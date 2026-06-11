@@ -71,6 +71,12 @@ pub struct MemoryDeleteInput {
     pub confirm: bool,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SessionStartInput {
+    /// Absolute path to the project root where .hivemind.toml lives.
+    pub project_path: String,
+}
+
 #[derive(Clone)]
 pub struct HiveMind {
     store: Arc<SqliteStore>,
@@ -176,6 +182,49 @@ impl HiveMind {
             "id": p.id,
         })))
     }
+
+    pub async fn do_session_start(&self, p: SessionStartInput) -> Result<CallToolResult, ErrorData> {
+        // Validate the path: must exist and be a directory. canonicalize resolves
+        // `..`/symlinks so traversal can't escape into a non-directory.
+        let canon = std::fs::canonicalize(&p.project_path)
+            .map_err(|_| ErrorData::invalid_params(
+                format!("project_path does not exist: {}", p.project_path), None))?;
+        if !canon.is_dir() {
+            return Err(ErrorData::invalid_params("project_path is not a directory", None));
+        }
+
+        let config = crate::config::load_config(&canon)
+            .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
+
+        let result = crate::session::execute_session_start(&config, &self.store)
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+
+        let context_loaded: Vec<_> = result.loaded.iter().map(|l| json!({
+            "id": l.entry.id,
+            "title": l.entry.title,
+            "content": l.entry.content,
+            "layer": l.entry.layer.to_string(),
+            "tags": l.entry.tags,
+        })).collect();
+
+        let skipped: Vec<_> = result.skipped.iter().map(|s| json!({
+            "query": s.query,
+            "reason": s.reason.as_str(),
+        })).collect();
+
+        Ok(CallToolResult::structured(json!({
+            "project": result.project,
+            "context_loaded": context_loaded,
+            "budget": {
+                "used_tokens": result.used_tokens,
+                "max_tokens": result.max_tokens,
+                "remaining": result.remaining(),
+                "truncated": result.truncated(),
+            },
+            "skipped": skipped,
+            "hint": "Session context loaded. Incorporate it silently and proceed with the user's request.",
+        })))
+    }
 }
 
 #[tool_router]
@@ -218,6 +267,14 @@ impl HiveMind {
         Parameters(p): Parameters<MemoryDeleteInput>,
     ) -> Result<CallToolResult, ErrorData> {
         self.do_memory_delete(p).await
+    }
+
+    #[tool(description = "Call this once at the start of every session when .hivemind.toml exists in the project root. Returns pre-configured memory context (within a token budget) for this project. Do not call more than once per session.")]
+    async fn hivemind_session_start(
+        &self,
+        Parameters(p): Parameters<SessionStartInput>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.do_session_start(p).await
     }
 }
 
@@ -390,6 +447,53 @@ mod tests {
             merge_content: None,
         }).await.unwrap();
         assert_eq!(result.structured_content.unwrap()["updated"], false);
+    }
+
+    #[tokio::test]
+    async fn session_start_loads_configured_recalls() {
+        let hm = test_hivemind();
+        hm.do_memory_store(MemoryStoreInput {
+            title: "golang preferences".to_string(),
+            content: "use uber/zap, sqlc, pgx v5".to_string(),
+            layer: "personal".to_string(),
+            tags: vec!["golang".to_string()],
+            project: None,
+        }).await.unwrap();
+
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join(".hivemind.toml"),
+            "[project]\nname=\"demo\"\n[hooks.on_session_start]\nmax_tokens=2000\nrecalls=[\"golang preferences\"]\n",
+        ).unwrap();
+
+        let result = hm.do_session_start(SessionStartInput {
+            project_path: tmp.path().to_string_lossy().into_owned(),
+        }).await.unwrap();
+        let val = result.structured_content.unwrap();
+        assert_eq!(val["project"], "demo");
+        assert_eq!(val["context_loaded"].as_array().unwrap().len(), 1);
+        assert_eq!(val["context_loaded"][0]["title"], "golang preferences");
+        assert_eq!(val["budget"]["truncated"], false);
+        assert!(val["budget"]["used_tokens"].as_u64().unwrap() > 0);
+    }
+
+    #[tokio::test]
+    async fn session_start_rejects_nonexistent_path() {
+        let hm = test_hivemind();
+        let err = hm.do_session_start(SessionStartInput {
+            project_path: "/no/such/dir/anywhere".to_string(),
+        }).await;
+        assert!(err.is_err());
+    }
+
+    #[tokio::test]
+    async fn session_start_errors_without_config() {
+        let hm = test_hivemind();
+        let tmp = tempfile::tempdir().unwrap();
+        let err = hm.do_session_start(SessionStartInput {
+            project_path: tmp.path().to_string_lossy().into_owned(),
+        }).await;
+        assert!(err.is_err());
     }
 
     #[tokio::test]
