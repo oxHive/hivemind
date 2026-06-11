@@ -21,6 +21,9 @@ pub struct HiveMindConfig {
     pub project_name: String,
     pub max_tokens: usize,
     pub recalls: Vec<Recall>,
+    /// Parsed from `[hooks.on_session_start.conditions]`. Reserved for the
+    /// path-scoped workspace-memory injection feature; not yet enforced.
+    #[allow(dead_code)]
     pub condition_paths: Vec<String>,
     pub file_open_rule_count: usize,
     pub mention_trigger_count: usize,
