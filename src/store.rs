@@ -50,6 +50,74 @@ impl SqliteStore {
         }
         Ok(id)
     }
+
+    pub fn recall_by_id(&self, id: &str) -> Result<Option<MemoryEntry>> {
+        let conn = self.conn.lock().unwrap();
+        let result = conn.query_row(
+            "SELECT id, layer, type, title, content, source, project, created_at, updated_at
+             FROM memories WHERE id = ?1",
+            rusqlite::params![id],
+            |row| Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, i64>(7)?,
+                row.get::<_, i64>(8)?,
+            )),
+        );
+        match result {
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+            Ok((rid, layer_s, type_s, title, content, source, project, created_at, updated_at)) => {
+                let layer = layer_s.parse::<Layer>()?;
+                let memory_type = type_s.parse::<MemoryType>()?;
+                let tags = Self::fetch_tags(&*conn, &rid)?;
+                Ok(Some(MemoryEntry { id: rid, layer, memory_type, title, content, source, project, tags, created_at, updated_at }))
+            }
+        }
+    }
+
+    pub fn recall_by_title(&self, title: &str) -> Result<Option<MemoryEntry>> {
+        let conn = self.conn.lock().unwrap();
+        let result = conn.query_row(
+            "SELECT id, layer, type, title, content, source, project, created_at, updated_at
+             FROM memories WHERE title = ?1 ORDER BY updated_at DESC LIMIT 1",
+            rusqlite::params![title],
+            |row| Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, i64>(7)?,
+                row.get::<_, i64>(8)?,
+            )),
+        );
+        match result {
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+            Ok((rid, layer_s, type_s, title, content, source, project, created_at, updated_at)) => {
+                let layer = layer_s.parse::<Layer>()?;
+                let memory_type = type_s.parse::<MemoryType>()?;
+                let tags = Self::fetch_tags(&*conn, &rid)?;
+                Ok(Some(MemoryEntry { id: rid, layer, memory_type, title, content, source, project, tags, created_at, updated_at }))
+            }
+        }
+    }
+
+    fn fetch_tags(conn: &Connection, memory_id: &str) -> Result<Vec<String>> {
+        let mut stmt = conn.prepare("SELECT tag FROM tags WHERE memory_id = ?1")?;
+        let tags = stmt
+            .query_map(rusqlite::params![memory_id], |row| row.get(0))?
+            .collect::<rusqlite::Result<Vec<String>>>()?;
+        Ok(tags)
+    }
 }
 
 #[cfg(test)]
@@ -95,5 +163,36 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM tags WHERE memory_id=?1", [&id], |r| r.get(0))
             .unwrap();
         assert_eq!(tag_count, 2);
+    }
+
+    #[test]
+    fn recall_by_id_returns_full_entry_with_tags() {
+        let s = open_test_store();
+        let id = s.store(sample()).unwrap();
+        let entry = s.recall_by_id(&id).unwrap().unwrap();
+        assert_eq!(entry.title, "golang preferences");
+        assert_eq!(entry.layer, Layer::Personal);
+        assert_eq!(entry.tags.len(), 2);
+        assert!(entry.tags.contains(&"golang".to_string()));
+    }
+
+    #[test]
+    fn recall_by_id_returns_none_for_missing() {
+        let s = open_test_store();
+        assert!(s.recall_by_id("mem_doesnotexist").unwrap().is_none());
+    }
+
+    #[test]
+    fn recall_by_title_returns_entry() {
+        let s = open_test_store();
+        s.store(sample()).unwrap();
+        let entry = s.recall_by_title("golang preferences").unwrap().unwrap();
+        assert_eq!(entry.layer, Layer::Personal);
+    }
+
+    #[test]
+    fn recall_by_title_returns_none_for_missing() {
+        let s = open_test_store();
+        assert!(s.recall_by_title("no such title").unwrap().is_none());
     }
 }
