@@ -75,14 +75,25 @@ pub fn scaffold(
     Ok(report)
 }
 
+/// Write `contents` to `path` atomically: write to a sibling temp file, then
+/// rename over the destination. This protects an existing user file (e.g. a
+/// customized ~/.claude/CLAUDE.md) from truncation if the process is interrupted
+/// mid-write. (tempfile is dev-only, so the temp file is created manually.)
+fn write_atomic(path: &Path, contents: &str) -> Result<()> {
+    let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    std::fs::create_dir_all(parent)?;
+    let file_name = path.file_name().and_then(|s| s.to_str()).unwrap_or("file");
+    let tmp = parent.join(format!(".{file_name}.hivemind-tmp"));
+    std::fs::write(&tmp, contents)?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}
+
 fn write_if_absent(path: &Path, contents: &str) -> Result<(PathBuf, &'static str)> {
     if path.exists() {
         return Ok((path.to_path_buf(), "exists"));
     }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(path, contents)?;
+    write_atomic(path, contents)?;
     Ok((path.to_path_buf(), "created"))
 }
 
@@ -92,16 +103,13 @@ fn ensure_line(path: &Path, line: &str) -> Result<(PathBuf, &'static str)> {
     if existing.lines().any(|l| l.trim() == line) {
         return Ok((path.to_path_buf(), "exists"));
     }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
     let mut body = existing;
     if !body.is_empty() && !body.ends_with('\n') {
         body.push('\n');
     }
     body.push_str(line);
     body.push('\n');
-    std::fs::write(path, body)?;
+    write_atomic(path, &body)?;
     Ok((path.to_path_buf(), "created"))
 }
 
@@ -115,9 +123,6 @@ fn append_block_if_absent(
     if existing.contains(marker) {
         return Ok((path.to_path_buf(), "exists"));
     }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
     let mut body = existing;
     if !body.is_empty() && !body.ends_with('\n') {
         body.push('\n');
@@ -126,7 +131,7 @@ fn append_block_if_absent(
         body.push('\n');
     }
     body.push_str(block);
-    std::fs::write(path, body)?;
+    write_atomic(path, &body)?;
     Ok((path.to_path_buf(), "created"))
 }
 
@@ -231,13 +236,14 @@ pub fn render_status(
     let count = store.count()?;
     let mut out = String::new();
 
+    // Load the config once (if a project root is found) and reuse it for both
+    // the header label and the injection preview below.
     let root = crate::config::discover_project_root(cwd);
-    let project_label = match &root {
-        Some(r) => crate::config::load_config_with_global(r, global_path)
-            .map(|c| c.project_name)
-            .unwrap_or_else(|_| "—".to_string()),
-        None => "—".to_string(),
+    let config = match &root {
+        Some(r) => Some(crate::config::load_config_with_global(r, global_path)?),
+        None => None,
     };
+    let project_label = config.as_ref().map(|c| c.project_name.as_str()).unwrap_or("—");
 
     writeln!(out, "HiveMind v{version} — {project_label}")?;
     writeln!(out, "─────────────────────────────────────────────────────")?;
@@ -246,13 +252,12 @@ pub fn render_status(
     writeln!(out, "Sync:       disabled (local only)")?;
     writeln!(out)?;
 
-    let Some(root) = root else {
+    let (Some(root), Some(config)) = (root, config) else {
         writeln!(out, "No .hivemind.toml found in this directory tree.")?;
         writeln!(out, "Run `hivemind init` to set up memory hooks for this project.")?;
         return Ok(out);
     };
 
-    let config = crate::config::load_config_with_global(&root, global_path)?;
     let result = crate::session::execute_session_start(&config, store)?;
 
     writeln!(out, "Project:    {}", config.project_name)?;
@@ -327,6 +332,25 @@ mod tests {
         assert_eq!(gc.matches("# HiveMind Memory System").count(), 1);
         let gi = fs::read_to_string(proj.path().join(".gitignore")).unwrap();
         assert_eq!(gi.matches(".hivemind.local.toml").count(), 1);
+    }
+
+    #[test]
+    fn scaffold_preserves_existing_user_claude_md() {
+        let proj = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let cfg = tempfile::tempdir().unwrap();
+
+        // The user already has a customized global CLAUDE.md.
+        let global = home.path().join(".claude").join("CLAUDE.md");
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(&global, "# My personal rules\nAlways write tests first.\n").unwrap();
+
+        scaffold(proj.path(), home.path(), cfg.path()).unwrap();
+
+        let gc = fs::read_to_string(&global).unwrap();
+        assert!(gc.contains("My personal rules"), "user content must be preserved");
+        assert!(gc.contains("Always write tests first."), "user content must be preserved");
+        assert!(gc.contains("# HiveMind Memory System"), "hook block appended");
     }
 
     #[test]

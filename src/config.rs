@@ -176,7 +176,7 @@ pub fn load_config_with_global(project_root: &Path, global_path: &Path) -> Resul
     if local_file.is_file() {
         let raw_local: RawLocal = toml::from_str(&std::fs::read_to_string(&local_file)?)
             .with_context(|| format!("parsing {}", local_file.display()))?;
-        max_tokens += raw_local.hooks.on_session_start.max_tokens.unwrap_or(0);
+        max_tokens = max_tokens.saturating_add(raw_local.hooks.on_session_start.max_tokens.unwrap_or(0));
         for q in &raw_local.hooks.on_session_start.recalls {
             recalls.push(Recall { query: q.clone(), source: RecallSource::Local });
         }
