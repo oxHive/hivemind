@@ -246,6 +246,20 @@ impl SqliteStore {
         Ok(true)
     }
 
+    pub fn delete(&self, id: &str) -> Result<bool> {
+        let mut conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let tx = conn.transaction()?;
+        tx.execute("DELETE FROM tags WHERE memory_id = ?1", rusqlite::params![id])?;
+        tx.execute(
+            "DELETE FROM edges WHERE source_id = ?1 OR target_id = ?1",
+            rusqlite::params![id],
+        )?;
+        // The AFTER DELETE trigger on memories keeps the FTS index in sync.
+        let n = tx.execute("DELETE FROM memories WHERE id = ?1", rusqlite::params![id])?;
+        tx.commit()?;
+        Ok(n > 0)
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn row_to_entry(
         conn: &Connection,
@@ -506,6 +520,52 @@ mod tests {
         }).unwrap();
         assert_eq!(s.search("kubernetes", 5).unwrap().len(), 1);
         assert!(s.search("pgx", 5).unwrap().is_empty());
+    }
+
+    #[test]
+    fn delete_removes_memory_tags_and_fts() {
+        let s = open_test_store();
+        let id = s.store(sample()).unwrap().id;
+        let deleted = s.delete(&id).unwrap();
+        assert!(deleted);
+        assert!(s.recall_by_id(&id).unwrap().is_none());
+        assert!(s.search("pgx", 5).unwrap().is_empty(), "FTS entry removed");
+        let conn = s.conn.lock().unwrap();
+        let tag_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM tags WHERE memory_id=?1", [&id], |r| r.get(0))
+            .unwrap();
+        assert_eq!(tag_count, 0, "tags removed");
+    }
+
+    #[test]
+    fn delete_removes_connected_edges() {
+        let s = open_test_store();
+        let first = s.store(sample()).unwrap().id;
+        let second = s.store(NewMemory {
+            title: "go again".to_string(),
+            content: "more golang".to_string(),
+            layer: Layer::Personal,
+            memory_type: MemoryType::Preference,
+            tags: vec!["golang".to_string()],
+            project: None,
+            source: None,
+        }).unwrap().id;
+        s.delete(&second).unwrap();
+        let edge_count: i64 = {
+            let conn = s.conn.lock().unwrap();
+            conn.query_row(
+                "SELECT COUNT(*) FROM edges WHERE source_id=?1 OR target_id=?1",
+                [&second], |r| r.get(0),
+            ).unwrap()
+        };
+        assert_eq!(edge_count, 0, "edges referencing deleted memory removed");
+        assert!(s.recall_by_id(&first).unwrap().is_some());
+    }
+
+    #[test]
+    fn delete_returns_false_for_missing() {
+        let s = open_test_store();
+        assert!(!s.delete("mem_nope").unwrap());
     }
 
     #[test]
