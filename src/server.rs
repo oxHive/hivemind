@@ -238,6 +238,7 @@ mod tests {
 
     fn test_hivemind() -> HiveMind {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
         db::create_schema(&conn).unwrap();
         HiveMind::new(SqliteStore::new(conn))
     }

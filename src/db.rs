@@ -54,7 +54,11 @@ pub fn create_schema(conn: &Connection) -> Result<()> {
             VALUES (new.rowid, new.title, new.content);
         END;",
     )?;
-    // Backfill the FTS index from any pre-existing memories (idempotent).
+    // Backfill the FTS index from the canonical `memories` rows. This is needed
+    // when upgrading a pre-FTS database; triggers keep the index in sync after
+    // creation. `rebuild` is idempotent and cheap at expected data sizes. (A
+    // COUNT-based "skip if in sync" guard does NOT work here: COUNT(*) on an
+    // external-content FTS5 table reflects the content table, not the index.)
     conn.execute_batch("INSERT INTO memories_fts(memories_fts) VALUES('rebuild');")?;
     Ok(())
 }
@@ -69,6 +73,28 @@ pub fn open(path: &str) -> Result<Connection> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn create_schema_backfills_fts_for_preexisting_rows() {
+        let conn = Connection::open_in_memory().unwrap();
+        // Simulate a pre-FTS (Phase 1) database: memories table + a row, no FTS index.
+        conn.execute_batch(
+            "CREATE TABLE memories (id TEXT PRIMARY KEY, layer TEXT NOT NULL, type TEXT NOT NULL,
+             title TEXT NOT NULL, content TEXT NOT NULL, source TEXT, project TEXT,
+             created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);",
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO memories (id, layer, type, title, content, created_at, updated_at)
+             VALUES ('mem_old','personal','preference','old note','legacy kubernetes content',1,1)",
+            [],
+        ).unwrap();
+        // Upgrading the schema must create the FTS index and backfill the existing row.
+        create_schema(&conn).unwrap();
+        let hits: i64 = conn
+            .query_row("SELECT COUNT(*) FROM memories_fts WHERE memories_fts MATCH 'kubernetes'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(hits, 1, "pre-existing row was not backfilled into FTS");
+    }
 
     #[test]
     fn create_schema_creates_memories_and_tags_tables() {
