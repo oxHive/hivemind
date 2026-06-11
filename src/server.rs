@@ -36,6 +36,15 @@ pub struct MemoryRecallInput {
     pub title: Option<String>,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct MemorySearchInput {
+    /// Keywords to search memory titles and content
+    pub query: String,
+    /// Max results (default 5, capped at 10)
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
 #[derive(Clone)]
 pub struct HiveMind {
     store: Arc<SqliteStore>,
@@ -96,6 +105,23 @@ impl HiveMind {
             }))),
         }
     }
+
+    pub async fn do_memory_search(&self, p: MemorySearchInput) -> Result<CallToolResult, ErrorData> {
+        let limit = p.limit.unwrap_or(5).clamp(1, 10) as usize;
+        let hits = self.store.search(&p.query, limit)
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+        let results: Vec<_> = hits.iter().map(|h| json!({
+            "id": h.id,
+            "title": h.title,
+            "snippet": h.snippet,
+            "layer": h.layer.to_string(),
+            "tags": h.tags,
+        })).collect();
+        Ok(CallToolResult::structured(json!({
+            "count": results.len(),
+            "results": results,
+        })))
+    }
 }
 
 #[tool_router]
@@ -114,6 +140,14 @@ impl HiveMind {
         Parameters(p): Parameters<MemoryRecallInput>,
     ) -> Result<CallToolResult, ErrorData> {
         self.do_memory_recall(p).await
+    }
+
+    #[tool(description = "Search stored memories by keyword (FTS). Returns ranked snippets (not full content) to conserve context — use memory_recall with an id for full content. Default 5 results, max 10.")]
+    async fn memory_search(
+        &self,
+        Parameters(p): Parameters<MemorySearchInput>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.do_memory_search(p).await
     }
 }
 
@@ -218,5 +252,34 @@ mod tests {
         let hm = test_hivemind();
         let err = hm.do_memory_recall(MemoryRecallInput { id: None, title: None }).await;
         assert!(err.is_err());
+    }
+
+    #[tokio::test]
+    async fn memory_search_returns_snippets() {
+        let hm = test_hivemind();
+        hm.do_memory_store(MemoryStoreInput {
+            title: "db driver choice".to_string(),
+            content: "we standardized on pgx v5 for postgres".to_string(),
+            layer: "personal".to_string(),
+            tags: vec!["golang".to_string(), "database".to_string()],
+            project: None,
+        }).await.unwrap();
+
+        let result = hm.do_memory_search(MemorySearchInput {
+            query: "pgx".to_string(),
+            limit: None,
+        }).await.unwrap();
+        let val = result.structured_content.unwrap();
+        assert_eq!(val["count"], 1);
+        assert_eq!(val["results"][0]["title"], "db driver choice");
+        assert!(val["results"][0]["snippet"].as_str().unwrap().to_lowercase().contains("pgx"));
+        assert!(val["results"][0].get("content").is_none(), "search returns snippets, not full content");
+    }
+
+    #[tokio::test]
+    async fn memory_search_empty_query_returns_zero() {
+        let hm = test_hivemind();
+        let result = hm.do_memory_search(MemorySearchInput { query: "  ".to_string(), limit: None }).await.unwrap();
+        assert_eq!(result.structured_content.unwrap()["count"], 0);
     }
 }
