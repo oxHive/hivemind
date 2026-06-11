@@ -18,8 +18,44 @@ pub fn create_schema(conn: &Connection) -> Result<()> {
             memory_id TEXT REFERENCES memories(id) ON DELETE CASCADE,
             tag       TEXT NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS idx_tags_memory_id ON tags(memory_id);",
+        CREATE INDEX IF NOT EXISTS idx_tags_memory_id ON tags(memory_id);
+
+        CREATE TABLE IF NOT EXISTS edges (
+            id           TEXT PRIMARY KEY,
+            source_id    TEXT NOT NULL REFERENCES memories(id),
+            target_id    TEXT NOT NULL REFERENCES memories(id),
+            relationship TEXT NOT NULL,
+            weight       REAL DEFAULT 1.0,
+            inferred_by  TEXT NOT NULL,
+            status       TEXT DEFAULT 'accepted',
+            confidence   REAL,
+            reason       TEXT,
+            created_at   INTEGER NOT NULL,
+            updated_at   INTEGER NOT NULL,
+            UNIQUE(source_id, target_id, relationship)
+        );
+
+        CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+            title, content, content='memories', content_rowid='rowid'
+        );
+
+        CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
+            INSERT INTO memories_fts(rowid, title, content)
+            VALUES (new.rowid, new.title, new.content);
+        END;
+        CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
+            INSERT INTO memories_fts(memories_fts, rowid, title, content)
+            VALUES ('delete', old.rowid, old.title, old.content);
+        END;
+        CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
+            INSERT INTO memories_fts(memories_fts, rowid, title, content)
+            VALUES ('delete', old.rowid, old.title, old.content);
+            INSERT INTO memories_fts(rowid, title, content)
+            VALUES (new.rowid, new.title, new.content);
+        END;",
     )?;
+    // Backfill the FTS index from any pre-existing memories (idempotent).
+    conn.execute_batch("INSERT INTO memories_fts(memories_fts) VALUES('rebuild');")?;
     Ok(())
 }
 
@@ -57,5 +93,49 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         create_schema(&conn).unwrap();
         create_schema(&conn).unwrap();
+    }
+
+    #[test]
+    fn create_schema_creates_fts_and_edges() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_schema(&conn).unwrap();
+        let mut stmt = conn
+            .prepare("SELECT name FROM sqlite_master WHERE name IN ('memories_fts','edges') ORDER BY name")
+            .unwrap();
+        let names: Vec<String> = stmt
+            .query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect();
+        assert!(names.contains(&"edges".to_string()), "edges table missing");
+        assert!(names.contains(&"memories_fts".to_string()), "memories_fts missing");
+    }
+
+    #[test]
+    fn fts_index_is_populated_by_insert_trigger() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_schema(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO memories (id, layer, type, title, content, created_at, updated_at)
+             VALUES ('mem_x','personal','preference','Rust testing','use cargo test and clippy',1,1)",
+            [],
+        ).unwrap();
+        let hits: i64 = conn
+            .query_row("SELECT COUNT(*) FROM memories_fts WHERE memories_fts MATCH 'clippy'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(hits, 1, "FTS insert trigger did not index the row");
+    }
+
+    #[test]
+    fn fts_delete_trigger_removes_from_index() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_schema(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO memories (id, layer, type, title, content, created_at, updated_at)
+             VALUES ('mem_x','personal','preference','Rust testing','clippy lints',1,1)",
+            [],
+        ).unwrap();
+        conn.execute("DELETE FROM memories WHERE id='mem_x'", []).unwrap();
+        let hits: i64 = conn
+            .query_row("SELECT COUNT(*) FROM memories_fts WHERE memories_fts MATCH 'clippy'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(hits, 0, "FTS delete trigger did not remove the row");
     }
 }
