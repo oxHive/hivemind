@@ -8,7 +8,7 @@ name = "hivemind"
 path = "src/main.rs"
 
 [dependencies]
-rmcp = { version = "1", features = ["server"] }
+rmcp = { version = "1", features = ["server", "macros"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
