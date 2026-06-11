@@ -63,6 +63,14 @@ pub struct MemoryUpdateInput {
     pub merge_content: Option<bool>,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct MemoryDeleteInput {
+    /// ID of the memory to delete (mem_xxx)
+    pub id: String,
+    /// Must be true. Confirm with the user before deleting — deletion is permanent.
+    pub confirm: bool,
+}
+
 #[derive(Clone)]
 pub struct HiveMind {
     store: Arc<SqliteStore>,
@@ -153,6 +161,21 @@ impl HiveMind {
             "id": p.id,
         })))
     }
+
+    pub async fn do_memory_delete(&self, p: MemoryDeleteInput) -> Result<CallToolResult, ErrorData> {
+        if !p.confirm {
+            return Err(ErrorData::invalid_params(
+                "Deletion is permanent and requires confirm: true. Confirm with the user first.",
+                None,
+            ));
+        }
+        let deleted = self.store.delete(&p.id)
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+        Ok(CallToolResult::structured(json!({
+            "deleted": deleted,
+            "id": p.id,
+        })))
+    }
 }
 
 #[tool_router]
@@ -187,6 +210,14 @@ impl HiveMind {
         Parameters(p): Parameters<MemoryUpdateInput>,
     ) -> Result<CallToolResult, ErrorData> {
         self.do_memory_update(p).await
+    }
+
+    #[tool(description = "Permanently delete a memory by id. Requires confirm=true; always confirm with the user before calling. Removes the memory, its tags, and its connections.")]
+    async fn memory_delete(
+        &self,
+        Parameters(p): Parameters<MemoryDeleteInput>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.do_memory_delete(p).await
     }
 }
 
@@ -358,5 +389,31 @@ mod tests {
             merge_content: None,
         }).await.unwrap();
         assert_eq!(result.structured_content.unwrap()["updated"], false);
+    }
+
+    #[tokio::test]
+    async fn memory_delete_requires_confirm() {
+        let hm = test_hivemind();
+        let stored = hm.do_memory_store(MemoryStoreInput {
+            title: "temp".to_string(),
+            content: "delete me".to_string(),
+            layer: "personal".to_string(),
+            tags: vec!["tmp".to_string()],
+            project: None,
+        }).await.unwrap();
+        let id = stored.structured_content.unwrap()["id"].as_str().unwrap().to_string();
+
+        let err = hm.do_memory_delete(MemoryDeleteInput { id: id.clone(), confirm: false }).await;
+        assert!(err.is_err());
+        assert!(hm.do_memory_recall(MemoryRecallInput { id: Some(id.clone()), title: None })
+            .await.unwrap().structured_content.unwrap()["found"] == true);
+
+        let ok = hm.do_memory_delete(MemoryDeleteInput { id: id.clone(), confirm: true }).await.unwrap();
+        assert_eq!(ok.structured_content.unwrap()["deleted"], true);
+        assert_eq!(
+            hm.do_memory_recall(MemoryRecallInput { id: Some(id), title: None })
+                .await.unwrap().structured_content.unwrap()["found"],
+            false
+        );
     }
 }
