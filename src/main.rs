@@ -1,4 +1,5 @@
 mod budget;
+mod cli;
 mod config;
 mod db;
 mod model;
@@ -7,12 +8,23 @@ mod session;
 mod store;
 
 use anyhow::Result;
+use clap::Parser;
+use cli::{Cli, Command};
 use rmcp::ServiceExt;
 use server::HiveMind;
 use store::SqliteStore;
 
+fn main() -> Result<()> {
+    let cli = Cli::parse();
+    match cli.command {
+        None => run_server(),
+        Some(Command::Init) => cli::cmd_init(),
+        Some(Command::Status) => cli::cmd_status(),
+    }
+}
+
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn run_server() -> Result<()> {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_env_filter(
@@ -21,7 +33,7 @@ async fn main() -> Result<()> {
         )
         .init();
 
-    let db_path = resolve_db_path();
+    let db_path = db::resolve_db_path();
     tracing::info!("opening database at {db_path}");
 
     let conn = db::open(&db_path)?;
@@ -33,14 +45,4 @@ async fn main() -> Result<()> {
         .await?;
     server.waiting().await?;
     Ok(())
-}
-
-fn resolve_db_path() -> String {
-    if let Ok(path) = std::env::var("HIVEMIND_DB_PATH") {
-        return path;
-    }
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    let dir = format!("{home}/.local/share/hivemind");
-    std::fs::create_dir_all(&dir).ok();
-    format!("{dir}/memory.db")
 }

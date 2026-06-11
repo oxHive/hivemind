@@ -63,6 +63,16 @@ pub fn create_schema(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+pub fn resolve_db_path() -> String {
+    if let Ok(path) = std::env::var("HIVEMIND_DB_PATH") {
+        return path;
+    }
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let dir = format!("{home}/.local/share/hivemind");
+    std::fs::create_dir_all(&dir).ok();
+    format!("{dir}/memory.db")
+}
+
 pub fn open(path: &str) -> Result<Connection> {
     let conn = Connection::open(path)?;
     conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
