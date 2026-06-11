@@ -1,3 +1,4 @@
+mod budget;
 mod config;
 mod db;
 mod model;
