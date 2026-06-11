@@ -88,6 +88,23 @@ pub struct StoreResult {
     pub auto_connected: usize,
 }
 
+#[derive(Debug, Clone)]
+pub struct SearchHit {
+    pub id: String,
+    pub title: String,
+    pub snippet: String,
+    pub layer: Layer,
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct UpdateMemory {
+    pub title: Option<String>,
+    pub content: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub merge_content: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
