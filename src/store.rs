@@ -26,8 +26,9 @@ impl SqliteStore {
     pub fn store(&self, new: NewMemory) -> Result<String> {
         let id = gen_id();
         let now = now_secs();
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
+        let mut conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let tx = conn.transaction()?;
+        tx.execute(
             "INSERT INTO memories (id, layer, type, title, content, source, project, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             rusqlite::params![
@@ -42,17 +43,19 @@ impl SqliteStore {
                 now
             ],
         )?;
-        for tag in &new.tags {
-            conn.execute(
+        let mut seen = std::collections::HashSet::new();
+        for tag in new.tags.iter().filter(|t| seen.insert((*t).clone())) {
+            tx.execute(
                 "INSERT INTO tags (memory_id, tag) VALUES (?1, ?2)",
                 rusqlite::params![id, tag],
             )?;
         }
+        tx.commit()?;
         Ok(id)
     }
 
     pub fn recall_by_id(&self, id: &str) -> Result<Option<MemoryEntry>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
         let result = conn.query_row(
             "SELECT id, layer, type, title, content, source, project, created_at, updated_at
              FROM memories WHERE id = ?1",
@@ -73,16 +76,13 @@ impl SqliteStore {
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e.into()),
             Ok((rid, layer_s, type_s, title, content, source, project, created_at, updated_at)) => {
-                let layer = layer_s.parse::<Layer>()?;
-                let memory_type = type_s.parse::<MemoryType>()?;
-                let tags = Self::fetch_tags(&*conn, &rid)?;
-                Ok(Some(MemoryEntry { id: rid, layer, memory_type, title, content, source, project, tags, created_at, updated_at }))
+                Self::row_to_entry(&conn, rid, layer_s, type_s, title, content, source, project, created_at, updated_at).map(Some)
             }
         }
     }
 
     pub fn recall_by_title(&self, title: &str) -> Result<Option<MemoryEntry>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
         let result = conn.query_row(
             "SELECT id, layer, type, title, content, source, project, created_at, updated_at
              FROM memories WHERE title = ?1 ORDER BY updated_at DESC LIMIT 1",
@@ -103,12 +103,21 @@ impl SqliteStore {
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e.into()),
             Ok((rid, layer_s, type_s, title, content, source, project, created_at, updated_at)) => {
-                let layer = layer_s.parse::<Layer>()?;
-                let memory_type = type_s.parse::<MemoryType>()?;
-                let tags = Self::fetch_tags(&*conn, &rid)?;
-                Ok(Some(MemoryEntry { id: rid, layer, memory_type, title, content, source, project, tags, created_at, updated_at }))
+                Self::row_to_entry(&conn, rid, layer_s, type_s, title, content, source, project, created_at, updated_at).map(Some)
             }
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn row_to_entry(
+        conn: &Connection,
+        rid: String, layer_s: String, type_s: String, title: String, content: String,
+        source: Option<String>, project: Option<String>, created_at: i64, updated_at: i64,
+    ) -> Result<MemoryEntry> {
+        let layer = layer_s.parse::<Layer>()?;
+        let memory_type = type_s.parse::<MemoryType>()?;
+        let tags = Self::fetch_tags(conn, &rid)?;
+        Ok(MemoryEntry { id: rid, layer, memory_type, title, content, source, project, tags, created_at, updated_at })
     }
 
     fn fetch_tags(conn: &Connection, memory_id: &str) -> Result<Vec<String>> {
@@ -194,5 +203,25 @@ mod tests {
     fn recall_by_title_returns_none_for_missing() {
         let s = open_test_store();
         assert!(s.recall_by_title("no such title").unwrap().is_none());
+    }
+
+    #[test]
+    fn store_deduplicates_tags() {
+        let s = open_test_store();
+        let new = NewMemory {
+            title: "dedup test".to_string(),
+            content: "testing tag deduplication".to_string(),
+            layer: Layer::Personal,
+            memory_type: MemoryType::Preference,
+            tags: vec!["rust".to_string(), "rust".to_string(), "go".to_string()],
+            project: None,
+            source: None,
+        };
+        let id = s.store(new).unwrap();
+        let conn = s.conn.lock().unwrap();
+        let tag_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM tags WHERE memory_id=?1", [&id], |r| r.get(0))
+            .unwrap();
+        assert_eq!(tag_count, 2, "expected 2 unique tags, got {tag_count}");
     }
 }

@@ -2,7 +2,7 @@ use std::sync::Arc;
 use rmcp::{
     handler::server::wrapper::Parameters,
     model::{CallToolResult, ErrorData},
-    schemars, tool, tool_router,
+    schemars, tool, tool_handler, tool_router,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -98,7 +98,7 @@ impl HiveMind {
     }
 }
 
-#[tool_router(server_handler)]
+#[tool_router]
 impl HiveMind {
     #[tool(description = "Store a memory, preference, project context, or personal note for future recall across sessions and devices. Use when the user explicitly asks to remember something, or when important context should persist beyond this session.")]
     async fn memory_store(
@@ -114,6 +114,14 @@ impl HiveMind {
         Parameters(p): Parameters<MemoryRecallInput>,
     ) -> Result<CallToolResult, ErrorData> {
         self.do_memory_recall(p).await
+    }
+}
+
+#[tool_handler]
+impl rmcp::ServerHandler for HiveMind {
+    fn get_info(&self) -> rmcp::model::ServerInfo {
+        rmcp::model::ServerInfo::default()
+            .with_server_info(rmcp::model::Implementation::new("hivemind", env!("CARGO_PKG_VERSION")))
     }
 }
 
