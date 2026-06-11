@@ -3,6 +3,7 @@ mod config;
 mod db;
 mod model;
 mod server;
+mod session;
 mod store;
 
 use anyhow::Result;
