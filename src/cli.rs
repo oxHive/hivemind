@@ -209,8 +209,77 @@ Wait for explicit confirmation before calling memory_store.
 ";
 
 pub fn cmd_status() -> Result<()> {
-    println!("status: not yet implemented");
+    let cwd = std::env::current_dir()?;
+    let db_path = crate::db::resolve_db_path();
+    let conn = crate::db::open(&db_path)?;
+    let store = crate::store::SqliteStore::new(conn);
+    let out = render_status(&cwd, &crate::config::global_config_path(), &store, &db_path)?;
+    println!("{out}");
     Ok(())
+}
+
+/// Build the `hivemind status` report. `global_path` is injectable for testing.
+pub fn render_status(
+    cwd: &Path,
+    global_path: &Path,
+    store: &crate::store::SqliteStore,
+    db_path: &str,
+) -> Result<String> {
+    use std::fmt::Write as _;
+
+    let version = env!("CARGO_PKG_VERSION");
+    let count = store.count()?;
+    let mut out = String::new();
+
+    let root = crate::config::discover_project_root(cwd);
+    let project_label = match &root {
+        Some(r) => crate::config::load_config_with_global(r, global_path)
+            .map(|c| c.project_name)
+            .unwrap_or_else(|_| "—".to_string()),
+        None => "—".to_string(),
+    };
+
+    writeln!(out, "HiveMind v{version} — {project_label}")?;
+    writeln!(out, "─────────────────────────────────────────────────────")?;
+    writeln!(out, "Server:     stdio (spawned by Claude Code)")?;
+    writeln!(out, "Storage:    {db_path} ({count} memories)")?;
+    writeln!(out, "Sync:       disabled (local only)")?;
+    writeln!(out)?;
+
+    let Some(root) = root else {
+        writeln!(out, "No .hivemind.toml found in this directory tree.")?;
+        writeln!(out, "Run `hivemind init` to set up memory hooks for this project.")?;
+        return Ok(out);
+    };
+
+    let config = crate::config::load_config_with_global(&root, global_path)?;
+    let result = crate::session::execute_session_start(&config, store)?;
+
+    writeln!(out, "Project:    {}", config.project_name)?;
+    writeln!(out, "Config:     .hivemind.toml{}", if root.join(".hivemind.local.toml").is_file() { " + .hivemind.local.toml" } else { "" })?;
+    writeln!(out)?;
+    writeln!(out, "On session start will inject:")?;
+    if result.loaded.is_empty() {
+        writeln!(out, "  (nothing — no recalls configured or none resolved)")?;
+    }
+    for entry in &result.loaded {
+        let layer = format!("[{}]", entry.entry.layer);
+        let local = if matches!(entry.source, crate::config::RecallSource::Local) { "  (local)" } else { "" };
+        writeln!(out, "  {:<11} {:<40} ~{} tokens{}", layer, entry.entry.title, entry.tokens, local)?;
+    }
+    for skip in &result.skipped {
+        writeln!(out, "  [skipped]   {:<40} ({})", skip.query, skip.reason.as_str())?;
+    }
+    writeln!(out, "  ──────────────────────────────────────────────────────────")?;
+    writeln!(out, "  Total:      ~{} tokens", result.used_tokens)?;
+    writeln!(out, "  Budget:     {} tokens", result.max_tokens)?;
+    let headroom = if result.truncated() { "⚠" } else { "✓" };
+    writeln!(out, "  Remaining:  ~{} tokens  {headroom}", result.remaining())?;
+    writeln!(out)?;
+    writeln!(out, "On file open rules:    {} active", config.file_open_rule_count)?;
+    writeln!(out, "On mention triggers:   {} (reserved, not yet active)", config.mention_trigger_count)?;
+
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -258,5 +327,52 @@ mod tests {
         assert_eq!(gc.matches("# HiveMind Memory System").count(), 1);
         let gi = fs::read_to_string(proj.path().join(".gitignore")).unwrap();
         assert_eq!(gi.matches(".hivemind.local.toml").count(), 1);
+    }
+
+    #[test]
+    fn render_status_previews_injection() {
+        use crate::db;
+        use crate::model::{Layer, MemoryType, NewMemory};
+        use crate::store::SqliteStore;
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        db::create_schema(&conn).unwrap();
+        let store = SqliteStore::new(conn);
+        store.store(NewMemory {
+            title: "golang preferences".to_string(),
+            content: "uber/zap, sqlc, pgx v5".to_string(),
+            layer: Layer::Personal,
+            memory_type: MemoryType::Preference,
+            tags: vec!["golang".to_string()],
+            project: None,
+            source: None,
+        }).unwrap();
+
+        let proj = tempfile::tempdir().unwrap();
+        std::fs::write(
+            proj.path().join(".hivemind.toml"),
+            "[project]\nname=\"demo\"\n[hooks.on_session_start]\nmax_tokens=2000\nrecalls=[\"golang preferences\"]\n",
+        ).unwrap();
+        let missing_global = proj.path().join("no-global.toml");
+
+        let out = render_status(proj.path(), &missing_global, &store, "/tmp/x.db").unwrap();
+        assert!(out.contains("demo"), "shows project name");
+        assert!(out.contains("golang preferences"), "lists the injected memory");
+        assert!(out.contains("Budget:"), "shows the budget line");
+        assert!(out.contains("1 memories") || out.contains("1 memorie"), "shows memory count");
+    }
+
+    #[test]
+    fn render_status_without_config_reports_missing() {
+        use crate::db;
+        use crate::store::SqliteStore;
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        db::create_schema(&conn).unwrap();
+        let store = SqliteStore::new(conn);
+
+        let proj = tempfile::tempdir().unwrap();
+        let missing_global = proj.path().join("no-global.toml");
+        let out = render_status(proj.path(), &missing_global, &store, "/tmp/x.db").unwrap();
+        assert!(out.contains("hivemind init"), "suggests init when no config");
     }
 }
