@@ -17,7 +17,8 @@ pub fn create_schema(conn: &Connection) -> Result<()> {
         CREATE TABLE IF NOT EXISTS tags (
             memory_id TEXT REFERENCES memories(id) ON DELETE CASCADE,
             tag       TEXT NOT NULL
-        );",
+        );
+        CREATE INDEX IF NOT EXISTS idx_tags_memory_id ON tags(memory_id);",
     )?;
     Ok(())
 }
