@@ -45,6 +45,24 @@ pub struct MemorySearchInput {
     pub limit: Option<u32>,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct MemoryUpdateInput {
+    /// ID of the memory to update (mem_xxx)
+    pub id: String,
+    /// New title (omit to keep current)
+    #[serde(default)]
+    pub title: Option<String>,
+    /// New content (omit to keep current)
+    #[serde(default)]
+    pub content: Option<String>,
+    /// Replace all tags with these (omit to keep current)
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
+    /// If true, append `content` to existing content instead of replacing
+    #[serde(default)]
+    pub merge_content: Option<bool>,
+}
+
 #[derive(Clone)]
 pub struct HiveMind {
     store: Arc<SqliteStore>,
@@ -122,6 +140,19 @@ impl HiveMind {
             "results": results,
         })))
     }
+
+    pub async fn do_memory_update(&self, p: MemoryUpdateInput) -> Result<CallToolResult, ErrorData> {
+        let updated = self.store.update(&p.id, crate::model::UpdateMemory {
+            title: p.title,
+            content: p.content,
+            tags: p.tags,
+            merge_content: p.merge_content.unwrap_or(false),
+        }).map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+        Ok(CallToolResult::structured(json!({
+            "updated": updated,
+            "id": p.id,
+        })))
+    }
 }
 
 #[tool_router]
@@ -148,6 +179,14 @@ impl HiveMind {
         Parameters(p): Parameters<MemorySearchInput>,
     ) -> Result<CallToolResult, ErrorData> {
         self.do_memory_search(p).await
+    }
+
+    #[tool(description = "Update an existing memory's title, content, or tags by id. Set merge_content=true to append to existing content rather than replace it. Providing tags replaces all tags on the memory.")]
+    async fn memory_update(
+        &self,
+        Parameters(p): Parameters<MemoryUpdateInput>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.do_memory_update(p).await
     }
 }
 
@@ -281,5 +320,43 @@ mod tests {
         let hm = test_hivemind();
         let result = hm.do_memory_search(MemorySearchInput { query: "  ".to_string(), limit: None }).await.unwrap();
         assert_eq!(result.structured_content.unwrap()["count"], 0);
+    }
+
+    #[tokio::test]
+    async fn memory_update_changes_content() {
+        let hm = test_hivemind();
+        let stored = hm.do_memory_store(MemoryStoreInput {
+            title: "deploy notes".to_string(),
+            content: "uses docker swarm".to_string(),
+            layer: "personal".to_string(),
+            tags: vec!["devops".to_string()],
+            project: None,
+        }).await.unwrap();
+        let id = stored.structured_content.unwrap()["id"].as_str().unwrap().to_string();
+
+        let result = hm.do_memory_update(MemoryUpdateInput {
+            id: id.clone(),
+            title: None,
+            content: Some("migrated to kubernetes".to_string()),
+            tags: None,
+            merge_content: None,
+        }).await.unwrap();
+        assert_eq!(result.structured_content.unwrap()["updated"], true);
+
+        let recalled = hm.do_memory_recall(MemoryRecallInput { id: Some(id), title: None }).await.unwrap();
+        assert_eq!(recalled.structured_content.unwrap()["content"], "migrated to kubernetes");
+    }
+
+    #[tokio::test]
+    async fn memory_update_returns_updated_false_for_missing() {
+        let hm = test_hivemind();
+        let result = hm.do_memory_update(MemoryUpdateInput {
+            id: "mem_nope".to_string(),
+            title: Some("x".to_string()),
+            content: None,
+            tags: None,
+            merge_content: None,
+        }).await.unwrap();
+        assert_eq!(result.structured_content.unwrap()["updated"], false);
     }
 }
