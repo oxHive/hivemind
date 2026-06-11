@@ -1,6 +1,6 @@
 use std::sync::Mutex;
 use anyhow::Result;
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use crate::model::{NewMemory, MemoryEntry, Layer, MemoryType, StoreResult};
 
 fn gen_id() -> String {
@@ -201,6 +201,51 @@ impl SqliteStore {
         Ok(hits)
     }
 
+    pub fn update(&self, id: &str, upd: crate::model::UpdateMemory) -> Result<bool> {
+        let now = now_secs();
+        let mut conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let tx = conn.transaction()?;
+
+        let existing: Option<(String, String)> = tx
+            .query_row(
+                "SELECT title, content FROM memories WHERE id = ?1",
+                rusqlite::params![id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+
+        let (old_title, old_content) = match existing {
+            None => return Ok(false),
+            Some(x) => x,
+        };
+
+        let new_title = upd.title.unwrap_or(old_title);
+        let new_content = match upd.content {
+            None => old_content,
+            Some(c) if upd.merge_content => format!("{old_content}\n{c}"),
+            Some(c) => c,
+        };
+
+        tx.execute(
+            "UPDATE memories SET title = ?1, content = ?2, updated_at = ?3 WHERE id = ?4",
+            rusqlite::params![new_title, new_content, now, id],
+        )?;
+
+        if let Some(tags) = upd.tags {
+            tx.execute("DELETE FROM tags WHERE memory_id = ?1", rusqlite::params![id])?;
+            let mut seen = std::collections::HashSet::new();
+            for tag in tags.iter().filter(|t| seen.insert((*t).clone())) {
+                tx.execute(
+                    "INSERT INTO tags (memory_id, tag) VALUES (?1, ?2)",
+                    rusqlite::params![id, tag],
+                )?;
+            }
+        }
+
+        tx.commit()?;
+        Ok(true)
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn row_to_entry(
         conn: &Connection,
@@ -392,6 +437,75 @@ mod tests {
             }).unwrap();
         }
         assert_eq!(s.search("apple", 2).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn update_replaces_title_and_content() {
+        let s = open_test_store();
+        let id = s.store(sample()).unwrap().id;
+        let found = s.update(&id, crate::model::UpdateMemory {
+            title: Some("golang prefs v2".to_string()),
+            content: Some("now also: chi router".to_string()),
+            tags: None,
+            merge_content: false,
+        }).unwrap();
+        assert!(found);
+        let e = s.recall_by_id(&id).unwrap().unwrap();
+        assert_eq!(e.title, "golang prefs v2");
+        assert_eq!(e.content, "now also: chi router");
+        assert_eq!(e.tags.len(), 2, "tags untouched when None");
+    }
+
+    #[test]
+    fn update_merge_content_appends() {
+        let s = open_test_store();
+        let id = s.store(sample()).unwrap().id;
+        s.update(&id, crate::model::UpdateMemory {
+            title: None,
+            content: Some("addendum line".to_string()),
+            tags: None,
+            merge_content: true,
+        }).unwrap();
+        let e = s.recall_by_id(&id).unwrap().unwrap();
+        assert!(e.content.contains("pgx v5 driver"), "old content kept");
+        assert!(e.content.contains("addendum line"), "new content appended");
+    }
+
+    #[test]
+    fn update_replaces_tags_when_provided() {
+        let s = open_test_store();
+        let id = s.store(sample()).unwrap().id;
+        s.update(&id, crate::model::UpdateMemory {
+            title: None,
+            content: None,
+            tags: Some(vec!["rust".to_string(), "rust".to_string(), "mcp".to_string()]),
+            merge_content: false,
+        }).unwrap();
+        let e = s.recall_by_id(&id).unwrap().unwrap();
+        assert_eq!(e.tags.len(), 2, "tags replaced and deduped");
+        assert!(e.tags.contains(&"mcp".to_string()));
+        assert!(!e.tags.contains(&"golang".to_string()));
+    }
+
+    #[test]
+    fn update_returns_false_for_missing() {
+        let s = open_test_store();
+        let found = s.update("mem_nope", crate::model::UpdateMemory::default()).unwrap();
+        assert!(!found);
+    }
+
+    #[test]
+    fn update_reindexes_fts() {
+        let s = open_test_store();
+        let id = s.store(sample()).unwrap().id;
+        s.update(&id, crate::model::UpdateMemory {
+            title: None,
+            content: Some("kubernetes operators".to_string()),
+            tags: None,
+            merge_content: false,
+        }).unwrap();
+        assert_eq!(s.search("kubernetes", 5).unwrap().len(), 1);
+        assert!(s.search("pgx", 5).unwrap().is_empty());
     }
 
     #[test]
