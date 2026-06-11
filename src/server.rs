@@ -142,4 +142,63 @@ mod tests {
         assert!(val["id"].as_str().unwrap().starts_with("mem_"));
         assert_eq!(val["auto_connected"], 0);
     }
+
+    #[tokio::test]
+    async fn memory_recall_by_id_returns_content() {
+        let hm = test_hivemind();
+        let stored = hm.do_memory_store(MemoryStoreInput {
+            title: "rust style".to_string(),
+            content: "use clippy, rustfmt, and deny warnings".to_string(),
+            layer: "personal".to_string(),
+            tags: vec!["rust".to_string()],
+            project: None,
+        }).await.unwrap();
+        let id = stored.structured_content.unwrap()["id"].as_str().unwrap().to_string();
+
+        let result = hm.do_memory_recall(MemoryRecallInput {
+            id: Some(id),
+            title: None,
+        }).await.unwrap();
+        let val = result.structured_content.unwrap();
+        assert_eq!(val["found"], true);
+        assert_eq!(val["title"], "rust style");
+        assert!(val["content"].as_str().unwrap().contains("clippy"));
+    }
+
+    #[tokio::test]
+    async fn memory_recall_by_title_returns_content() {
+        let hm = test_hivemind();
+        hm.do_memory_store(MemoryStoreInput {
+            title: "clean arch".to_string(),
+            content: "domain at center, infra at edge".to_string(),
+            layer: "personal".to_string(),
+            tags: vec!["architecture".to_string()],
+            project: None,
+        }).await.unwrap();
+
+        let result = hm.do_memory_recall(MemoryRecallInput {
+            id: None,
+            title: Some("clean arch".to_string()),
+        }).await.unwrap();
+        let val = result.structured_content.unwrap();
+        assert_eq!(val["found"], true);
+        assert_eq!(val["content"], "domain at center, infra at edge");
+    }
+
+    #[tokio::test]
+    async fn memory_recall_returns_not_found_for_missing_id() {
+        let hm = test_hivemind();
+        let result = hm.do_memory_recall(MemoryRecallInput {
+            id: Some("mem_doesnotexist".to_string()),
+            title: None,
+        }).await.unwrap();
+        assert_eq!(result.structured_content.unwrap()["found"], false);
+    }
+
+    #[tokio::test]
+    async fn memory_recall_errors_without_id_or_title() {
+        let hm = test_hivemind();
+        let err = hm.do_memory_recall(MemoryRecallInput { id: None, title: None }).await;
+        assert!(err.is_err());
+    }
 }
