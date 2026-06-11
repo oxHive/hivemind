@@ -120,8 +120,10 @@ impl HiveMind {
 #[tool_handler]
 impl rmcp::ServerHandler for HiveMind {
     fn get_info(&self) -> rmcp::model::ServerInfo {
-        rmcp::model::ServerInfo::default()
-            .with_server_info(rmcp::model::Implementation::new("hivemind", env!("CARGO_PKG_VERSION")))
+        rmcp::model::ServerInfo::new(
+            rmcp::model::ServerCapabilities::builder().enable_tools().build(),
+        )
+        .with_server_info(rmcp::model::Implementation::new("hivemind", env!("CARGO_PKG_VERSION")))
     }
 }
 
@@ -134,6 +136,14 @@ mod tests {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         db::create_schema(&conn).unwrap();
         HiveMind::new(SqliteStore::new(conn))
+    }
+
+    #[test]
+    fn get_info_advertises_name_and_tools_capability() {
+        use rmcp::ServerHandler;
+        let info = test_hivemind().get_info();
+        assert_eq!(info.server_info.name, "hivemind");
+        assert!(info.capabilities.tools.is_some(), "tools capability must be advertised");
     }
 
     #[tokio::test]
