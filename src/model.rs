@@ -82,6 +82,12 @@ pub struct NewMemory {
     pub source: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct StoreResult {
+    pub id: String,
+    pub auto_connected: usize,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
