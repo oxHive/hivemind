@@ -149,6 +149,58 @@ impl SqliteStore {
         }
     }
 
+    pub fn search(&self, query: &str, limit: usize) -> Result<Vec<crate::model::SearchHit>> {
+        let trimmed = query.trim();
+        if trimmed.is_empty() {
+            return Ok(Vec::new());
+        }
+        // Strip non-alphanumeric characters from each whitespace-separated token,
+        // then quote the remainder.  Join with OR so that any matching word
+        // surfaces a result.  This prevents FTS5 syntax errors from punctuation
+        // or operator keywords in the input.
+        let fts_query = trimmed
+            .split_whitespace()
+            .map(|t| t.chars().filter(|c| c.is_alphanumeric()).collect::<String>())
+            .filter(|t| !t.is_empty())
+            .map(|t| format!("\"{}\"", t.replace('"', "\"\"")))
+            .collect::<Vec<_>>()
+            .join(" OR ");
+
+        if fts_query.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let rows = {
+            let mut stmt = conn.prepare(
+                "SELECT m.id, m.title, m.layer, snippet(memories_fts, 1, '[', ']', '…', 12)
+                 FROM memories_fts
+                 JOIN memories m ON m.rowid = memories_fts.rowid
+                 WHERE memories_fts MATCH ?1
+                 ORDER BY rank
+                 LIMIT ?2",
+            )?;
+            stmt
+                .query_map(rusqlite::params![fts_query, limit as i64], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+
+        let mut hits = Vec::with_capacity(rows.len());
+        for (id, title, layer_s, snippet) in rows {
+            let layer = layer_s.parse::<Layer>()?;
+            let tags = Self::fetch_tags(&conn, &id)?;
+            hits.push(crate::model::SearchHit { id, title, snippet, layer, tags });
+        }
+        Ok(hits)
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn row_to_entry(
         conn: &Connection,
@@ -290,6 +342,56 @@ mod tests {
                 [&second.id], |r| r.get(0),
             ).unwrap();
         assert_eq!(edge_count, 1);
+    }
+
+    #[test]
+    fn search_finds_memory_by_content_keyword() {
+        let s = open_test_store();
+        s.store(sample()).unwrap();
+        let hits = s.search("pgx", 5).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].title, "golang preferences");
+        assert!(hits[0].snippet.to_lowercase().contains("pgx"));
+        assert_eq!(hits[0].tags.len(), 2);
+    }
+
+    #[test]
+    fn search_returns_empty_for_no_match() {
+        let s = open_test_store();
+        s.store(sample()).unwrap();
+        assert!(s.search("kubernetes", 5).unwrap().is_empty());
+    }
+
+    #[test]
+    fn search_empty_query_returns_empty() {
+        let s = open_test_store();
+        s.store(sample()).unwrap();
+        assert!(s.search("   ", 5).unwrap().is_empty());
+    }
+
+    #[test]
+    fn search_handles_punctuation_without_error() {
+        let s = open_test_store();
+        s.store(sample()).unwrap();
+        let hits = s.search("pgx\" OR (", 5).unwrap();
+        assert_eq!(hits.len(), 1);
+    }
+
+    #[test]
+    fn search_respects_limit() {
+        let s = open_test_store();
+        for i in 0..3 {
+            s.store(NewMemory {
+                title: format!("note {i}"),
+                content: "shared keyword apple".to_string(),
+                layer: Layer::Personal,
+                memory_type: MemoryType::Preference,
+                tags: vec![format!("t{i}")],
+                project: None,
+                source: None,
+            }).unwrap();
+        }
+        assert_eq!(s.search("apple", 2).unwrap().len(), 2);
     }
 
     #[test]
