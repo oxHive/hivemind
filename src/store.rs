@@ -246,6 +246,27 @@ impl SqliteStore {
         Ok(true)
     }
 
+    /// Resolve a recall query in priority order: exact id, exact title, then
+    /// the top FTS result. Returns the full entry, or None if nothing matches.
+    pub fn resolve_recall(&self, query: &str) -> Result<Option<MemoryEntry>> {
+        if let Some(entry) = self.recall_by_id(query)? {
+            return Ok(Some(entry));
+        }
+        if let Some(entry) = self.recall_by_title(query)? {
+            return Ok(Some(entry));
+        }
+        if let Some(hit) = self.search(query, 1)?.into_iter().next() {
+            return self.recall_by_id(&hit.id);
+        }
+        Ok(None)
+    }
+
+    pub fn count(&self) -> Result<usize> {
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM memories", [], |r| r.get(0))?;
+        Ok(n as usize)
+    }
+
     pub fn delete(&self, id: &str) -> Result<bool> {
         let mut conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
         let tx = conn.transaction()?;
@@ -567,6 +588,45 @@ mod tests {
     fn delete_returns_false_for_missing() {
         let s = open_test_store();
         assert!(!s.delete("mem_nope").unwrap());
+    }
+
+    #[test]
+    fn resolve_recall_matches_by_id() {
+        let s = open_test_store();
+        let id = s.store(sample()).unwrap().id;
+        let e = s.resolve_recall(&id).unwrap().unwrap();
+        assert_eq!(e.title, "golang preferences");
+    }
+
+    #[test]
+    fn resolve_recall_matches_by_exact_title() {
+        let s = open_test_store();
+        s.store(sample()).unwrap();
+        let e = s.resolve_recall("golang preferences").unwrap().unwrap();
+        assert_eq!(e.tags.len(), 2);
+    }
+
+    #[test]
+    fn resolve_recall_falls_back_to_fts() {
+        let s = open_test_store();
+        s.store(sample()).unwrap();
+        let e = s.resolve_recall("pgx driver").unwrap().unwrap();
+        assert_eq!(e.title, "golang preferences");
+    }
+
+    #[test]
+    fn resolve_recall_returns_none_when_nothing_matches() {
+        let s = open_test_store();
+        s.store(sample()).unwrap();
+        assert!(s.resolve_recall("kubernetes operators").unwrap().is_none());
+    }
+
+    #[test]
+    fn count_returns_number_of_memories() {
+        let s = open_test_store();
+        assert_eq!(s.count().unwrap(), 0);
+        s.store(sample()).unwrap();
+        assert_eq!(s.count().unwrap(), 1);
     }
 
     #[test]
