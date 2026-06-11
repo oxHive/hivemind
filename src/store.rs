@@ -1,7 +1,7 @@
 use std::sync::Mutex;
 use anyhow::Result;
 use rusqlite::Connection;
-use crate::model::{NewMemory, MemoryEntry, Layer, MemoryType};
+use crate::model::{NewMemory, MemoryEntry, Layer, MemoryType, StoreResult};
 
 fn gen_id() -> String {
     format!("mem_{}", uuid::Uuid::new_v4().simple())
@@ -23,11 +23,22 @@ impl SqliteStore {
         Self { conn: Mutex::new(conn) }
     }
 
-    pub fn store(&self, new: NewMemory) -> Result<String> {
+    pub fn store(&self, new: NewMemory) -> Result<StoreResult> {
         let id = gen_id();
         let now = now_secs();
+
+        // Deduplicate tags, preserving insertion order.
+        let mut seen = std::collections::HashSet::new();
+        let tags: Vec<String> = new
+            .tags
+            .iter()
+            .filter(|t| seen.insert((*t).clone()))
+            .cloned()
+            .collect();
+
         let mut conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
         let tx = conn.transaction()?;
+
         tx.execute(
             "INSERT INTO memories (id, layer, type, title, content, source, project, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
@@ -43,15 +54,45 @@ impl SqliteStore {
                 now
             ],
         )?;
-        let mut seen = std::collections::HashSet::new();
-        for tag in new.tags.iter().filter(|t| seen.insert((*t).clone())) {
+
+        for tag in &tags {
             tx.execute(
                 "INSERT INTO tags (memory_id, tag) VALUES (?1, ?2)",
                 rusqlite::params![id, tag],
             )?;
         }
+
+        // Auto-connect: one directional edge to each distinct other memory
+        // that shares at least one tag with this one.
+        let mut auto_connected = 0usize;
+        if !tags.is_empty() {
+            let placeholders = vec!["?"; tags.len()].join(",");
+            let sql = format!(
+                "SELECT DISTINCT memory_id FROM tags WHERE memory_id != ?1 AND tag IN ({placeholders})"
+            );
+            let targets: Vec<String> = {
+                let mut stmt = tx.prepare(&sql)?;
+                let mut params: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(tags.len() + 1);
+                params.push(&id);
+                for t in &tags {
+                    params.push(t);
+                }
+                stmt.query_map(params.as_slice(), |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<String>>>()?
+            };
+            for target in &targets {
+                let edge_id = format!("edge_{}", uuid::Uuid::new_v4().simple());
+                auto_connected += tx.execute(
+                    "INSERT OR IGNORE INTO edges
+                     (id, source_id, target_id, relationship, weight, inferred_by, status, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, 'shares_tag', 1.0, 'auto', 'accepted', ?4, ?4)",
+                    rusqlite::params![edge_id, id, target, now],
+                )?;
+            }
+        }
+
         tx.commit()?;
-        Ok(id)
+        Ok(StoreResult { id, auto_connected })
     }
 
     pub fn recall_by_id(&self, id: &str) -> Result<Option<MemoryEntry>> {
@@ -155,14 +196,14 @@ mod tests {
     #[test]
     fn store_returns_mem_prefixed_id() {
         let s = open_test_store();
-        let id = s.store(sample()).unwrap();
-        assert!(id.starts_with("mem_"), "id was: {id}");
+        let r = s.store(sample()).unwrap();
+        assert!(r.id.starts_with("mem_"), "id was: {}", r.id);
     }
 
     #[test]
     fn store_persists_row_and_tags() {
         let s = open_test_store();
-        let id = s.store(sample()).unwrap();
+        let id = s.store(sample()).unwrap().id;
         let conn = s.conn.lock().unwrap();
         let title: String = conn
             .query_row("SELECT title FROM memories WHERE id=?1", [&id], |r| r.get(0))
@@ -177,7 +218,7 @@ mod tests {
     #[test]
     fn recall_by_id_returns_full_entry_with_tags() {
         let s = open_test_store();
-        let id = s.store(sample()).unwrap();
+        let id = s.store(sample()).unwrap().id;
         let entry = s.recall_by_id(&id).unwrap().unwrap();
         assert_eq!(entry.title, "golang preferences");
         assert_eq!(entry.layer, Layer::Personal);
@@ -217,11 +258,53 @@ mod tests {
             project: None,
             source: None,
         };
-        let id = s.store(new).unwrap();
+        let id = s.store(new).unwrap().id;
         let conn = s.conn.lock().unwrap();
         let tag_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM tags WHERE memory_id=?1", [&id], |r| r.get(0))
             .unwrap();
         assert_eq!(tag_count, 2, "expected 2 unique tags, got {tag_count}");
+    }
+
+    #[test]
+    fn store_auto_connects_memories_sharing_a_tag() {
+        let s = open_test_store();
+        let first = s.store(sample()).unwrap();
+        assert_eq!(first.auto_connected, 0, "first memory connects to nothing");
+
+        let second = s.store(NewMemory {
+            title: "go http patterns".to_string(),
+            content: "chi router, middleware chain".to_string(),
+            layer: Layer::Personal,
+            memory_type: MemoryType::Preference,
+            tags: vec!["golang".to_string()],
+            project: None,
+            source: None,
+        }).unwrap();
+        assert_eq!(second.auto_connected, 1, "should connect to the golang memory");
+
+        let conn = s.conn.lock().unwrap();
+        let edge_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM edges WHERE source_id=?1 AND relationship='shares_tag'",
+                [&second.id], |r| r.get(0),
+            ).unwrap();
+        assert_eq!(edge_count, 1);
+    }
+
+    #[test]
+    fn store_does_not_connect_when_no_shared_tags() {
+        let s = open_test_store();
+        s.store(sample()).unwrap();
+        let other = s.store(NewMemory {
+            title: "unrelated".to_string(),
+            content: "nothing in common".to_string(),
+            layer: Layer::Personal,
+            memory_type: MemoryType::Preference,
+            tags: vec!["cooking".to_string()],
+            project: None,
+            source: None,
+        }).unwrap();
+        assert_eq!(other.auto_connected, 0);
     }
 }

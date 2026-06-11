@@ -59,12 +59,12 @@ impl HiveMind {
             project: p.project,
             source: Some("claude_code".to_string()),
         };
-        let id = self.store.store(new_memory)
+        let result = self.store.store(new_memory)
             .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
         Ok(CallToolResult::structured(json!({
-            "id": id,
+            "id": result.id,
             "title": title,
-            "auto_connected": 0
+            "auto_connected": result.auto_connected
         })))
     }
 
