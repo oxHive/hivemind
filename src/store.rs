@@ -288,6 +288,7 @@ mod tests {
 
     fn open_test_store() -> SqliteStore {
         let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
         db::create_schema(&conn).unwrap();
         SqliteStore::new(conn)
     }
