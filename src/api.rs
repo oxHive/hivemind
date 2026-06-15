@@ -321,7 +321,7 @@ async fn patch_feedback(
 // --- conflicts + status ---
 
 async fn list_conflicts(State(store): State<Store>) -> Result<Json<Value>, ApiError> {
-    let items = store.list_conflicts()?;
+    let items = store.list_conflicts(None)?;
     Ok(Json(json!({ "count": items.len(), "conflicts": items })))
 }
 
