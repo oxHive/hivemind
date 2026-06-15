@@ -442,6 +442,7 @@ impl SqliteStore {
                 loser_src: row.get(5)?,
                 detected_at: row.get(6)?,
                 status: row.get(7)?,
+                title: None,
             })
         })?.collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(items)

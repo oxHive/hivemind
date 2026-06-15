@@ -56,6 +56,11 @@ pub fn create_schema(conn: &Connection) -> Result<()> {
             status      TEXT DEFAULT 'open'
         );
 
+        CREATE TABLE IF NOT EXISTS kv (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+
         CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
             title, content, content='memories', content_rowid='rowid'
         );
@@ -194,6 +199,18 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM memories_fts WHERE memories_fts MATCH 'clippy'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(hits, 0, "FTS delete trigger did not remove the row");
+    }
+
+    #[test]
+    fn create_schema_creates_kv_table() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_schema(&conn).unwrap();
+        let exists: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE name='kv'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(exists, 1, "kv table not created");
     }
 
     #[test]
