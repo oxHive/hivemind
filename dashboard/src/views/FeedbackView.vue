@@ -1,1 +1,43 @@
-<template><div class="flex-1 flex items-center justify-center" style="color:var(--hm-text-tertiary)">Feedback view</div></template>
+<script setup>
+import { useFeedbackStore } from '../stores/feedback.js'
+import ConflictCard from '../components/feedback/ConflictCard.vue'
+import FeedbackCard from '../components/feedback/FeedbackCard.vue'
+import EmptyState from '../components/shared/EmptyState.vue'
+
+const fb = useFeedbackStore()
+</script>
+
+<template>
+  <div class="flex flex-col flex-1 overflow-hidden">
+
+    <!-- Tabs -->
+    <div class="flex px-4 pt-3"
+      style="border-bottom:0.5px solid var(--hm-border-subtle); background:var(--hm-bg-surface)">
+      <button
+        v-for="tab in ['conflicts','feedback']" :key="tab"
+        @click="fb.activeTab = tab"
+        class="px-3 pb-2 font-mono capitalize"
+        :style="fb.activeTab===tab
+          ? 'font-size:12px; color:var(--hm-text-primary); border-bottom:2px solid var(--hm-personal)'
+          : 'font-size:12px; color:var(--hm-text-tertiary); border-bottom:2px solid transparent'">
+        {{ tab }}
+        <span v-if="tab==='conflicts' && fb.conflicts.length" class="ml-1.5 font-mono"
+          style="font-size:10px; background:var(--hm-warning-bg); color:var(--hm-warning); padding:1px 5px; border-radius:3px">
+          {{ fb.conflicts.length }}
+        </span>
+      </button>
+    </div>
+
+    <!-- Content -->
+    <div class="flex-1 overflow-y-auto px-4 py-4">
+      <template v-if="fb.activeTab === 'conflicts'">
+        <EmptyState v-if="!fb.conflicts.length" message="✓ Nothing to review. All memories are clean." icon="✓" />
+        <ConflictCard v-for="c in fb.conflicts" :key="c.id" :conflict="c" />
+      </template>
+      <template v-else>
+        <EmptyState v-if="!fb.feedbackItems.length" message="✓ Nothing to review. All memories are clean." icon="✓" />
+        <FeedbackCard v-for="item in fb.feedbackItems" :key="item.id" :item="item" />
+      </template>
+    </div>
+  </div>
+</template>
