@@ -24,8 +24,8 @@ pub fn app_router(
     let mcp = StreamableHttpService::new(
         {
             let store = store.clone();
-            let _trigger = trigger.clone();
-            move || Ok(HiveMind::with_store(store.clone()))
+            let trigger = trigger.clone();
+            move || Ok(HiveMind::with_sync(store.clone(), trigger.clone()))
         },
         Arc::new(LocalSessionManager::default()),
         Default::default(),

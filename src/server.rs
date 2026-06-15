@@ -80,15 +80,20 @@ pub struct SessionStartInput {
 #[derive(Clone)]
 pub struct HiveMind {
     store: Arc<SqliteStore>,
+    sync_trigger: Option<Arc<tokio::sync::Notify>>,
 }
 
 impl HiveMind {
     pub fn new(store: SqliteStore) -> Self {
-        Self { store: Arc::new(store) }
+        Self { store: Arc::new(store), sync_trigger: None }
     }
 
     pub fn with_store(store: Arc<SqliteStore>) -> Self {
-        Self { store }
+        Self { store, sync_trigger: None }
+    }
+
+    pub fn with_sync(store: Arc<SqliteStore>, trigger: Arc<tokio::sync::Notify>) -> Self {
+        Self { store, sync_trigger: Some(trigger) }
     }
 
     pub async fn do_memory_store(&self, p: MemoryStoreInput) -> Result<CallToolResult, ErrorData> {
@@ -106,6 +111,9 @@ impl HiveMind {
         };
         let result = self.store.store(new_memory)
             .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+        if let Some(t) = &self.sync_trigger {
+            t.notify_one();
+        }
         Ok(CallToolResult::structured(json!({
             "id": result.id,
             "title": title,
