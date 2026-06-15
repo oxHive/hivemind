@@ -1,0 +1,49 @@
+<script setup>
+import LayerBadge from '../shared/LayerBadge.vue'
+import TagChip from '../shared/TagChip.vue'
+
+const props = defineProps({ mem: Object, selected: Boolean })
+defineEmits(['select'])
+
+function fmtDate(iso) {
+  if (!iso) return ''
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+</script>
+
+<template>
+  <div
+    @click="$emit('select', mem)"
+    class="px-3.5 py-3 cursor-pointer"
+    :style="`border-left:2px solid ${selected
+      ? (mem.layer === 'personal' ? 'var(--hm-personal)' : 'var(--hm-workspace)')
+      : 'transparent'};
+      background:${selected ? 'var(--hm-bg-elevated)' : 'transparent'};
+      border-bottom:0.5px solid var(--hm-border-subtle)`"
+    @mouseover="!selected && ($event.currentTarget.style.background='var(--hm-bg-elevated)')"
+    @mouseleave="!selected && ($event.currentTarget.style.background='transparent')"
+  >
+    <!-- Row 1: title + layer badge -->
+    <div class="flex items-start justify-between gap-2 mb-1">
+      <span class="font-medium leading-snug"
+        style="font-size:13px; color:var(--hm-text-primary); overflow:hidden; display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical">
+        {{ mem.title }}
+      </span>
+      <LayerBadge :layer="mem.layer" class="shrink-0 mt-0.5" />
+    </div>
+    <!-- Row 2: snippet -->
+    <p class="mb-1.5"
+      style="font-size:12px; color:var(--hm-text-secondary); overflow:hidden; display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical">
+      {{ mem.content }}
+    </p>
+    <!-- Row 3: tags + date -->
+    <div class="flex items-center gap-1 justify-between">
+      <div class="flex items-center gap-1 overflow-hidden">
+        <TagChip v-for="tag in (mem.tags || []).slice(0,3)" :key="tag" :tag="tag" />
+      </div>
+      <span class="font-mono shrink-0" style="font-size:11px; color:var(--hm-text-tertiary)">
+        {{ fmtDate(mem.updated_at || mem.created_at) }}
+      </span>
+    </div>
+  </div>
+</template>
