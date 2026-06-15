@@ -1,15 +1,16 @@
 use std::sync::Arc;
 use axum::{
     Json, Router,
-    extract::{Path, Query, State},
+    extract::{Extension, Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{get, patch},
+    routing::{get, patch, post},
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tower_http::cors::CorsLayer;
 use crate::{
+    config::SyncSettings,
     model::{EdgeCreate, Layer, MemoryEntry, MemoryType, NewMemory, UpdateMemory},
     store::SqliteStore,
 };
@@ -18,6 +19,7 @@ const RELATIONSHIPS: &[&str] = &["shares_tag", "applies_to", "pairs_with", "used
 const EDGE_STATUSES: &[&str] = &["accepted", "pending", "rejected"];
 const FEEDBACK_TYPES: &[&str] = &["incorrect", "outdated", "duplicate", "wrong_connection", "missing_connection", "other"];
 const FEEDBACK_STATUSES: &[&str] = &["open", "resolved", "dismissed"];
+const CONFLICT_ACTIONS: &[&str] = &["keep", "restore"];
 
 type Store = Arc<SqliteStore>;
 
@@ -51,7 +53,7 @@ fn validate(value: &str, allowed: &[&str], what: &str) -> Result<(), ApiError> {
     }
 }
 
-pub fn router(store: Store) -> Router {
+pub fn router(store: Store, sync: SyncSettings) -> Router {
     Router::new()
         .route("/api/v1/memories", get(list_memories).post(create_memory))
         .route("/api/v1/memories/{id}", get(get_memory).patch(patch_memory).delete(delete_memory))
@@ -61,9 +63,15 @@ pub fn router(store: Store) -> Router {
         .route("/api/v1/feedback", get(list_feedback).post(create_feedback))
         .route("/api/v1/feedback/{id}", patch(patch_feedback))
         .route("/api/v1/conflicts", get(list_conflicts))
+        .route("/api/v1/conflicts/{id}/resolve", post(resolve_conflict_handler))
+        .route("/api/v1/settings/sync", get(get_sync_settings).post(save_sync_settings))
         .route("/api/v1/status", get(server_status))
-        .layer(CorsLayer::permissive())
+        .route("/api/sync/status", get(sync_status))
+        .route("/api/sync/push", post(sync_push))
+        .route("/api/sync/pull", get(sync_pull))
         .with_state(store)
+        .layer(Extension(sync))
+        .layer(CorsLayer::permissive())
 }
 
 fn entry_json(e: &MemoryEntry) -> Value {
@@ -320,18 +328,110 @@ async fn patch_feedback(
 
 // --- conflicts + status ---
 
-async fn list_conflicts(State(store): State<Store>) -> Result<Json<Value>, ApiError> {
-    let items = store.list_conflicts(None)?;
+#[derive(Deserialize)]
+struct ConflictQuery { status: Option<String> }
+
+async fn list_conflicts(
+    State(store): State<Store>,
+    Query(p): Query<ConflictQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let items = store.list_conflicts(p.status.as_deref())?;
     Ok(Json(json!({ "count": items.len(), "conflicts": items })))
 }
 
-async fn server_status(State(store): State<Store>) -> Result<Json<Value>, ApiError> {
+async fn server_status(
+    State(store): State<Store>,
+    Extension(sync): Extension<SyncSettings>,
+) -> Result<Json<Value>, ApiError> {
+    let last_synced_at = store.get_kv("last_synced_at")?
+        .and_then(|v| v.parse::<i64>().ok());
+    let conflict_count = store.list_conflicts(Some("open"))?.len();
     Ok(Json(json!({
         "version": env!("CARGO_PKG_VERSION"),
         "memory_count": store.count()?,
         "db_path": crate::db::resolve_db_path(),
-        "sync": { "enabled": false },
+        "sync": {
+            "enabled": sync.enabled,
+            "last_synced_at": last_synced_at,
+            "conflict_count": conflict_count,
+        },
     })))
+}
+
+// --- sync server endpoints ---
+
+async fn sync_status(State(store): State<Store>) -> Result<Json<Value>, ApiError> {
+    let server_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+    Ok(Json(json!({ "server_time": server_time, "memory_count": store.count()? })))
+}
+
+#[derive(Deserialize)]
+struct PushBody {
+    records: Vec<MemoryEntry>,
+    #[allow(dead_code)]
+    client_id: Option<String>,
+}
+
+async fn sync_push(
+    State(store): State<Store>,
+    Json(body): Json<PushBody>,
+) -> Result<Json<Value>, ApiError> {
+    let mut accepted = 0usize;
+    let mut conflicts = vec![];
+    for record in &body.records {
+        match store.upsert_memory(record)? {
+            Some(c) => conflicts.push(c),
+            None => accepted += 1,
+        }
+    }
+    Ok(Json(json!({ "accepted": accepted, "conflicts": conflicts })))
+}
+
+#[derive(Deserialize)]
+struct PullQuery { since: Option<i64> }
+
+async fn sync_pull(
+    State(store): State<Store>,
+    Query(q): Query<PullQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let records = store.memories_since(q.since.unwrap_or(0))?;
+    let server_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+    Ok(Json(json!({ "records": records, "server_time": server_time })))
+}
+
+// --- conflict resolution ---
+
+#[derive(Deserialize)]
+struct ResolveBody { action: String }
+
+async fn resolve_conflict_handler(
+    State(store): State<Store>,
+    Path(id): Path<String>,
+    Json(b): Json<ResolveBody>,
+) -> Result<Json<Value>, ApiError> {
+    validate(&b.action, CONFLICT_ACTIONS, "action")?;
+    if !store.resolve_conflict(&id, &b.action)? {
+        return Err(not_found(format!("conflict {id} not found or already resolved")));
+    }
+    Ok(Json(json!({ "resolved": true, "id": id, "action": b.action })))
+}
+
+// --- sync settings (read-only from file in v1) ---
+
+async fn get_sync_settings(Extension(sync): Extension<SyncSettings>) -> Json<Value> {
+    Json(json!({
+        "enabled": sync.enabled,
+        "remote_url": sync.remote_url,
+        "interval_seconds": sync.interval_seconds,
+        "sync_on_store": sync.sync_on_store,
+        "sync_on_startup": sync.sync_on_startup,
+    }))
+}
+
+async fn save_sync_settings(Json(_): Json<Value>) -> Json<Value> {
+    Json(json!({ "saved": false, "message": "Sync settings are managed via config.toml — restart hivemind after editing." }))
 }
 
 #[cfg(test)]
@@ -347,7 +447,7 @@ mod tests {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
         db::create_schema(&conn).unwrap();
-        router(Arc::new(SqliteStore::new(conn)))
+        router(Arc::new(SqliteStore::new(conn)), crate::config::SyncSettings::default())
     }
 
     async fn req(app: Router, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
@@ -503,5 +603,68 @@ mod tests {
         assert_eq!(status["version"], env!("CARGO_PKG_VERSION"));
         assert_eq!(status["memory_count"], 1);
         assert_eq!(status["sync"]["enabled"], false);
+    }
+
+    #[tokio::test]
+    async fn sync_status_returns_server_time_and_count() {
+        let (status, body) = req(test_router(), "GET", "/api/sync/status", None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body["server_time"].is_number());
+        assert_eq!(body["memory_count"], 0);
+    }
+
+    #[tokio::test]
+    async fn sync_push_inserts_new_memory() {
+        let app = test_router();
+        let record = json!({
+            "id": "mem_test001", "layer": "personal", "memory_type": "preference",
+            "title": "Test", "content": "Content", "source": null, "project": null,
+            "tags": ["tag1"], "created_at": 1000, "updated_at": 1000
+        });
+        let (status, body) = req(app, "POST", "/api/sync/push",
+            Some(json!({ "records": [record], "client_id": "test-client" }))).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["accepted"], 1);
+        assert_eq!(body["conflicts"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn sync_pull_returns_records_since() {
+        let app = test_router();
+        req(app.clone(), "POST", "/api/v1/memories",
+            Some(json!({ "title": "T", "content": "C", "layer": "personal", "tags": [] }))).await;
+        let (status, body) = req(app, "GET", "/api/sync/pull?since=0", None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["records"].as_array().unwrap().len(), 1);
+        assert!(body["server_time"].is_number());
+    }
+
+    #[tokio::test]
+    async fn resolve_conflict_returns_404_for_missing() {
+        let (status, _) = req(test_router(), "POST", "/api/v1/conflicts/cfl_missing/resolve",
+            Some(json!({ "action": "keep" }))).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn resolve_conflict_rejects_invalid_action() {
+        let (status, _) = req(test_router(), "POST", "/api/v1/conflicts/any/resolve",
+            Some(json!({ "action": "delete" }))).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn settings_sync_returns_defaults() {
+        let (status, body) = req(test_router(), "GET", "/api/v1/settings/sync", None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["enabled"], false);
+        assert_eq!(body["interval_seconds"], 300);
+    }
+
+    #[tokio::test]
+    async fn server_status_includes_sync_info() {
+        let (status, body) = req(test_router(), "GET", "/api/v1/status", None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["sync"]["enabled"], false);
     }
 }
