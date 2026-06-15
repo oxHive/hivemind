@@ -141,6 +141,7 @@ pub struct ConflictItem {
     pub loser_src: String,
     pub detected_at: i64,
     pub status: String,
+    pub title: Option<String>,
 }
 
 /// Result of attempting to create an edge.

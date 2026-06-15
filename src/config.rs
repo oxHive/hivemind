@@ -112,6 +112,39 @@ struct RawDashboard {
 }
 
 #[derive(Debug, Default, Deserialize)]
+struct RawSync {
+    enabled: Option<bool>,
+    remote_url: Option<String>,
+    api_key: Option<String>,
+    interval_seconds: Option<u64>,
+    sync_on_store: Option<bool>,
+    sync_on_startup: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncSettings {
+    pub enabled: bool,
+    pub remote_url: String,
+    pub api_key: String,
+    pub interval_seconds: u64,
+    pub sync_on_store: bool,
+    pub sync_on_startup: bool,
+}
+
+impl Default for SyncSettings {
+    fn default() -> Self {
+        SyncSettings {
+            enabled: false,
+            remote_url: String::new(),
+            api_key: String::new(),
+            interval_seconds: 300,
+            sync_on_store: true,
+            sync_on_startup: true,
+        }
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
 struct RawGlobal {
     #[serde(default)]
     defaults: RawDefaults,
@@ -119,6 +152,8 @@ struct RawGlobal {
     server: RawServer,
     #[serde(default)]
     dashboard: RawDashboard,
+    #[serde(default)]
+    sync: RawSync,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -224,6 +259,7 @@ pub struct ServerSettings {
     pub dashboard_port: u16,
     /// API base URL the dashboard frontend should call.
     pub api_url: String,
+    pub sync: SyncSettings,
 }
 
 pub fn load_server_settings(global_path: &std::path::Path) -> anyhow::Result<ServerSettings> {
@@ -237,7 +273,15 @@ pub fn load_server_settings(global_path: &std::path::Path) -> anyhow::Result<Ser
     let port = raw.server.port.unwrap_or(3456);
     let dashboard_port = raw.dashboard.port.unwrap_or(3457);
     let api_url = raw.dashboard.api_url.unwrap_or_else(|| format!("http://{host}:{port}"));
-    Ok(ServerSettings { host, port, dashboard_port, api_url })
+    let sync = SyncSettings {
+        enabled: raw.sync.enabled.unwrap_or(false),
+        remote_url: raw.sync.remote_url.unwrap_or_default(),
+        api_key: raw.sync.api_key.unwrap_or_default(),
+        interval_seconds: raw.sync.interval_seconds.unwrap_or(300),
+        sync_on_store: raw.sync.sync_on_store.unwrap_or(true),
+        sync_on_startup: raw.sync.sync_on_startup.unwrap_or(true),
+    };
+    Ok(ServerSettings { host, port, dashboard_port, api_url, sync })
 }
 
 #[cfg(test)]
@@ -338,5 +382,29 @@ mod tests {
         assert_eq!(s.port, 4000);
         assert_eq!(s.dashboard_port, 4001);
         assert_eq!(s.api_url, "http://pi.local:4000");
+    }
+
+    #[test]
+    fn sync_settings_defaults_when_global_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let s = load_server_settings(&tmp.path().join("no-global.toml")).unwrap();
+        assert!(!s.sync.enabled);
+        assert!(s.sync.remote_url.is_empty());
+        assert_eq!(s.sync.interval_seconds, 300);
+        assert!(s.sync.sync_on_store);
+        assert!(s.sync.sync_on_startup);
+    }
+
+    #[test]
+    fn sync_settings_reads_from_global_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(tmp.path(), "config.toml",
+            "[sync]\nenabled=true\nremote_url=\"http://pi.local:3456\"\napi_key=\"secret\"\ninterval_seconds=60\nsync_on_store=false\n");
+        let s = load_server_settings(&tmp.path().join("config.toml")).unwrap();
+        assert!(s.sync.enabled);
+        assert_eq!(s.sync.remote_url, "http://pi.local:3456");
+        assert_eq!(s.sync.api_key, "secret");
+        assert_eq!(s.sync.interval_seconds, 60);
+        assert!(!s.sync.sync_on_store);
     }
 }
