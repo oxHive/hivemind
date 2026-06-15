@@ -9,6 +9,7 @@ pub struct SyncClient {
     http: reqwest::Client,
 }
 
+#[allow(dead_code)]
 pub struct SyncReport {
     pub pushed: usize,
     pub pulled: usize,
@@ -78,10 +79,8 @@ pub async fn run_sync_loop(
     sync_on_startup: bool,
     trigger: Arc<tokio::sync::Notify>,
 ) {
-    if sync_on_startup {
-        if let Err(e) = client.sync_once().await {
-            tracing::warn!("initial sync failed: {e:#}");
-        }
+    if sync_on_startup && let Err(e) = client.sync_once().await {
+        tracing::warn!("initial sync failed: {e:#}");
     }
     let mut ticker = tokio::time::interval(tokio::time::Duration::from_secs(interval_secs));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);

@@ -84,6 +84,7 @@ pub struct HiveMind {
 }
 
 impl HiveMind {
+    #[allow(dead_code)]
     pub fn new(store: SqliteStore) -> Self {
         Self { store: Arc::new(store), sync_trigger: None }
     }
