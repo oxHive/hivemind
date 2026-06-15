@@ -524,6 +524,93 @@ impl SqliteStore {
         Ok(items)
     }
 
+    pub fn memories_since(&self, since_ts: i64) -> Result<Vec<MemoryEntry>> {
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let mut stmt = conn.prepare(
+            "SELECT id, layer, type, title, content, source, project, created_at, updated_at
+             FROM memories WHERE updated_at > ?1 ORDER BY updated_at ASC"
+        )?;
+        let rows = stmt.query_map(rusqlite::params![since_ts], Self::row_tuple)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut entries = Vec::with_capacity(rows.len());
+        for (rid, layer_s, type_s, title, content, source, project, created_at, updated_at) in rows {
+            entries.push(Self::row_to_entry(&conn, rid, layer_s, type_s, title, content, source, project, created_at, updated_at)?);
+        }
+        Ok(entries)
+    }
+
+    pub fn upsert_memory(&self, entry: &crate::model::MemoryEntry) -> Result<Option<crate::model::ConflictItem>> {
+        let now = now_secs();
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let tx = conn.unchecked_transaction()?;
+
+        let existing: Option<(i64, String, String)> = tx.query_row(
+            "SELECT updated_at, content, title FROM memories WHERE id = ?1",
+            rusqlite::params![entry.id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        ).optional()?;
+
+        let conflict = if let Some((local_ts, local_content, local_title)) = existing {
+            if entry.updated_at == local_ts {
+                tx.commit()?;
+                return Ok(None);
+            }
+            let (winner, loser, winner_src, loser_src) = if entry.updated_at > local_ts {
+                (entry.content.as_str(), local_content.as_str(), "remote", "local")
+            } else {
+                (local_content.as_str(), entry.content.as_str(), "local", "remote")
+            };
+            if entry.updated_at > local_ts {
+                tx.execute(
+                    "UPDATE memories SET layer=?1, type=?2, title=?3, content=?4, source=?5, project=?6, updated_at=?7 WHERE id=?8",
+                    rusqlite::params![
+                        entry.layer.to_string(), entry.memory_type.to_string(),
+                        entry.title, entry.content, entry.source, entry.project,
+                        entry.updated_at, entry.id,
+                    ],
+                )?;
+                tx.execute("DELETE FROM tags WHERE memory_id = ?1", rusqlite::params![entry.id])?;
+                for t in &entry.tags {
+                    tx.execute("INSERT INTO tags (memory_id, tag) VALUES (?1, ?2)", rusqlite::params![entry.id, t])?;
+                }
+            }
+            let cfl_id = format!("cfl_{}", uuid::Uuid::new_v4().simple());
+            tx.execute(
+                "INSERT INTO conflicts (id, memory_id, winner, loser, winner_src, loser_src, detected_at, status)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'open')",
+                rusqlite::params![cfl_id, entry.id, winner, loser, winner_src, loser_src, now],
+            )?;
+            Some(crate::model::ConflictItem {
+                id: cfl_id,
+                memory_id: Some(entry.id.clone()),
+                winner: winner.to_string(),
+                loser: loser.to_string(),
+                winner_src: winner_src.to_string(),
+                loser_src: loser_src.to_string(),
+                detected_at: now,
+                status: "open".to_string(),
+                title: Some(local_title),
+            })
+        } else {
+            tx.execute(
+                "INSERT INTO memories (id, layer, type, title, content, source, project, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                rusqlite::params![
+                    entry.id, entry.layer.to_string(), entry.memory_type.to_string(),
+                    entry.title, entry.content, entry.source, entry.project,
+                    entry.created_at, entry.updated_at,
+                ],
+            )?;
+            for t in &entry.tags {
+                tx.execute("INSERT INTO tags (memory_id, tag) VALUES (?1, ?2)", rusqlite::params![entry.id, t])?;
+            }
+            None
+        };
+
+        tx.commit()?;
+        Ok(conflict)
+    }
+
     pub fn delete(&self, id: &str) -> Result<bool> {
         let mut conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
         let tx = conn.transaction()?;
@@ -1111,5 +1198,113 @@ mod tests {
         assert_eq!(s.list_conflicts(Some("open")).unwrap().len(), 1);
         assert_eq!(s.list_conflicts(Some("resolved")).unwrap().len(), 1);
         assert_eq!(s.list_conflicts(None).unwrap().len(), 2);
+    }
+
+    fn remote_entry(id: &str, title: &str, content: &str, updated_at: i64) -> crate::model::MemoryEntry {
+        crate::model::MemoryEntry {
+            id: id.to_string(),
+            layer: crate::model::Layer::Personal,
+            memory_type: crate::model::MemoryType::Preference,
+            title: title.to_string(),
+            content: content.to_string(),
+            source: Some("remote".to_string()),
+            project: None,
+            tags: vec!["test".to_string()],
+            created_at: updated_at - 10,
+            updated_at,
+        }
+    }
+
+    #[test]
+    fn memories_since_returns_empty_when_no_new_records() {
+        let s = open_test_store();
+        let _id = s.store(sample()).unwrap().id;
+        let later = now_secs() + 10;
+        let result = s.memories_since(later).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn memories_since_returns_records_after_timestamp() {
+        let s = open_test_store();
+        let _id = s.store(sample()).unwrap().id;
+        let ts = now_secs() - 1;
+        let result = s.memories_since(ts).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].title, "golang preferences");
+    }
+
+    #[test]
+    fn upsert_memory_inserts_new_memory_without_conflict() {
+        let s = open_test_store();
+        let entry = remote_entry("mem_abc", "Remote Title", "Remote content", now_secs());
+        let conflict = s.upsert_memory(&entry).unwrap();
+        assert!(conflict.is_none(), "new memory should not produce a conflict");
+        let recalled = s.recall_by_id("mem_abc").unwrap().unwrap();
+        assert_eq!(recalled.title, "Remote Title");
+        assert_eq!(recalled.tags, vec!["test"]);
+    }
+
+    #[test]
+    fn upsert_memory_remote_wins_when_newer() {
+        let s = open_test_store();
+        let local_id = s.store(crate::model::NewMemory {
+            title: "Local title".into(), content: "Local content".into(),
+            layer: crate::model::Layer::Personal,
+            memory_type: crate::model::MemoryType::Preference,
+            tags: vec![], project: None, source: Some("local".to_string()),
+        }).unwrap().id;
+
+        let remote_ts = now_secs() + 100;
+        let entry = remote_entry(&local_id, "Remote title", "Remote content", remote_ts);
+        let conflict = s.upsert_memory(&entry).unwrap();
+
+        let c = conflict.expect("conflict expected when remote wins");
+        assert_eq!(c.winner, "Remote content");
+        assert_eq!(c.loser, "Local content");
+        assert_eq!(c.winner_src, "remote");
+        assert_eq!(c.loser_src, "local");
+
+        let recalled = s.recall_by_id(&local_id).unwrap().unwrap();
+        assert_eq!(recalled.content, "Remote content", "memory should be updated to winner");
+    }
+
+    #[test]
+    fn upsert_memory_local_wins_when_newer() {
+        let s = open_test_store();
+        let local_id = s.store(crate::model::NewMemory {
+            title: "Local title".into(), content: "Local content".into(),
+            layer: crate::model::Layer::Personal,
+            memory_type: crate::model::MemoryType::Preference,
+            tags: vec![], project: None, source: Some("local".to_string()),
+        }).unwrap().id;
+
+        let entry = remote_entry(&local_id, "Remote title", "Remote content", 1);
+        let conflict = s.upsert_memory(&entry).unwrap();
+
+        let c = conflict.expect("conflict expected even when local wins");
+        assert_eq!(c.winner_src, "local");
+        assert_eq!(c.loser_src, "remote");
+
+        let recalled = s.recall_by_id(&local_id).unwrap().unwrap();
+        assert_eq!(recalled.content, "Local content", "local content should be unchanged");
+    }
+
+    #[test]
+    fn upsert_memory_no_conflict_when_timestamps_equal() {
+        let s = open_test_store();
+        let ts = now_secs();
+        let local_id = {
+            let conn = s.conn.lock().unwrap();
+            let id = format!("mem_{}", uuid::Uuid::new_v4().simple());
+            conn.execute(
+                "INSERT INTO memories (id, layer, type, title, content, created_at, updated_at) VALUES (?1,'personal','preference','T','C',?2,?2)",
+                rusqlite::params![id, ts],
+            ).unwrap();
+            id
+        };
+        let entry = remote_entry(&local_id, "T", "C", ts);
+        let conflict = s.upsert_memory(&entry).unwrap();
+        assert!(conflict.is_none(), "same timestamp = no conflict");
     }
 }
