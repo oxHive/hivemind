@@ -12,7 +12,7 @@ use rmcp::transport::streamable_http_server::{
     StreamableHttpService,
     session::local::LocalSessionManager,
 };
-use crate::{api, config::{ServerSettings, SyncSettings}, server::HiveMind, store::SqliteStore};
+use crate::{api, config::{ServerSettings, SyncSettings}, server::HiveMind, store::SqliteStore, sync as syncer};
 
 static DASHBOARD: Dir = include_dir!("$CARGO_MANIFEST_DIR/dashboard/dist");
 
@@ -78,10 +78,24 @@ pub fn dashboard_router(api_url: &str) -> Router {
 
 pub async fn run_up(store: Arc<SqliteStore>, settings: &ServerSettings, headless: bool) -> Result<()> {
     let trigger = Arc::new(tokio::sync::Notify::new());
-    let app = app_router(store.clone(), settings.sync.clone(), trigger);
+    let app = app_router(store.clone(), settings.sync.clone(), trigger.clone());
+
+    if settings.sync.enabled {
+        let client = Arc::new(syncer::SyncClient::new(&settings.sync, store.clone()));
+        let interval = settings.sync.interval_seconds;
+        let on_startup = settings.sync.sync_on_startup;
+        let t = trigger.clone();
+        tokio::spawn(async move {
+            syncer::run_sync_loop(client, interval, on_startup, t).await;
+        });
+    }
+
     let listener = tokio::net::TcpListener::bind((settings.host.as_str(), settings.port)).await?;
     tracing::info!("MCP endpoint:  http://{}:{}/mcp", settings.host, settings.port);
     tracing::info!("REST API:      http://{}:{}/api/v1", settings.host, settings.port);
+    if settings.sync.enabled {
+        tracing::info!("Sync:          enabled → {}", settings.sync.remote_url);
+    }
     if headless {
         axum::serve(listener, app).await?;
         return Ok(());
