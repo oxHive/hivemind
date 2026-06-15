@@ -105,6 +105,52 @@ pub struct UpdateMemory {
     pub merge_content: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct Edge {
+    pub id: String,
+    pub source_id: String,
+    pub target_id: String,
+    pub relationship: String,
+    pub weight: f64,
+    pub inferred_by: String,
+    pub status: String,
+    pub reason: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FeedbackItem {
+    pub id: String,
+    pub memory_id: Option<String>,
+    pub edge_id: Option<String>,
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub note: Option<String>,
+    pub status: String,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ConflictItem {
+    pub id: String,
+    pub memory_id: Option<String>,
+    pub winner: String,
+    pub loser: String,
+    pub winner_src: String,
+    pub loser_src: String,
+    pub detected_at: i64,
+    pub status: String,
+}
+
+/// Result of attempting to create an edge.
+#[derive(Debug, PartialEq, Eq)]
+pub enum EdgeCreate {
+    Created(String),
+    Duplicate,
+    MissingEndpoint,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
