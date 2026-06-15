@@ -426,13 +426,74 @@ impl SqliteStore {
         Ok(n > 0)
     }
 
+    pub fn get_kv(&self, key: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let mut stmt = conn.prepare("SELECT value FROM kv WHERE key = ?1")?;
+        match stmt.query_row(rusqlite::params![key], |r| r.get(0)) {
+            Ok(v) => Ok(Some(v)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn set_kv(&self, key: &str, value: &str) -> Result<()> {
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        conn.execute(
+            "INSERT INTO kv (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            rusqlite::params![key, value],
+        )?;
+        Ok(())
+    }
+
+    pub fn write_conflict(
+        &self,
+        memory_id: Option<&str>,
+        winner: &str,
+        loser: &str,
+        winner_src: &str,
+        loser_src: &str,
+    ) -> Result<String> {
+        let id = format!("cfl_{}", uuid::Uuid::new_v4().simple());
+        let now = now_secs();
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        conn.execute(
+            "INSERT INTO conflicts (id, memory_id, winner, loser, winner_src, loser_src, detected_at, status)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'open')",
+            rusqlite::params![id, memory_id, winner, loser, winner_src, loser_src, now],
+        )?;
+        Ok(id)
+    }
+
+    pub fn resolve_conflict(&self, id: &str, action: &str) -> Result<bool> {
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        if action == "restore" {
+            let row: Option<(Option<String>, String)> = {
+                let mut stmt = conn.prepare(
+                    "SELECT memory_id, loser FROM conflicts WHERE id = ?1 AND status = 'open'"
+                )?;
+                stmt.query_row(rusqlite::params![id], |r| Ok((r.get(0)?, r.get(1)?)))
+                    .optional()?
+            };
+            if let Some((Some(memory_id), loser_content)) = row {
+                conn.execute(
+                    "UPDATE memories SET content = ?1, updated_at = ?2 WHERE id = ?3",
+                    rusqlite::params![loser_content, now_secs(), memory_id],
+                )?;
+            }
+        }
+        let new_status = if action == "restore" { "restored" } else { "resolved" };
+        let n = conn.execute(
+            "UPDATE conflicts SET status = ?1 WHERE id = ?2 AND status = 'open'",
+            rusqlite::params![new_status, id],
+        )?;
+        Ok(n > 0)
+    }
+
     /// Conflicts are written by Phase 5 sync; the dashboard already reads them.
-    pub fn list_conflicts(&self) -> Result<Vec<ConflictItem>> {
+    pub fn list_conflicts(&self, status: Option<&str>) -> Result<Vec<ConflictItem>> {
         let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
-        let mut stmt = conn.prepare(
-            "SELECT id, memory_id, winner, loser, winner_src, loser_src, detected_at, status
-             FROM conflicts ORDER BY detected_at DESC, rowid DESC")?;
-        let items = stmt.query_map([], |row| {
+        let map = |row: &rusqlite::Row| -> rusqlite::Result<ConflictItem> {
             Ok(ConflictItem {
                 id: row.get(0)?,
                 memory_id: row.get(1)?,
@@ -442,9 +503,24 @@ impl SqliteStore {
                 loser_src: row.get(5)?,
                 detected_at: row.get(6)?,
                 status: row.get(7)?,
-                title: None,
+                title: row.get(8)?,
             })
-        })?.collect::<rusqlite::Result<Vec<_>>>()?;
+        };
+        let base = "SELECT c.id, c.memory_id, c.winner, c.loser, c.winner_src, c.loser_src,
+                           c.detected_at, c.status, m.title
+                    FROM conflicts c LEFT JOIN memories m ON c.memory_id = m.id";
+        let items = match status {
+            Some(st) => {
+                let sql = format!("{base} WHERE c.status = ?1 ORDER BY c.detected_at DESC, c.rowid DESC");
+                let mut stmt = conn.prepare(&sql)?;
+                stmt.query_map(rusqlite::params![st], map)?.collect::<rusqlite::Result<Vec<_>>>()?
+            }
+            None => {
+                let sql = format!("{base} ORDER BY c.detected_at DESC, c.rowid DESC");
+                let mut stmt = conn.prepare(&sql)?;
+                stmt.query_map([], map)?.collect::<rusqlite::Result<Vec<_>>>()?
+            }
+        };
         Ok(items)
     }
 
@@ -961,6 +1037,79 @@ mod tests {
     #[test]
     fn list_conflicts_is_empty_pre_sync() {
         let s = open_test_store();
-        assert!(s.list_conflicts().unwrap().is_empty());
+        assert!(s.list_conflicts(None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn get_kv_returns_none_when_key_missing() {
+        let s = open_test_store();
+        assert!(s.get_kv("not_set").unwrap().is_none());
+    }
+
+    #[test]
+    fn set_and_get_kv_roundtrip() {
+        let s = open_test_store();
+        s.set_kv("last_synced_at", "1000000000").unwrap();
+        assert_eq!(s.get_kv("last_synced_at").unwrap().as_deref(), Some("1000000000"));
+        // upsert overwrites
+        s.set_kv("last_synced_at", "2000000000").unwrap();
+        assert_eq!(s.get_kv("last_synced_at").unwrap().as_deref(), Some("2000000000"));
+    }
+
+    #[test]
+    fn write_conflict_creates_open_record() {
+        let s = open_test_store();
+        let id = s.write_conflict(None, "remote content", "local content", "remote", "local").unwrap();
+        assert!(id.starts_with("cfl_"));
+        let conflicts = s.list_conflicts(Some("open")).unwrap();
+        assert_eq!(conflicts.len(), 1);
+        assert_eq!(conflicts[0].winner, "remote content");
+        assert_eq!(conflicts[0].loser, "local content");
+        assert_eq!(conflicts[0].status, "open");
+    }
+
+    #[test]
+    fn resolve_conflict_keep_marks_resolved() {
+        let s = open_test_store();
+        let id = s.write_conflict(None, "w", "l", "remote", "local").unwrap();
+        assert!(s.resolve_conflict(&id, "keep").unwrap());
+        let open = s.list_conflicts(Some("open")).unwrap();
+        assert!(open.is_empty());
+        let resolved = s.list_conflicts(Some("resolved")).unwrap();
+        assert_eq!(resolved.len(), 1);
+    }
+
+    #[test]
+    fn resolve_conflict_restore_updates_memory_content() {
+        let s = open_test_store();
+        let mem_id = s.store(crate::model::NewMemory {
+            title: "t".into(), content: "new content".into(),
+            layer: crate::model::Layer::Personal,
+            memory_type: crate::model::MemoryType::Preference,
+            tags: vec![], project: None, source: None,
+        }).unwrap().id;
+        let cfl_id = s.write_conflict(Some(&mem_id), "new content", "old content", "remote", "local").unwrap();
+        assert!(s.resolve_conflict(&cfl_id, "restore").unwrap());
+        let mem = s.recall_by_id(&mem_id).unwrap().unwrap();
+        assert_eq!(mem.content, "old content", "restore should write the loser content back");
+        let restored = s.list_conflicts(Some("restored")).unwrap();
+        assert_eq!(restored.len(), 1);
+    }
+
+    #[test]
+    fn resolve_conflict_returns_false_for_missing_id() {
+        let s = open_test_store();
+        assert!(!s.resolve_conflict("cfl_nonexistent", "keep").unwrap());
+    }
+
+    #[test]
+    fn list_conflicts_filters_by_status() {
+        let s = open_test_store();
+        s.write_conflict(None, "w", "l", "remote", "local").unwrap();
+        let id2 = s.write_conflict(None, "w2", "l2", "remote", "local").unwrap();
+        s.resolve_conflict(&id2, "keep").unwrap();
+        assert_eq!(s.list_conflicts(Some("open")).unwrap().len(), 1);
+        assert_eq!(s.list_conflicts(Some("resolved")).unwrap().len(), 1);
+        assert_eq!(s.list_conflicts(None).unwrap().len(), 2);
     }
 }
