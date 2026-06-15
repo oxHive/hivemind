@@ -100,9 +100,25 @@ struct RawLocalSessionStart {
 }
 
 #[derive(Debug, Default, Deserialize)]
+struct RawServer {
+    host: Option<String>,
+    port: Option<u16>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawDashboard {
+    port: Option<u16>,
+    api_url: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
 struct RawGlobal {
     #[serde(default)]
     defaults: RawDefaults,
+    #[serde(default)]
+    server: RawServer,
+    #[serde(default)]
+    dashboard: RawDashboard,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -201,6 +217,29 @@ pub fn load_config_with_global(project_root: &Path, global_path: &Path) -> Resul
     })
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerSettings {
+    pub host: String,
+    pub port: u16,
+    pub dashboard_port: u16,
+    /// API base URL the dashboard frontend should call.
+    pub api_url: String,
+}
+
+pub fn load_server_settings(global_path: &std::path::Path) -> anyhow::Result<ServerSettings> {
+    let raw: RawGlobal = if global_path.is_file() {
+        toml::from_str(&std::fs::read_to_string(global_path)?)
+            .with_context(|| format!("parsing {}", global_path.display()))?
+    } else {
+        RawGlobal::default()
+    };
+    let host = raw.server.host.unwrap_or_else(|| "127.0.0.1".to_string());
+    let port = raw.server.port.unwrap_or(3456);
+    let dashboard_port = raw.dashboard.port.unwrap_or(3457);
+    let api_url = raw.dashboard.api_url.unwrap_or_else(|| format!("http://{host}:{port}"));
+    Ok(ServerSettings { host, port, dashboard_port, api_url })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -277,5 +316,27 @@ mod tests {
         let cfg = load_config_with_global(tmp.path(), &missing_global).unwrap();
         assert_eq!(cfg.file_open_rule_count, 2);
         assert_eq!(cfg.mention_trigger_count, 1);
+    }
+
+    #[test]
+    fn server_settings_defaults_when_global_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let s = load_server_settings(&tmp.path().join("no-global.toml")).unwrap();
+        assert_eq!(s.host, "127.0.0.1");
+        assert_eq!(s.port, 3456);
+        assert_eq!(s.dashboard_port, 3457);
+        assert_eq!(s.api_url, "http://127.0.0.1:3456");
+    }
+
+    #[test]
+    fn server_settings_reads_overrides() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(tmp.path(), "config.toml",
+            "[server]\nhost=\"0.0.0.0\"\nport=4000\n[dashboard]\nport=4001\napi_url=\"http://pi.local:4000\"\n");
+        let s = load_server_settings(&tmp.path().join("config.toml")).unwrap();
+        assert_eq!(s.host, "0.0.0.0");
+        assert_eq!(s.port, 4000);
+        assert_eq!(s.dashboard_port, 4001);
+        assert_eq!(s.api_url, "http://pi.local:4000");
     }
 }
