@@ -1,7 +1,7 @@
 use std::sync::Mutex;
 use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension};
-use crate::model::{NewMemory, MemoryEntry, Layer, MemoryType, StoreResult};
+use crate::model::{NewMemory, MemoryEntry, Layer, MemoryType, StoreResult, Edge, EdgeCreate};
 
 fn gen_id() -> String {
     format!("mem_{}", uuid::Uuid::new_v4().simple())
@@ -267,6 +267,99 @@ impl SqliteStore {
         Ok(n as usize)
     }
 
+    /// Newest-first listing. `rowid DESC` breaks same-second timestamp ties.
+    pub fn list_memories(&self, layer: Option<Layer>, limit: usize) -> Result<Vec<MemoryEntry>> {
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let base = "SELECT id, layer, type, title, content, source, project, created_at, updated_at
+                    FROM memories";
+        let rows = match &layer {
+            Some(l) => {
+                let mut stmt = conn.prepare(
+                    &format!("{base} WHERE layer = ?1 ORDER BY updated_at DESC, rowid DESC LIMIT ?2"))?;
+                stmt.query_map(rusqlite::params![l.to_string(), limit as i64], Self::row_tuple)?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            }
+            None => {
+                let mut stmt = conn.prepare(
+                    &format!("{base} ORDER BY updated_at DESC, rowid DESC LIMIT ?1"))?;
+                stmt.query_map(rusqlite::params![limit as i64], Self::row_tuple)?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            }
+        };
+        let mut entries = Vec::with_capacity(rows.len());
+        for (rid, layer_s, type_s, title, content, source, project, created_at, updated_at) in rows {
+            entries.push(Self::row_to_entry(
+                &conn, rid, layer_s, type_s, title, content, source, project, created_at, updated_at)?);
+        }
+        Ok(entries)
+    }
+
+    pub fn list_edges(&self, status: Option<&str>) -> Result<Vec<Edge>> {
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let base = "SELECT id, source_id, target_id, relationship, weight, inferred_by, status, reason, created_at, updated_at
+                    FROM edges";
+        let map = |row: &rusqlite::Row| -> rusqlite::Result<Edge> {
+            Ok(Edge {
+                id: row.get(0)?,
+                source_id: row.get(1)?,
+                target_id: row.get(2)?,
+                relationship: row.get(3)?,
+                weight: row.get(4)?,
+                inferred_by: row.get(5)?,
+                status: row.get(6)?,
+                reason: row.get(7)?,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
+            })
+        };
+        let edges = match status {
+            Some(st) => {
+                let mut stmt = conn.prepare(&format!("{base} WHERE status = ?1 ORDER BY created_at DESC, rowid DESC"))?;
+                stmt.query_map(rusqlite::params![st], map)?.collect::<rusqlite::Result<Vec<_>>>()?
+            }
+            None => {
+                let mut stmt = conn.prepare(&format!("{base} ORDER BY created_at DESC, rowid DESC"))?;
+                stmt.query_map([], map)?.collect::<rusqlite::Result<Vec<_>>>()?
+            }
+        };
+        Ok(edges)
+    }
+
+    /// Create a user-confirmed (manual, accepted) edge between two memories.
+    pub fn create_edge(&self, source_id: &str, target_id: &str, relationship: &str) -> Result<EdgeCreate> {
+        let now = now_secs();
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        for id in [source_id, target_id] {
+            let exists: i64 = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM memories WHERE id = ?1)",
+                rusqlite::params![id], |r| r.get(0))?;
+            if exists == 0 {
+                return Ok(EdgeCreate::MissingEndpoint);
+            }
+        }
+        let edge_id = format!("edge_{}", uuid::Uuid::new_v4().simple());
+        let n = conn.execute(
+            "INSERT OR IGNORE INTO edges
+             (id, source_id, target_id, relationship, weight, inferred_by, status, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, 1.0, 'manual', 'accepted', ?5, ?5)",
+            rusqlite::params![edge_id, source_id, target_id, relationship, now],
+        )?;
+        if n == 0 {
+            Ok(EdgeCreate::Duplicate)
+        } else {
+            Ok(EdgeCreate::Created(edge_id))
+        }
+    }
+
+    pub fn set_edge_status(&self, id: &str, status: &str) -> Result<bool> {
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let n = conn.execute(
+            "UPDATE edges SET status = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![status, now_secs(), id],
+        )?;
+        Ok(n > 0)
+    }
+
     pub fn delete(&self, id: &str) -> Result<bool> {
         let mut conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
         let tx = conn.transaction()?;
@@ -279,6 +372,17 @@ impl SqliteStore {
         let n = tx.execute("DELETE FROM memories WHERE id = ?1", rusqlite::params![id])?;
         tx.commit()?;
         Ok(n > 0)
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn row_tuple(row: &rusqlite::Row) -> rusqlite::Result<(
+        String, String, String, String, String,
+        Option<String>, Option<String>, i64, i64,
+    )> {
+        Ok((
+            row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?,
+            row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?,
+        ))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -643,5 +747,101 @@ mod tests {
             source: None,
         }).unwrap();
         assert_eq!(other.auto_connected, 0);
+    }
+
+    #[test]
+    fn list_memories_returns_newest_first_with_tags() {
+        let s = open_test_store();
+        s.store(sample()).unwrap();
+        s.store(NewMemory {
+            title: "second".to_string(),
+            content: "newer entry".to_string(),
+            layer: Layer::Workspace,
+            memory_type: MemoryType::Project,
+            tags: vec!["t".to_string()],
+            project: Some("proj".to_string()),
+            source: None,
+        }).unwrap();
+        let list = s.list_memories(None, 50).unwrap();
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].title, "second", "newest first");
+        assert_eq!(list[1].tags.len(), 2, "tags hydrated");
+    }
+
+    #[test]
+    fn list_memories_filters_by_layer_and_respects_limit() {
+        let s = open_test_store();
+        s.store(sample()).unwrap(); // personal
+        for i in 0..2 {
+            s.store(NewMemory {
+                title: format!("ws {i}"),
+                content: "workspace entry".to_string(),
+                layer: Layer::Workspace,
+                memory_type: MemoryType::Project,
+                tags: vec![],
+                project: Some("p".to_string()),
+                source: None,
+            }).unwrap();
+        }
+        let ws = s.list_memories(Some(Layer::Workspace), 50).unwrap();
+        assert_eq!(ws.len(), 2);
+        assert!(ws.iter().all(|e| e.layer == Layer::Workspace));
+        assert_eq!(s.list_memories(None, 1).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn create_edge_creates_accepted_manual_edge() {
+        let s = open_test_store();
+        let a = s.store(sample()).unwrap().id;
+        let b = s.store(NewMemory {
+            title: "other".to_string(), content: "x".to_string(),
+            layer: Layer::Personal, memory_type: MemoryType::Preference,
+            tags: vec![], project: None, source: None,
+        }).unwrap().id;
+        let created = s.create_edge(&a, &b, "pairs_with").unwrap();
+        let id = match created {
+            crate::model::EdgeCreate::Created(id) => id,
+            other => panic!("expected Created, got {other:?}"),
+        };
+        let edges = s.list_edges(None).unwrap();
+        let e = edges.iter().find(|e| e.id == id).unwrap();
+        assert_eq!(e.relationship, "pairs_with");
+        assert_eq!(e.inferred_by, "manual");
+        assert_eq!(e.status, "accepted");
+    }
+
+    #[test]
+    fn create_edge_detects_duplicate_and_missing_endpoint() {
+        let s = open_test_store();
+        let a = s.store(sample()).unwrap().id;
+        let b = s.store(NewMemory {
+            title: "other".to_string(), content: "x".to_string(),
+            layer: Layer::Personal, memory_type: MemoryType::Preference,
+            tags: vec![], project: None, source: None,
+        }).unwrap().id;
+        s.create_edge(&a, &b, "pairs_with").unwrap();
+        assert_eq!(s.create_edge(&a, &b, "pairs_with").unwrap(), crate::model::EdgeCreate::Duplicate);
+        assert_eq!(s.create_edge(&a, "mem_nope", "pairs_with").unwrap(), crate::model::EdgeCreate::MissingEndpoint);
+    }
+
+    #[test]
+    fn list_edges_filters_by_status_and_set_edge_status_flips() {
+        let s = open_test_store();
+        s.store(sample()).unwrap();
+        // Sharing the "golang" tag auto-creates an accepted edge.
+        s.store(NewMemory {
+            title: "go http".to_string(), content: "chi router".to_string(),
+            layer: Layer::Personal, memory_type: MemoryType::Preference,
+            tags: vec!["golang".to_string()], project: None, source: None,
+        }).unwrap();
+        let accepted = s.list_edges(Some("accepted")).unwrap();
+        assert_eq!(accepted.len(), 1);
+        assert!(s.list_edges(Some("pending")).unwrap().is_empty());
+
+        let id = accepted[0].id.clone();
+        assert!(s.set_edge_status(&id, "rejected").unwrap());
+        assert!(s.list_edges(Some("accepted")).unwrap().is_empty());
+        assert_eq!(s.list_edges(Some("rejected")).unwrap().len(), 1);
+        assert!(!s.set_edge_status("edge_nope", "accepted").unwrap());
     }
 }
