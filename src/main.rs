@@ -1,3 +1,4 @@
+mod api;
 mod budget;
 mod cli;
 mod config;
