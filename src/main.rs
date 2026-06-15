@@ -3,11 +3,13 @@ mod budget;
 mod cli;
 mod config;
 mod db;
+mod http;
 mod model;
 mod server;
 mod session;
 mod store;
 
+use std::sync::Arc;
 use anyhow::Result;
 use clap::Parser;
 use cli::{Cli, Command};
@@ -21,11 +23,12 @@ fn main() -> Result<()> {
         None => run_server(),
         Some(Command::Init) => cli::cmd_init(),
         Some(Command::Status) => cli::cmd_status(),
+        Some(Command::Up { headless }) => run_up(headless),
+        Some(Command::Dashboard { open }) => run_dashboard(open),
     }
 }
 
-#[tokio::main]
-async fn run_server() -> Result<()> {
+fn init_tracing() {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_env_filter(
@@ -33,12 +36,20 @@ async fn run_server() -> Result<()> {
                 .unwrap_or_else(|_| "hivemind=info".into()),
         )
         .init();
+}
 
+fn open_store() -> Result<Arc<SqliteStore>> {
     let db_path = db::resolve_db_path();
     tracing::info!("opening database at {db_path}");
-
     let conn = db::open(&db_path)?;
-    let service = HiveMind::new(SqliteStore::new(conn));
+    Ok(Arc::new(SqliteStore::new(conn)))
+}
+
+#[tokio::main]
+async fn run_server() -> Result<()> {
+    init_tracing();
+    let store = open_store()?;
+    let service = HiveMind::with_store(store);
 
     tracing::info!("HiveMind MCP server starting on stdio");
     let server = service
@@ -46,4 +57,19 @@ async fn run_server() -> Result<()> {
         .await?;
     server.waiting().await?;
     Ok(())
+}
+
+#[tokio::main]
+async fn run_up(headless: bool) -> Result<()> {
+    init_tracing();
+    let settings = config::load_server_settings(&config::global_config_path())?;
+    let store = open_store()?;
+    http::run_up(store, &settings, headless).await
+}
+
+#[tokio::main]
+async fn run_dashboard(open: bool) -> Result<()> {
+    init_tracing();
+    let settings = config::load_server_settings(&config::global_config_path())?;
+    http::run_dashboard(&settings, open).await
 }

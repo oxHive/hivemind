@@ -15,6 +15,18 @@ pub enum Command {
     Init,
     /// Show config and preview what session start will inject
     Status,
+    /// Start the HTTP server: MCP at /mcp, REST at /api/v1, plus the dashboard
+    Up {
+        /// Serve only MCP + REST API — no dashboard
+        #[arg(long)]
+        headless: bool,
+    },
+    /// Serve the dashboard only, attached to an already-running server
+    Dashboard {
+        /// Open the dashboard in a browser
+        #[arg(long)]
+        open: bool,
+    },
 }
 
 pub fn cmd_init() -> Result<()> {
