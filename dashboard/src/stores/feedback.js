@@ -2,6 +2,14 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import * as api from '../api/feedback.js'
 
+function mapConflict(c) {
+  return {
+    ...c,
+    incoming: c.winner,
+    current: c.loser,
+  }
+}
+
 export const useFeedbackStore = defineStore('feedback', () => {
   const conflicts = ref([])
   const feedbackItems = ref([])
@@ -10,14 +18,23 @@ export const useFeedbackStore = defineStore('feedback', () => {
 
   async function fetchConflicts() {
     loading.value = true
-    try { conflicts.value = await api.listConflicts() }
-    catch { conflicts.value = [] }
-    finally { loading.value = false }
+    try {
+      const data = await api.listConflicts()
+      conflicts.value = (data.conflicts ?? []).map(mapConflict)
+    } catch {
+      conflicts.value = []
+    } finally {
+      loading.value = false
+    }
   }
 
   async function fetchFeedback() {
-    try { feedbackItems.value = await api.listFeedback() }
-    catch { feedbackItems.value = [] }
+    try {
+      const data = await api.listFeedback()
+      feedbackItems.value = data.items ?? []
+    } catch {
+      feedbackItems.value = []
+    }
   }
 
   async function resolveConflict(id, action) {

@@ -33,6 +33,26 @@ const statusText = computed(() => {
 })
 
 const memoryCount = computed(() => ui.serverInfo?.memory_count ?? ui.serverInfo?.memoryCount ?? '—')
+
+const syncInfo = computed(() => ui.syncInfo)
+
+const syncStatusText = computed(() => {
+  if (!syncInfo.value?.enabled) return null
+  const last = syncInfo.value?.last_synced_at
+  if (!last) return 'not yet synced'
+  const diffSec = Math.floor(Date.now() / 1000) - last
+  if (diffSec < 60) return 'synced · just now'
+  const diffMin = Math.floor(diffSec / 60)
+  return `synced · ${diffMin}m ago`
+})
+
+const syncDot = computed(() => {
+  if (!syncInfo.value?.enabled) return null
+  const last = syncInfo.value?.last_synced_at
+  if (!last) return 'gray'
+  const diffSec = Math.floor(Date.now() / 1000) - last
+  return diffSec > 600 ? 'amber' : 'green'
+})
 </script>
 
 <template>
@@ -74,19 +94,13 @@ const memoryCount = computed(() => ui.serverInfo?.memory_count ?? ui.serverInfo?
     <div class="mt-auto px-4 pb-4 pt-3" style="border-top:0.5px solid var(--hm-border-subtle)">
       <StatusRow :dot="statusDot" :text="statusText" />
       <StatusRow dot="gray" :text="`${memoryCount} memories`" class="mt-1" />
-      <template v-if="ui.syncInfo">
-        <StatusRow
-          v-if="!ui.syncInfo.enabled"
-          dot="amber" text="sync disabled" class="mt-1" />
-        <StatusRow
-          v-else-if="ui.serverStatus === 'sync_failed'"
-          dot="red" text="sync failed" class="mt-1" />
-        <StatusRow
-          v-else
-          dot="green"
-          :text="`synced · ${ui.syncInfo.lastSynced || 'never'}`"
-          class="mt-1" />
-      </template>
+      <StatusRow v-if="syncStatusText" :dot="syncDot" :text="syncStatusText" class="mt-1" />
+      <StatusRow
+        v-if="(syncInfo?.conflict_count ?? 0) > 0"
+        dot="amber"
+        :text="`${syncInfo.conflict_count} conflict${syncInfo.conflict_count > 1 ? 's' : ''} need review`"
+        class="mt-1"
+      />
     </div>
   </nav>
 </template>
