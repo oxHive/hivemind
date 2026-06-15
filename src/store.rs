@@ -1,7 +1,7 @@
 use std::sync::Mutex;
 use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension};
-use crate::model::{NewMemory, MemoryEntry, Layer, MemoryType, StoreResult, Edge, EdgeCreate};
+use crate::model::{NewMemory, MemoryEntry, Layer, MemoryType, StoreResult, Edge, EdgeCreate, FeedbackItem, ConflictItem};
 
 fn gen_id() -> String {
     format!("mem_{}", uuid::Uuid::new_v4().simple())
@@ -358,6 +358,93 @@ impl SqliteStore {
             rusqlite::params![status, now_secs(), id],
         )?;
         Ok(n > 0)
+    }
+
+    /// Returns Ok(None) when a referenced memory/edge does not exist.
+    pub fn create_feedback(
+        &self,
+        memory_id: Option<&str>,
+        edge_id: Option<&str>,
+        kind: &str,
+        note: Option<&str>,
+    ) -> Result<Option<String>> {
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        if let Some(mid) = memory_id {
+            let exists: i64 = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM memories WHERE id = ?1)",
+                rusqlite::params![mid], |r| r.get(0))?;
+            if exists == 0 { return Ok(None); }
+        }
+        if let Some(eid) = edge_id {
+            let exists: i64 = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM edges WHERE id = ?1)",
+                rusqlite::params![eid], |r| r.get(0))?;
+            if exists == 0 { return Ok(None); }
+        }
+        let id = format!("fb_{}", uuid::Uuid::new_v4().simple());
+        conn.execute(
+            "INSERT INTO feedback (id, memory_id, edge_id, type, note, status, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, 'open', ?6)",
+            rusqlite::params![id, memory_id, edge_id, kind, note, now_secs()],
+        )?;
+        Ok(Some(id))
+    }
+
+    pub fn list_feedback(&self, status: Option<&str>) -> Result<Vec<FeedbackItem>> {
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let base = "SELECT id, memory_id, edge_id, type, note, status, created_at FROM feedback";
+        let map = |row: &rusqlite::Row| -> rusqlite::Result<FeedbackItem> {
+            Ok(FeedbackItem {
+                id: row.get(0)?,
+                memory_id: row.get(1)?,
+                edge_id: row.get(2)?,
+                kind: row.get(3)?,
+                note: row.get(4)?,
+                status: row.get(5)?,
+                created_at: row.get(6)?,
+            })
+        };
+        let items = match status {
+            Some(st) => {
+                let mut stmt = conn.prepare(&format!("{base} WHERE status = ?1 ORDER BY created_at DESC, rowid DESC"))?;
+                stmt.query_map(rusqlite::params![st], map)?.collect::<rusqlite::Result<Vec<_>>>()?
+            }
+            None => {
+                let mut stmt = conn.prepare(&format!("{base} ORDER BY created_at DESC, rowid DESC"))?;
+                stmt.query_map([], map)?.collect::<rusqlite::Result<Vec<_>>>()?
+            }
+        };
+        Ok(items)
+    }
+
+    pub fn set_feedback_status(&self, id: &str, status: &str) -> Result<bool> {
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let n = conn.execute(
+            "UPDATE feedback SET status = ?1 WHERE id = ?2",
+            rusqlite::params![status, id],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Conflicts are written by Phase 5 sync; the dashboard already reads them.
+    pub fn list_conflicts(&self) -> Result<Vec<ConflictItem>> {
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let mut stmt = conn.prepare(
+            "SELECT id, memory_id, winner, loser, winner_src, loser_src, detected_at, status
+             FROM conflicts ORDER BY detected_at DESC, rowid DESC")?;
+        let items = stmt.query_map([], |row| {
+            Ok(ConflictItem {
+                id: row.get(0)?,
+                memory_id: row.get(1)?,
+                winner: row.get(2)?,
+                loser: row.get(3)?,
+                winner_src: row.get(4)?,
+                loser_src: row.get(5)?,
+                detected_at: row.get(6)?,
+                status: row.get(7)?,
+            })
+        })?.collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(items)
     }
 
     pub fn delete(&self, id: &str) -> Result<bool> {
@@ -843,5 +930,36 @@ mod tests {
         assert!(s.list_edges(Some("accepted")).unwrap().is_empty());
         assert_eq!(s.list_edges(Some("rejected")).unwrap().len(), 1);
         assert!(!s.set_edge_status("edge_nope", "accepted").unwrap());
+    }
+
+    #[test]
+    fn feedback_roundtrip_and_status_filter() {
+        let s = open_test_store();
+        let mem = s.store(sample()).unwrap().id;
+        let id = s.create_feedback(Some(&mem), None, "outdated", Some("pgx is now v6"))
+            .unwrap().expect("memory exists");
+        assert!(id.starts_with("fb_"), "id was {id}");
+
+        let open = s.list_feedback(Some("open")).unwrap();
+        assert_eq!(open.len(), 1);
+        assert_eq!(open[0].kind, "outdated");
+        assert_eq!(open[0].memory_id.as_deref(), Some(mem.as_str()));
+
+        assert!(s.set_feedback_status(&id, "resolved").unwrap());
+        assert!(s.list_feedback(Some("open")).unwrap().is_empty());
+        assert_eq!(s.list_feedback(None).unwrap().len(), 1);
+        assert!(!s.set_feedback_status("fb_nope", "resolved").unwrap());
+    }
+
+    #[test]
+    fn create_feedback_rejects_missing_memory() {
+        let s = open_test_store();
+        assert!(s.create_feedback(Some("mem_nope"), None, "incorrect", None).unwrap().is_none());
+    }
+
+    #[test]
+    fn list_conflicts_is_empty_pre_sync() {
+        let s = open_test_store();
+        assert!(s.list_conflicts().unwrap().is_empty());
     }
 }
