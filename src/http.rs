@@ -12,20 +12,25 @@ use rmcp::transport::streamable_http_server::{
     StreamableHttpService,
     session::local::LocalSessionManager,
 };
-use crate::{api, config::ServerSettings, server::HiveMind, store::SqliteStore};
+use crate::{api, config::{ServerSettings, SyncSettings}, server::HiveMind, store::SqliteStore};
 
 static DASHBOARD: Dir = include_dir!("$CARGO_MANIFEST_DIR/dashboard/dist");
 
-pub fn app_router(store: Arc<SqliteStore>) -> Router {
+pub fn app_router(
+    store: Arc<SqliteStore>,
+    sync: SyncSettings,
+    trigger: Arc<tokio::sync::Notify>,
+) -> Router {
     let mcp = StreamableHttpService::new(
         {
             let store = store.clone();
+            let _trigger = trigger.clone();
             move || Ok(HiveMind::with_store(store.clone()))
         },
         Arc::new(LocalSessionManager::default()),
         Default::default(),
     );
-    api::router(store).nest_service("/mcp", mcp)
+    api::router(store, sync).nest_service("/mcp", mcp)
 }
 
 pub fn dashboard_router(api_url: &str) -> Router {
@@ -72,7 +77,8 @@ pub fn dashboard_router(api_url: &str) -> Router {
 }
 
 pub async fn run_up(store: Arc<SqliteStore>, settings: &ServerSettings, headless: bool) -> Result<()> {
-    let app = app_router(store);
+    let trigger = Arc::new(tokio::sync::Notify::new());
+    let app = app_router(store.clone(), settings.sync.clone(), trigger);
     let listener = tokio::net::TcpListener::bind((settings.host.as_str(), settings.port)).await?;
     tracing::info!("MCP endpoint:  http://{}:{}/mcp", settings.host, settings.port);
     tracing::info!("REST API:      http://{}:{}/api/v1", settings.host, settings.port);
@@ -108,6 +114,7 @@ pub async fn run_dashboard(settings: &ServerSettings, open: bool) -> Result<()> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use http_body_util::BodyExt;
@@ -123,7 +130,11 @@ mod tests {
 
     #[tokio::test]
     async fn app_router_serves_rest_api() {
-        let app = app_router(test_store());
+        let app = app_router(
+            test_store(),
+            crate::config::SyncSettings::default(),
+            Arc::new(tokio::sync::Notify::new()),
+        );
         let resp = app
             .oneshot(Request::builder().uri("/api/v1/status").body(Body::empty()).unwrap())
             .await.unwrap();
