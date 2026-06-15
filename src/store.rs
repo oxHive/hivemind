@@ -446,6 +446,7 @@ impl SqliteStore {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn write_conflict(
         &self,
         memory_id: Option<&str>,
