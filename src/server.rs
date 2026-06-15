@@ -87,6 +87,10 @@ impl HiveMind {
         Self { store: Arc::new(store) }
     }
 
+    pub fn with_store(store: Arc<SqliteStore>) -> Self {
+        Self { store }
+    }
+
     pub async fn do_memory_store(&self, p: MemoryStoreInput) -> Result<CallToolResult, ErrorData> {
         let layer = p.layer.parse::<Layer>()
             .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
