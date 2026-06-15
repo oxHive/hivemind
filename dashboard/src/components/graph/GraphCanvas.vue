@@ -145,16 +145,36 @@ function handleClick(e) {
   graph.selectedNodeId = null
 }
 
+function ptSegDist(px, py, ax, ay, bx, by) {
+  const dx = bx - ax, dy = by - ay
+  if (dx === 0 && dy === 0) return Math.hypot(px - ax, py - ay)
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)))
+  return Math.hypot(px - ax - t * dx, py - ay - t * dy)
+}
+
 function handleMouseMove(e) {
   const { offsetX: mx, offsetY: my } = e
-  let found = null
+  let foundNode = null
   for (const node of nodes) {
     const r = nodeRadius(node)
     const dx = mx - node.x, dy = my - node.y
-    if (dx * dx + dy * dy <= (r + 4) * (r + 4)) { found = node; break }
+    if (dx * dx + dy * dy <= (r + 4) * (r + 4)) { foundNode = node; break }
   }
-  emit('node-hover', found)
-  canvasEl.value.style.cursor = found
+  emit('node-hover', foundNode)
+
+  let foundEdge = null
+  if (!foundNode) {
+    for (const link of links) {
+      if (link.status !== 'pending') continue
+      const sx = link.source?.x, sy = link.source?.y
+      const tx = link.target?.x, ty = link.target?.y
+      if (sx == null || tx == null) continue
+      if (ptSegDist(mx, my, sx, sy, tx, ty) <= 8) { foundEdge = link; break }
+    }
+  }
+  emit('edge-hover', foundEdge)
+
+  canvasEl.value.style.cursor = foundNode
     ? (graph.connectMode ? 'crosshair' : 'pointer')
     : graph.connectMode ? 'crosshair' : 'default'
 }
