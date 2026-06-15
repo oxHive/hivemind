@@ -35,6 +35,27 @@ pub fn create_schema(conn: &Connection) -> Result<()> {
             UNIQUE(source_id, target_id, relationship)
         );
 
+        CREATE TABLE IF NOT EXISTS feedback (
+            id         TEXT PRIMARY KEY,
+            memory_id  TEXT REFERENCES memories(id),
+            edge_id    TEXT REFERENCES edges(id),
+            type       TEXT NOT NULL,
+            note       TEXT,
+            status     TEXT DEFAULT 'open',
+            created_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS conflicts (
+            id          TEXT PRIMARY KEY,
+            memory_id   TEXT REFERENCES memories(id),
+            winner      TEXT NOT NULL,
+            loser       TEXT NOT NULL,
+            winner_src  TEXT NOT NULL,
+            loser_src   TEXT NOT NULL,
+            detected_at INTEGER NOT NULL,
+            status      TEXT DEFAULT 'open'
+        );
+
         CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
             title, content, content='memories', content_rowid='rowid'
         );
@@ -173,5 +194,17 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM memories_fts WHERE memories_fts MATCH 'clippy'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(hits, 0, "FTS delete trigger did not remove the row");
+    }
+
+    #[test]
+    fn create_schema_creates_feedback_and_conflicts() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_schema(&conn).unwrap();
+        let mut stmt = conn
+            .prepare("SELECT name FROM sqlite_master WHERE name IN ('feedback','conflicts') ORDER BY name")
+            .unwrap();
+        let names: Vec<String> = stmt
+            .query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect();
+        assert_eq!(names, vec!["conflicts".to_string(), "feedback".to_string()]);
     }
 }
