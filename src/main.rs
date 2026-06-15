@@ -8,6 +8,7 @@ mod model;
 mod server;
 mod session;
 mod store;
+mod sync;
 
 use std::sync::Arc;
 use anyhow::Result;
