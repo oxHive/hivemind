@@ -7,6 +7,10 @@ edition = "2024"
 name = "hivemind"
 path = "src/main.rs"
 
+[lib]
+name = "oxhivemind"
+path = "src/lib.rs"
+
 [dependencies]
 rmcp = { version = "1", features = ["server", "macros", "transport-streamable-http-server"] }
 axum = "0.8"
