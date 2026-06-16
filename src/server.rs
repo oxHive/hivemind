@@ -387,6 +387,59 @@ impl HiveMind {
         Ok(vec![PromptMessage::new_text(PromptMessageRole::User, body)])
     }
 
+    async fn do_suggest_connections_prompt(&self) -> Result<Vec<PromptMessage>, ErrorData> {
+        let memories = self.store.list_memories(None, 100)
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+        let edges = self.store.list_edges(None)
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+
+        if memories.is_empty() {
+            return Ok(vec![PromptMessage::new_text(
+                PromptMessageRole::User,
+                "No memories stored yet. Add some memories first with memory_store.".to_string()
+            )]);
+        }
+
+        let mem_lines: Vec<String> = memories.iter().map(|m| {
+            let tags = if m.tags.is_empty() { String::new() } else { format!(" [{}]", m.tags.join(", ")) };
+            let snippet: String = m.content.chars().take(80).collect();
+            let ellipsis = if m.content.len() > 80 { "…" } else { "" };
+            format!("{} | {} | {}{} | {}{}", m.id, m.layer, m.title, tags, snippet, ellipsis)
+        }).collect();
+
+        let edge_lines: Vec<String> = edges.iter().map(|e| {
+            format!("{} --[{}]--> {} ({})", e.source_id, e.relationship, e.target_id, e.status)
+        }).collect();
+
+        let edge_section = if edge_lines.is_empty() {
+            "  (none yet)".to_string()
+        } else {
+            edge_lines.join("\n")
+        };
+
+        let body = format!(
+            "HiveMind — Suggest Connections\n\
+             ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\
+             You have {} memories and {} existing connections.\n\n\
+             MEMORIES:\n\
+             {}\n\n\
+             EXISTING CONNECTIONS:\n\
+             {}\n\n\
+             ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\
+             Analyze the memories above and identify meaningful connections not yet captured.\n\
+             For each suggested connection, call memory_store_edge with:\n\
+               - source_id: the source memory ID\n\
+               - target_id: the target memory ID\n\
+               - relationship: one of: shares_tag | applies_to | pairs_with | used_in | related_to | custom\n\
+             New edges are created with status='pending' and will appear in the dashboard for review.\n\
+             Suggest 3–7 connections. Skip obvious ones (same tag already linked). Focus on cross-domain insights.",
+            memories.len(), edges.len(),
+            mem_lines.join("\n"),
+            edge_section,
+        );
+        Ok(vec![PromptMessage::new_text(PromptMessageRole::User, body)])
+    }
+
     pub async fn do_session_start(&self, p: SessionStartInput) -> Result<CallToolResult, ErrorData> {
         // Validate the path: must exist and be a directory. canonicalize resolves
         // `..`/symlinks so traversal can't escape into a non-directory.
@@ -518,6 +571,12 @@ impl HiveMind {
     #[prompt(name = "memory-merge", description = "Fetch a sync conflict by ID and present winner vs loser side by side. Review both versions, then call memory_update with a merged result. Finally, resolve the conflict via the dashboard or API.")]
     async fn memory_merge_prompt(&self, Parameters(p): Parameters<ConflictIdInput>) -> Result<Vec<PromptMessage>, ErrorData> {
         self.do_memory_merge_prompt(p).await
+    }
+
+    /// Analyze the memory graph and suggest new connections between related memories
+    #[prompt(name = "suggest-connections", description = "Fetch all memories and existing connections, then analyze them to suggest new edges. For each suggestion, call memory_store_edge to create a pending connection that appears in the dashboard for review.")]
+    async fn suggest_connections_prompt(&self) -> Result<Vec<PromptMessage>, ErrorData> {
+        self.do_suggest_connections_prompt().await
     }
 }
 
@@ -863,6 +922,29 @@ mod tests {
         let hm = test_hivemind();
         let result = hm.do_memory_merge_prompt(ConflictIdInput { id: "cfl_nonexistent".to_string() }).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn suggest_connections_prompt_lists_memories_and_edges() {
+        let hm = test_hivemind();
+        hm.do_memory_store(MemoryStoreInput {
+            title: "golang preferences".to_string(),
+            content: "use uber/zap and chi router".to_string(),
+            layer: "personal".to_string(),
+            tags: vec!["golang".to_string()],
+            project: None,
+        }).await.unwrap();
+        hm.do_memory_store(MemoryStoreInput {
+            title: "observability stack".to_string(),
+            content: "prometheus, grafana, loki".to_string(),
+            layer: "personal".to_string(),
+            tags: vec!["observability".to_string()],
+            project: None,
+        }).await.unwrap();
+        let result = hm.do_suggest_connections_prompt().await.unwrap();
+        let text = prompt_text(&result[0]);
+        assert!(text.contains("golang preferences"), "should include memory titles");
+        assert!(text.contains("memory_store_edge"), "should instruct Claude to call memory_store_edge");
     }
 
     #[tokio::test]
