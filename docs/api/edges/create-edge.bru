@@ -1,0 +1,24 @@
+meta {
+  name: Create Edge
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{base_url}}/api/v1/edges
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "source_id": "mem_abc123",
+    "target_id": "mem_def456",
+    "relationship": "pairs_with"
+  }
+}
+
+docs {
+  relationship must be one of:
+  shares_tag | applies_to | pairs_with | used_in | related_to | custom
+}

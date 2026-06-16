@@ -1,0 +1,16 @@
+meta {
+  name: Sync Status
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/api/sync/status
+  body: none
+  auth: none
+}
+
+docs {
+  Returns server_time (unix epoch) and memory_count.
+  Used by sync clients to verify connectivity before pushing/pulling.
+}

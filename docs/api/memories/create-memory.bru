@@ -1,0 +1,20 @@
+meta {
+  name: Create Memory
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{base_url}}/api/v1/memories
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "title": "golang preferences",
+    "content": "use uber/zap for logging, sqlc for queries, pgx v5 for postgres",
+    "layer": "personal",
+    "tags": ["golang", "tooling"]
+  }
+}

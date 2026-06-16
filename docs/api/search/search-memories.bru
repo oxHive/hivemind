@@ -1,0 +1,16 @@
+meta {
+  name: Search Memories
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/api/v1/search
+  body: none
+  auth: none
+}
+
+params:query {
+  q: golang
+  ~limit: 10
+}

@@ -1,0 +1,21 @@
+meta {
+  name: Sync Pull
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{base_url}}/api/sync/pull
+  body: none
+  auth: none
+}
+
+params:query {
+  since: 0
+}
+
+docs {
+  Pulls memory records updated after the given unix timestamp.
+  Pass since=0 to pull all records.
+  Returns records array and server_time for use as next since value.
+}

@@ -1,0 +1,21 @@
+meta {
+  name: Patch Edge Status
+  type: http
+  seq: 3
+}
+
+patch {
+  url: {{base_url}}/api/v1/edges/edge_abc123
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "status": "accepted"
+  }
+}
+
+docs {
+  status must be one of: accepted | pending | rejected
+}

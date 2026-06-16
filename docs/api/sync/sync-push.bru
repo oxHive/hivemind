@@ -1,0 +1,36 @@
+meta {
+  name: Sync Push
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{base_url}}/api/sync/push
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "client_id": "my-laptop",
+    "records": [
+      {
+        "id": "mem_abc123",
+        "layer": "personal",
+        "memory_type": "preference",
+        "title": "golang preferences",
+        "content": "use uber/zap and pgx v5",
+        "source": "claude_code",
+        "project": null,
+        "tags": ["golang"],
+        "created_at": 1718000000,
+        "updated_at": 1718000000
+      }
+    ]
+  }
+}
+
+docs {
+  Pushes local memory records to the remote server.
+  Returns accepted count and any conflicts (where remote had a newer version).
+}
