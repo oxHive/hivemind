@@ -73,6 +73,57 @@ impl SyncClient {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use crate::{config::SyncSettings, db, store::SqliteStore};
+
+    fn test_store() -> Arc<SqliteStore> {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        db::create_schema(&conn).unwrap();
+        Arc::new(SqliteStore::new(conn))
+    }
+
+    #[test]
+    fn sync_client_new_trims_trailing_slash() {
+        let settings = SyncSettings {
+            enabled: true,
+            remote_url: "http://pi.local:3456/".to_string(),
+            api_key: "secret".to_string(),
+            interval_seconds: 60,
+            sync_on_store: true,
+            sync_on_startup: false,
+        };
+        let client = SyncClient::new(&settings, test_store());
+        assert_eq!(client.remote_url, "http://pi.local:3456");
+        assert_eq!(client.api_key, "secret");
+    }
+
+    #[test]
+    fn sync_client_new_with_no_trailing_slash() {
+        let settings = SyncSettings {
+            enabled: true,
+            remote_url: "http://pi.local:3456".to_string(),
+            api_key: "tok".to_string(),
+            interval_seconds: 300,
+            sync_on_store: false,
+            sync_on_startup: true,
+        };
+        let client = SyncClient::new(&settings, test_store());
+        assert_eq!(client.remote_url, "http://pi.local:3456");
+    }
+
+    #[test]
+    fn sync_report_fields_are_accessible() {
+        let r = SyncReport { pushed: 3, pulled: 1, conflicts: 0 };
+        assert_eq!(r.pushed, 3);
+        assert_eq!(r.pulled, 1);
+        assert_eq!(r.conflicts, 0);
+    }
+}
+
 pub async fn run_sync_loop(
     client: Arc<SyncClient>,
     interval_secs: u64,

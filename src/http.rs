@@ -156,6 +156,18 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dashboard_router_spa_fallback_returns_html_for_unknown_path() {
+        let dash = dashboard_router("http://127.0.0.1:3456");
+        let resp = dash
+            .oneshot(Request::builder().uri("/some/unknown/route").body(Body::empty()).unwrap())
+            .await.unwrap();
+        // SPA fallback: unknown paths serve index.html (200 with html content-type)
+        assert_eq!(resp.status(), StatusCode::OK);
+        let ct = resp.headers()["content-type"].to_str().unwrap();
+        assert!(ct.contains("text/html"), "SPA fallback should serve HTML, got: {ct}");
+    }
+
+    #[tokio::test]
     async fn dashboard_router_serves_html_and_config_js() {
         let dash = dashboard_router("http://127.0.0.1:3456");
         let resp = dash.clone()

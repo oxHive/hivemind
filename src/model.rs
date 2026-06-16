@@ -176,4 +176,25 @@ mod tests {
         assert_eq!("project".parse::<MemoryType>().unwrap().to_string(), "project");
         assert_eq!("history".parse::<MemoryType>().unwrap().to_string(), "history");
     }
+
+    #[test]
+    fn memory_type_rejects_invalid_value() {
+        assert!("unknown".parse::<MemoryType>().is_err());
+    }
+
+    #[test]
+    fn layer_equality() {
+        assert_eq!(Layer::Personal, Layer::Personal);
+        assert_eq!(Layer::Workspace, Layer::Workspace);
+        assert_ne!(Layer::Personal, Layer::Workspace);
+    }
+
+    #[test]
+    fn edge_create_variants_are_distinct() {
+        let created = EdgeCreate::Created("edge_abc".to_string());
+        assert_ne!(created, EdgeCreate::Duplicate);
+        assert_ne!(created, EdgeCreate::MissingEndpoint);
+        assert_ne!(EdgeCreate::Duplicate, EdgeCreate::MissingEndpoint);
+        assert_eq!(EdgeCreate::Created("x".to_string()), EdgeCreate::Created("x".to_string()));
+    }
 }

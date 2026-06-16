@@ -305,6 +305,95 @@ mod tests {
     use std::fs;
 
     #[test]
+    fn write_atomic_creates_file_with_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("out.txt");
+        write_atomic(&path, "hello world").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "hello world");
+    }
+
+    #[test]
+    fn write_atomic_overwrites_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("out.txt");
+        write_atomic(&path, "first").unwrap();
+        write_atomic(&path, "second").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "second");
+    }
+
+    #[test]
+    fn write_if_absent_creates_when_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("new.txt");
+        let (p, status) = write_if_absent(&path, "content").unwrap();
+        assert_eq!(status, "created");
+        assert_eq!(p, path);
+        assert_eq!(fs::read_to_string(&path).unwrap(), "content");
+    }
+
+    #[test]
+    fn write_if_absent_skips_when_present() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("existing.txt");
+        fs::write(&path, "original").unwrap();
+        let (_, status) = write_if_absent(&path, "new content").unwrap();
+        assert_eq!(status, "exists");
+        assert_eq!(fs::read_to_string(&path).unwrap(), "original", "must not overwrite");
+    }
+
+    #[test]
+    fn ensure_line_appends_to_empty_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".gitignore");
+        let (_, status) = ensure_line(&path, "*.log").unwrap();
+        assert_eq!(status, "created");
+        assert!(fs::read_to_string(&path).unwrap().contains("*.log"));
+    }
+
+    #[test]
+    fn ensure_line_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".gitignore");
+        fs::write(&path, "*.log\n").unwrap();
+        let (_, status) = ensure_line(&path, "*.log").unwrap();
+        assert_eq!(status, "exists");
+        assert_eq!(fs::read_to_string(&path).unwrap().matches("*.log").count(), 1);
+    }
+
+    #[test]
+    fn ensure_line_appends_to_existing_file_without_trailing_newline() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".gitignore");
+        fs::write(&path, "node_modules").unwrap();
+        ensure_line(&path, "*.log").unwrap();
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(content.contains("node_modules"));
+        assert!(content.contains("*.log"));
+    }
+
+    #[test]
+    fn append_block_if_absent_appends_when_marker_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("CLAUDE.md");
+        fs::write(&path, "# My rules\n").unwrap();
+        let (_, status) = append_block_if_absent(&path, "# HiveMind", "# HiveMind\nsome block\n").unwrap();
+        assert_eq!(status, "created");
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(content.contains("My rules"));
+        assert!(content.contains("# HiveMind"));
+    }
+
+    #[test]
+    fn append_block_if_absent_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("CLAUDE.md");
+        fs::write(&path, "# HiveMind\nexisting block\n").unwrap();
+        let (_, status) = append_block_if_absent(&path, "# HiveMind", "# HiveMind\nnew block\n").unwrap();
+        assert_eq!(status, "exists");
+        assert_eq!(fs::read_to_string(&path).unwrap().matches("# HiveMind").count(), 1);
+    }
+
+    #[test]
     fn scaffold_creates_all_files() {
         let proj = tempfile::tempdir().unwrap();
         let home = tempfile::tempdir().unwrap();
