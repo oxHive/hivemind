@@ -1,19 +1,8 @@
-mod api;
-mod budget;
-mod cli;
-mod config;
-mod db;
-mod http;
-mod model;
-mod server;
-mod session;
-mod store;
-mod sync;
-
 use std::sync::Arc;
 use anyhow::Result;
 use clap::Parser;
-use cli::{Cli, Command};
+use oxhivemind::cli::{self, Cli, Command};
+use oxhivemind::{config, db, http, server, store};
 use rmcp::ServiceExt;
 use server::HiveMind;
 use store::SqliteStore;
