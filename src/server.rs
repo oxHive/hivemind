@@ -1,8 +1,13 @@
 use std::sync::Arc;
 use rmcp::{
     handler::server::wrapper::Parameters,
-    model::{CallToolResult, ErrorData},
-    schemars, tool, tool_handler, tool_router,
+    model::{
+        CallToolResult, ErrorData, GetPromptRequestParams, GetPromptResult,
+        ListPromptsResult, PaginatedRequestParams, PromptMessage, PromptMessageRole,
+    },
+    service::RequestContext,
+    RoleServer,
+    schemars, tool, tool_handler, tool_router, prompt, prompt_handler, prompt_router,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -196,6 +201,26 @@ impl HiveMind {
         })))
     }
 
+    async fn do_memory_list_prompt(&self) -> Result<Vec<PromptMessage>, ErrorData> {
+        let memories = self.store.list_memories(None, 50)
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+        let count = memories.len();
+        let body = if memories.is_empty() {
+            "No memories stored yet. Use memory_store to add some.".to_string()
+        } else {
+            let lines: Vec<String> = memories.iter().map(|m| {
+                let tags = if m.tags.is_empty() {
+                    String::new()
+                } else {
+                    format!(" [{}]", m.tags.join(", "))
+                };
+                format!("• {} — {}{} ({})", m.id, m.title, tags, m.layer)
+            }).collect();
+            format!("HiveMind Memory List ({count} memories):\n\n{}", lines.join("\n"))
+        };
+        Ok(vec![PromptMessage::new_text(PromptMessageRole::User, body)])
+    }
+
     pub async fn do_session_start(&self, p: SessionStartInput) -> Result<CallToolResult, ErrorData> {
         // Validate the path: must exist and be a directory. canonicalize resolves
         // `..`/symlinks so traversal can't escape into a non-directory.
@@ -291,11 +316,21 @@ impl HiveMind {
     }
 }
 
+#[prompt_router]
+impl HiveMind {
+    /// List all memories with titles, tags, and dates
+    #[prompt(name = "memory-list", description = "List all stored memories with titles, tags, and timestamps. Use to browse what HiveMind knows before searching or editing.")]
+    async fn memory_list_prompt(&self) -> Result<Vec<PromptMessage>, ErrorData> {
+        self.do_memory_list_prompt().await
+    }
+}
+
 #[tool_handler]
+#[prompt_handler]
 impl rmcp::ServerHandler for HiveMind {
     fn get_info(&self) -> rmcp::model::ServerInfo {
         rmcp::model::ServerInfo::new(
-            rmcp::model::ServerCapabilities::builder().enable_tools().build(),
+            rmcp::model::ServerCapabilities::builder().enable_tools().enable_prompts().build(),
         )
         .with_server_info(rmcp::model::Implementation::new("hivemind", env!("CARGO_PKG_VERSION")))
     }
@@ -319,6 +354,20 @@ mod tests {
         let info = test_hivemind().get_info();
         assert_eq!(info.server_info.name, "hivemind");
         assert!(info.capabilities.tools.is_some(), "tools capability must be advertised");
+    }
+
+    #[test]
+    fn get_info_advertises_prompts_capability() {
+        use rmcp::ServerHandler;
+        let info = test_hivemind().get_info();
+        assert!(info.capabilities.prompts.is_some(), "prompts capability must be advertised");
+    }
+
+    #[test]
+    fn list_prompts_returns_memory_list() {
+        let prompts = HiveMind::prompt_router().list_all();
+        let names: Vec<&str> = prompts.iter().map(|p| p.name.as_str()).collect();
+        assert!(names.contains(&"memory-list"), "memory-list prompt must be listed");
     }
 
     #[tokio::test]
