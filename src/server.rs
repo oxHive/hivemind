@@ -440,6 +440,52 @@ impl HiveMind {
         Ok(vec![PromptMessage::new_text(PromptMessageRole::User, body)])
     }
 
+    async fn do_review_feedback_prompt(&self) -> Result<Vec<PromptMessage>, ErrorData> {
+        let items = self.store.list_feedback(Some("open"))
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+
+        if items.is_empty() {
+            return Ok(vec![PromptMessage::new_text(
+                PromptMessageRole::User,
+                "No open feedback items. All flagged memories have been reviewed.\n\
+                 Tip: Use /memory-flag <id> to flag a memory that needs attention.".to_string()
+            )]);
+        }
+
+        let mut lines = vec![
+            format!("Open Feedback Items ({} total)", items.len()),
+            "\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}".to_string(),
+        ];
+
+        for (i, item) in items.iter().enumerate() {
+            let target = match (&item.memory_id, &item.edge_id) {
+                (Some(mid), _) => {
+                    if let Ok(Some(mem)) = self.store.recall_by_id(mid) {
+                        format!("Memory: {} \u{2014} \"{}\"", mid, mem.title)
+                    } else {
+                        format!("Memory: {mid}")
+                    }
+                }
+                (_, Some(eid)) => format!("Edge: {eid}"),
+                _ => "(no target)".to_string(),
+            };
+            let note = item.note.as_deref().unwrap_or("(no note)");
+            lines.push(format!(
+                "\n{}. [{}] {} | {}\n   Note: {}",
+                i + 1, item.kind, target, item.id, note
+            ));
+        }
+
+        lines.push("\n\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}".to_string());
+        lines.push("For each item, choose an action:".to_string());
+        lines.push("  \u{2022} Dismiss (no action needed) \u{2014} POST /api/v1/feedback/{id} {\"status\":\"dismissed\"}".to_string());
+        lines.push("  \u{2022} Fix the memory \u{2014} call memory_update with the memory ID".to_string());
+        lines.push("  \u{2022} Delete if truly wrong \u{2014} call memory_delete with confirm:true".to_string());
+        lines.push("\nAsk the user how to handle each item before taking action.".to_string());
+
+        Ok(vec![PromptMessage::new_text(PromptMessageRole::User, lines.join("\n"))])
+    }
+
     pub async fn do_session_start(&self, p: SessionStartInput) -> Result<CallToolResult, ErrorData> {
         // Validate the path: must exist and be a directory. canonicalize resolves
         // `..`/symlinks so traversal can't escape into a non-directory.
@@ -577,6 +623,12 @@ impl HiveMind {
     #[prompt(name = "suggest-connections", description = "Fetch all memories and existing connections, then analyze them to suggest new edges. For each suggestion, call memory_store_edge to create a pending connection that appears in the dashboard for review.")]
     async fn suggest_connections_prompt(&self) -> Result<Vec<PromptMessage>, ErrorData> {
         self.do_suggest_connections_prompt().await
+    }
+
+    /// Surface all open feedback items for interactive review and resolution
+    #[prompt(name = "review-feedback", description = "Fetch open feedback items (flagged memories, disputed edges) and present them for interactive resolution. For each item, you can dismiss, resolve, or take corrective action by calling memory_update or memory_delete.")]
+    async fn review_feedback_prompt(&self) -> Result<Vec<PromptMessage>, ErrorData> {
+        self.do_review_feedback_prompt().await
     }
 }
 
@@ -945,6 +997,29 @@ mod tests {
         let text = prompt_text(&result[0]);
         assert!(text.contains("golang preferences"), "should include memory titles");
         assert!(text.contains("memory_store_edge"), "should instruct Claude to call memory_store_edge");
+    }
+
+    #[tokio::test]
+    async fn review_feedback_prompt_shows_open_items() {
+        let hm = test_hivemind();
+        let stored = hm.do_memory_store(MemoryStoreInput {
+            title: "old pref".to_string(), content: "stale content".to_string(),
+            layer: "personal".to_string(), tags: vec![], project: None,
+        }).await.unwrap();
+        let mem_id = stored.structured_content.unwrap()["id"].as_str().unwrap().to_string();
+        hm.store.create_feedback(Some(&mem_id), None, "outdated", Some("This is outdated")).unwrap();
+
+        let result = hm.do_review_feedback_prompt().await.unwrap();
+        let text = prompt_text(&result[0]);
+        assert!(text.contains("outdated") || text.contains("old pref"), "should show feedback items");
+    }
+
+    #[tokio::test]
+    async fn review_feedback_prompt_empty_when_no_open_items() {
+        let hm = test_hivemind();
+        let result = hm.do_review_feedback_prompt().await.unwrap();
+        let text = prompt_text(&result[0]);
+        assert!(text.to_lowercase().contains("no open"), "should indicate no items");
     }
 
     #[tokio::test]
