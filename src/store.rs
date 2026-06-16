@@ -525,6 +525,29 @@ impl SqliteStore {
         Ok(items)
     }
 
+    pub fn get_conflict_by_id(&self, id: &str) -> Result<Option<ConflictItem>> {
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let mut stmt = conn.prepare(
+            "SELECT c.id, c.memory_id, c.winner, c.loser, c.winner_src, c.loser_src,
+                    c.detected_at, c.status, m.title
+             FROM conflicts c LEFT JOIN memories m ON c.memory_id = m.id
+             WHERE c.id = ?1"
+        )?;
+        stmt.query_row(rusqlite::params![id], |row| {
+            Ok(ConflictItem {
+                id: row.get(0)?,
+                memory_id: row.get(1)?,
+                winner: row.get(2)?,
+                loser: row.get(3)?,
+                winner_src: row.get(4)?,
+                loser_src: row.get(5)?,
+                detected_at: row.get(6)?,
+                status: row.get(7)?,
+                title: row.get(8)?,
+            })
+        }).optional().map_err(Into::into)
+    }
+
     pub fn memories_since(&self, since_ts: i64) -> Result<Vec<MemoryEntry>> {
         let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         let mut stmt = conn.prepare(
@@ -1289,6 +1312,23 @@ mod tests {
 
         let recalled = s.recall_by_id(&local_id).unwrap().unwrap();
         assert_eq!(recalled.content, "Local content", "local content should be unchanged");
+    }
+
+    #[test]
+    fn get_conflict_by_id_returns_none_for_missing() {
+        let s = open_test_store();
+        assert!(s.get_conflict_by_id("cfl_nonexistent").unwrap().is_none());
+    }
+
+    #[test]
+    fn get_conflict_by_id_returns_the_conflict() {
+        let s = open_test_store();
+        let id = s.write_conflict(None, "winner content", "loser content", "remote", "local").unwrap();
+        let c = s.get_conflict_by_id(&id).unwrap().unwrap();
+        assert_eq!(c.id, id);
+        assert_eq!(c.winner, "winner content");
+        assert_eq!(c.loser, "loser content");
+        assert_eq!(c.status, "open");
     }
 
     #[test]

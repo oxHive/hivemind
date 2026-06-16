@@ -103,6 +103,12 @@ pub struct MemoryFlagInput {
 fn default_flag_reason() -> String { "other".to_string() }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ConflictIdInput {
+    /// Conflict ID to merge (cfl_xxx)
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct SessionStartInput {
     /// Absolute path to the project root where .hivemind.toml lives.
     pub project_path: String,
@@ -337,6 +343,50 @@ impl HiveMind {
         Ok(vec![PromptMessage::new_text(PromptMessageRole::User, body)])
     }
 
+    async fn do_memory_merge_prompt(&self, p: ConflictIdInput) -> Result<Vec<PromptMessage>, ErrorData> {
+        let conflict = self.store.get_conflict_by_id(&p.id)
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
+            .ok_or_else(|| ErrorData::invalid_params(
+                format!("Conflict {} not found", p.id), None
+            ))?;
+        if conflict.status != "open" {
+            return Err(ErrorData::invalid_params(
+                format!("Conflict {} is already {} — nothing to merge", p.id, conflict.status), None
+            ));
+        }
+        let title_line = conflict.title
+            .as_deref()
+            .map(|t| format!("Memory: {t}\n"))
+            .unwrap_or_default();
+        let mem_line = conflict.memory_id.as_deref()
+            .map(|mid| format!("Memory ID: {mid}\n"))
+            .unwrap_or_default();
+        let body = format!(
+            "Sync Conflict — {id}\n\
+             {title_line}{mem_line}\
+             ━━━━━━━━━━━━━━ WINNER ({winner_src}) ━━━━━━━━━━━━━━\n\
+             {winner}\n\n\
+             ━━━━━━━━━━━━━━ LOSER ({loser_src}) ━━━━━━━━━━━━━━\n\
+             {loser}\n\
+             ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n\
+             The winner was applied automatically (newer timestamp). The loser was preserved here.\n\n\
+             Options:\n\
+             1. Keep winner — conflict stays resolved, no action needed\n\
+             2. Restore loser — call: POST /api/v1/conflicts/{id}/resolve with {{\"action\":\"restore\"}}\n\
+             3. Merge — review both, craft a merged version, call memory_update with the memory ID\n\
+                then resolve the conflict via the dashboard or API\n\n\
+             If merging: call memory_update({mem_id}, {{ \"content\": \"<merged content>\" }}) then\n\
+             POST /api/v1/conflicts/{id}/resolve with {{\"action\":\"keep\"}}",
+            id = p.id,
+            winner_src = conflict.winner_src,
+            winner = conflict.winner,
+            loser_src = conflict.loser_src,
+            loser = conflict.loser,
+            mem_id = conflict.memory_id.as_deref().unwrap_or("(no linked memory)"),
+        );
+        Ok(vec![PromptMessage::new_text(PromptMessageRole::User, body)])
+    }
+
     pub async fn do_session_start(&self, p: SessionStartInput) -> Result<CallToolResult, ErrorData> {
         // Validate the path: must exist and be a directory. canonicalize resolves
         // `..`/symlinks so traversal can't escape into a non-directory.
@@ -462,6 +512,12 @@ impl HiveMind {
     #[prompt(name = "memory-flag", description = "Flag a memory for review. Creates a feedback record with the specified reason. Use when you notice a memory contains wrong or stale information.")]
     async fn memory_flag_prompt(&self, Parameters(p): Parameters<MemoryFlagInput>) -> Result<Vec<PromptMessage>, ErrorData> {
         self.do_memory_flag_prompt(p).await
+    }
+
+    /// Present a sync conflict side-by-side for intelligent merging
+    #[prompt(name = "memory-merge", description = "Fetch a sync conflict by ID and present winner vs loser side by side. Review both versions, then call memory_update with a merged result. Finally, resolve the conflict via the dashboard or API.")]
+    async fn memory_merge_prompt(&self, Parameters(p): Parameters<ConflictIdInput>) -> Result<Vec<PromptMessage>, ErrorData> {
+        self.do_memory_merge_prompt(p).await
     }
 }
 
@@ -787,6 +843,26 @@ mod tests {
 
         let feedback = hm.store.list_feedback(Some("open")).unwrap();
         assert_eq!(feedback.len(), 1, "feedback record should be created");
+    }
+
+    #[tokio::test]
+    async fn memory_merge_prompt_shows_winner_and_loser() {
+        let hm = test_hivemind();
+        let cfl_id = hm.store.write_conflict(
+            None, "Remote wins: new content", "Local old content", "remote", "local"
+        ).unwrap();
+        let result = hm.do_memory_merge_prompt(ConflictIdInput { id: cfl_id.clone() }).await.unwrap();
+        let text = prompt_text(&result[0]);
+        assert!(text.contains("Remote wins: new content"), "should show winner content");
+        assert!(text.contains("Local old content"), "should show loser content");
+        assert!(text.contains("remote"), "should show winner source");
+    }
+
+    #[tokio::test]
+    async fn memory_merge_prompt_errors_for_missing_conflict() {
+        let hm = test_hivemind();
+        let result = hm.do_memory_merge_prompt(ConflictIdInput { id: "cfl_nonexistent".to_string() }).await;
+        assert!(result.is_err());
     }
 
     #[tokio::test]
