@@ -83,6 +83,26 @@ pub struct MemorySearchPromptInput {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct MemoryIdInput {
+    /// Memory ID to target (e.g. mem_abc123)
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct MemoryFlagInput {
+    /// Memory ID to flag
+    pub id: String,
+    /// Reason for flagging: "incorrect", "outdated", "duplicate", "other"
+    #[serde(default = "default_flag_reason")]
+    pub reason: String,
+    /// Optional note explaining the issue
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+fn default_flag_reason() -> String { "other".to_string() }
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct SessionStartInput {
     /// Absolute path to the project root where .hivemind.toml lives.
     pub project_path: String,
@@ -275,6 +295,48 @@ impl HiveMind {
         Ok(vec![PromptMessage::new_text(PromptMessageRole::User, body)])
     }
 
+    async fn do_memory_edit_prompt(&self, p: MemoryIdInput) -> Result<Vec<PromptMessage>, ErrorData> {
+        let mem = self.store.recall_by_id(&p.id)
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
+            .ok_or_else(|| ErrorData::invalid_params(
+                format!("Memory {} not found", p.id), None
+            ))?;
+        let tags = mem.tags.join(", ");
+        let body = format!(
+            "Memory to edit:\n\
+             ━━━━━━━━━━━━━━\n\
+             ID:      {}\n\
+             Title:   {}\n\
+             Layer:   {}\n\
+             Tags:    {}\n\
+             Content:\n{}\n\
+             ━━━━━━━━━━━━━━\n\n\
+             Ask the user what changes they want to make, then call memory_update with ID {} to save.\n\
+             You can update title, content, and/or tags. Omit fields you are not changing.",
+            mem.id, mem.title, mem.layer, tags, mem.content, mem.id
+        );
+        Ok(vec![PromptMessage::new_text(PromptMessageRole::User, body)])
+    }
+
+    async fn do_memory_flag_prompt(&self, p: MemoryFlagInput) -> Result<Vec<PromptMessage>, ErrorData> {
+        let mem = self.store.recall_by_id(&p.id)
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
+            .ok_or_else(|| ErrorData::invalid_params(
+                format!("Memory {} not found", p.id), None
+            ))?;
+        self.store.create_feedback(Some(&p.id), None, &p.reason, p.note.as_deref())
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+        let body = format!(
+            "Flagged memory \"{}\" ({}) as \"{}\".\n\
+             A feedback record has been created and will appear in the dashboard under Feedback.\n\
+             The memory has not been deleted — it remains available until a human reviews the flag.\n\
+             {}",
+            mem.title, mem.id, p.reason,
+            p.note.as_ref().map(|n| format!("Note: {n}")).unwrap_or_default()
+        );
+        Ok(vec![PromptMessage::new_text(PromptMessageRole::User, body)])
+    }
+
     pub async fn do_session_start(&self, p: SessionStartInput) -> Result<CallToolResult, ErrorData> {
         // Validate the path: must exist and be a directory. canonicalize resolves
         // `..`/symlinks so traversal can't escape into a non-directory.
@@ -388,6 +450,18 @@ impl HiveMind {
     #[prompt(name = "memory-search", description = "Search HiveMind memories by keyword. Returns matching memories with content snippets. Follow up with memory_recall for full content.")]
     async fn memory_search_prompt(&self, Parameters(p): Parameters<MemorySearchPromptInput>) -> Result<Vec<PromptMessage>, ErrorData> {
         self.do_memory_search_prompt(p).await
+    }
+
+    /// Fetch a memory and return a prompt for editing its content, title, or tags
+    #[prompt(name = "memory-edit", description = "Fetch a specific memory by ID and present its current content for editing. After reviewing, call memory_update to save changes.")]
+    async fn memory_edit_prompt(&self, Parameters(p): Parameters<MemoryIdInput>) -> Result<Vec<PromptMessage>, ErrorData> {
+        self.do_memory_edit_prompt(p).await
+    }
+
+    /// Flag a memory as incorrect, outdated, or duplicate
+    #[prompt(name = "memory-flag", description = "Flag a memory for review. Creates a feedback record with the specified reason. Use when you notice a memory contains wrong or stale information.")]
+    async fn memory_flag_prompt(&self, Parameters(p): Parameters<MemoryFlagInput>) -> Result<Vec<PromptMessage>, ErrorData> {
+        self.do_memory_flag_prompt(p).await
     }
 }
 
@@ -666,6 +740,53 @@ mod tests {
         }).await.unwrap();
         let text = prompt_text(&result[0]);
         assert!(text.contains("uber") || text.contains("golang"));
+    }
+
+    #[tokio::test]
+    async fn memory_edit_prompt_returns_formatted_content() {
+        let hm = test_hivemind();
+        let stored = hm.do_memory_store(MemoryStoreInput {
+            title: "rust style".to_string(),
+            content: "use clippy and rustfmt".to_string(),
+            layer: "personal".to_string(),
+            tags: vec!["rust".to_string()],
+            project: None,
+        }).await.unwrap();
+        let id = stored.structured_content.unwrap()["id"].as_str().unwrap().to_string();
+
+        let result = hm.do_memory_edit_prompt(MemoryIdInput { id: id.clone() }).await.unwrap();
+        let text = prompt_text(&result[0]);
+        assert!(text.contains("rust style"), "should include memory title");
+        assert!(text.contains("clippy"), "should include memory content");
+        assert!(text.contains(&id), "should include the ID");
+    }
+
+    #[tokio::test]
+    async fn memory_edit_prompt_returns_error_for_missing_id() {
+        let hm = test_hivemind();
+        let result = hm.do_memory_edit_prompt(MemoryIdInput { id: "mem_nonexistent".to_string() }).await;
+        assert!(result.is_err(), "should error when memory not found");
+    }
+
+    #[tokio::test]
+    async fn memory_flag_prompt_creates_feedback_record() {
+        let hm = test_hivemind();
+        let stored = hm.do_memory_store(MemoryStoreInput {
+            title: "test".to_string(), content: "c".to_string(),
+            layer: "personal".to_string(), tags: vec![], project: None,
+        }).await.unwrap();
+        let id = stored.structured_content.unwrap()["id"].as_str().unwrap().to_string();
+
+        let result = hm.do_memory_flag_prompt(MemoryFlagInput {
+            id: id.clone(),
+            reason: "outdated".to_string(),
+            note: None,
+        }).await.unwrap();
+        let text = prompt_text(&result[0]);
+        assert!(text.to_lowercase().contains("flagged"), "should confirm the flag");
+
+        let feedback = hm.store.list_feedback(Some("open")).unwrap();
+        assert_eq!(feedback.len(), 1, "feedback record should be created");
     }
 
     #[tokio::test]
