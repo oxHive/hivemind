@@ -1022,6 +1022,22 @@ mod tests {
         assert!(text.to_lowercase().contains("no open"), "should indicate no items");
     }
 
+    #[test]
+    fn all_eight_prompts_are_registered() {
+        let _hm = test_hivemind();
+        let prompts = HiveMind::prompt_router().list_all();
+        let names: Vec<&str> = prompts.iter().map(|p| p.name.as_str()).collect();
+        let expected = [
+            "memory-list", "memory-status", "memory-search",
+            "memory-edit", "memory-flag",
+            "memory-merge", "suggest-connections", "review-feedback",
+        ];
+        for name in &expected {
+            assert!(names.contains(name), "prompt {name} must be registered; got: {names:?}");
+        }
+        assert_eq!(prompts.len(), 8, "exactly 8 prompts expected");
+    }
+
     #[tokio::test]
     async fn memory_delete_requires_confirm() {
         let hm = test_hivemind();
