@@ -407,4 +407,50 @@ mod tests {
         assert_eq!(s.sync.interval_seconds, 60);
         assert!(!s.sync.sync_on_store);
     }
+
+    #[test]
+    fn load_config_errors_when_no_hivemind_toml_found() {
+        let tmp = tempfile::tempdir().unwrap();
+        let err = load_config(tmp.path());
+        assert!(err.is_err(), "should error when no .hivemind.toml exists");
+    }
+
+    #[test]
+    fn load_config_succeeds_with_project_toml_present() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(tmp.path(), ".hivemind.toml", "[project]\nname=\"myproject\"\n");
+        let cfg = load_config(tmp.path()).unwrap();
+        assert_eq!(cfg.project_name, "myproject");
+    }
+
+    #[test]
+    fn global_config_dir_uses_xdg_when_set() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Safety: tests run with RUST_TEST_THREADS=1 or we accept the data race risk;
+        // this is a test-only convenience and env mutation is unavoidable here.
+        unsafe {
+            std::env::set_var("XDG_CONFIG_HOME", tmp.path());
+        }
+        let dir = global_config_dir();
+        unsafe {
+            std::env::remove_var("XDG_CONFIG_HOME");
+        }
+        assert_eq!(dir, tmp.path().join("hivemind"));
+    }
+
+    #[test]
+    fn global_config_path_ends_with_config_toml() {
+        let path = global_config_path();
+        assert_eq!(path.file_name().unwrap(), "config.toml");
+    }
+
+    #[test]
+    fn project_name_falls_back_to_directory_name_when_empty() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(tmp.path(), ".hivemind.toml", "[project]\n");
+        let missing_global = tmp.path().join("no-global.toml");
+        let cfg = load_config_with_global(tmp.path(), &missing_global).unwrap();
+        let dir_name = tmp.path().file_name().unwrap().to_string_lossy();
+        assert_eq!(cfg.project_name, dir_name.as_ref());
+    }
 }

@@ -130,6 +130,35 @@ mod tests {
     }
 
     #[test]
+    fn skip_reason_as_str_values() {
+        assert_eq!(SkipReason::NotFound.as_str(), "not_found");
+        assert_eq!(SkipReason::BudgetExceeded.as_str(), "budget_exceeded");
+    }
+
+    #[test]
+    fn session_result_remaining_and_truncated() {
+        let result = SessionStartResult {
+            project: "p".to_string(),
+            loaded: vec![],
+            skipped: vec![],
+            used_tokens: 300,
+            max_tokens: 2000,
+        };
+        assert_eq!(result.remaining(), 1700);
+        assert!(!result.truncated());
+
+        let result_with_skip = SessionStartResult {
+            project: "p".to_string(),
+            loaded: vec![],
+            skipped: vec![SkippedEntry { query: "q".to_string(), reason: SkipReason::NotFound }],
+            used_tokens: 2001,
+            max_tokens: 2000,
+        };
+        assert_eq!(result_with_skip.remaining(), 0, "saturating_sub prevents underflow");
+        assert!(result_with_skip.truncated());
+    }
+
+    #[test]
     fn loads_all_recalls_within_budget() {
         let s = store_with(&[("pref a", "short content a"), ("pref b", "short content b")]);
         let r = execute_session_start(&config(2000, vec!["pref a", "pref b"]), &s).unwrap();
