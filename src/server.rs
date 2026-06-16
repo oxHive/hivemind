@@ -77,6 +77,12 @@ pub struct MemoryDeleteInput {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct MemorySearchPromptInput {
+    /// Keywords to search for in memory titles and content
+    pub query: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct SessionStartInput {
     /// Absolute path to the project root where .hivemind.toml lives.
     pub project_path: String,
@@ -221,6 +227,54 @@ impl HiveMind {
         Ok(vec![PromptMessage::new_text(PromptMessageRole::User, body)])
     }
 
+    async fn do_memory_status_prompt(&self) -> Result<Vec<PromptMessage>, ErrorData> {
+        let count = self.store.count()
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+        let recent = self.store.list_memories(None, 5)
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+        let open_conflicts = self.store.list_conflicts(Some("open"))
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?.len();
+        let open_feedback = self.store.list_feedback(Some("open"))
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?.len();
+
+        let recent_lines: Vec<String> = recent.iter().map(|m| {
+            format!("  \u{2022} {} \u{2014} {} [{}]", m.id, m.title, m.layer)
+        }).collect();
+
+        let mut parts = vec![
+            "HiveMind Status".to_string(),
+            "\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}".to_string(),
+            format!("Total memories: {count}"),
+        ];
+        if !recent_lines.is_empty() {
+            parts.push("\nRecent memories:".to_string());
+            parts.extend(recent_lines);
+        }
+        if open_conflicts > 0 {
+            parts.push(format!("\n\u{26a0}  {open_conflicts} sync conflict(s) need review \u{2014} check the dashboard or use /memory-merge"));
+        }
+        if open_feedback > 0 {
+            parts.push(format!("\u{26a0}  {open_feedback} open feedback item(s) \u{2014} use /review-feedback"));
+        }
+        parts.push("\nTip: Use /memory-list to browse all memories, or /memory-search <query> to find specific ones.".to_string());
+
+        Ok(vec![PromptMessage::new_text(PromptMessageRole::User, parts.join("\n"))])
+    }
+
+    async fn do_memory_search_prompt(&self, p: MemorySearchPromptInput) -> Result<Vec<PromptMessage>, ErrorData> {
+        let hits = self.store.search(&p.query, 10)
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+        let body = if hits.is_empty() {
+            format!("No memories found matching \"{}\".\n\nTip: Try broader keywords or use /memory-list to browse all memories.", p.query)
+        } else {
+            let lines: Vec<String> = hits.iter().map(|h| {
+                format!("\u{2022} {} \u{2014} {}\n  {}", h.id, h.title, h.snippet)
+            }).collect();
+            format!("Search results for \"{}\" ({} found):\n\n{}\n\nUse memory_recall with an ID for full content.", p.query, hits.len(), lines.join("\n\n"))
+        };
+        Ok(vec![PromptMessage::new_text(PromptMessageRole::User, body)])
+    }
+
     pub async fn do_session_start(&self, p: SessionStartInput) -> Result<CallToolResult, ErrorData> {
         // Validate the path: must exist and be a directory. canonicalize resolves
         // `..`/symlinks so traversal can't escape into a non-directory.
@@ -322,6 +376,18 @@ impl HiveMind {
     #[prompt(name = "memory-list", description = "List all stored memories with titles, tags, and timestamps. Use to browse what HiveMind knows before searching or editing.")]
     async fn memory_list_prompt(&self) -> Result<Vec<PromptMessage>, ErrorData> {
         self.do_memory_list_prompt().await
+    }
+
+    /// Show the current memory count, recent activity, and session context
+    #[prompt(name = "memory-status", description = "Show total memory count, recent memories, and sync status. Use at the start of a session to understand what context is available.")]
+    async fn memory_status_prompt(&self) -> Result<Vec<PromptMessage>, ErrorData> {
+        self.do_memory_status_prompt().await
+    }
+
+    /// Search memories by keyword and present results
+    #[prompt(name = "memory-search", description = "Search HiveMind memories by keyword. Returns matching memories with content snippets. Follow up with memory_recall for full content.")]
+    async fn memory_search_prompt(&self, Parameters(p): Parameters<MemorySearchPromptInput>) -> Result<Vec<PromptMessage>, ErrorData> {
+        self.do_memory_search_prompt(p).await
     }
 }
 
@@ -556,6 +622,50 @@ mod tests {
             project_path: tmp.path().to_string_lossy().into_owned(),
         }).await;
         assert!(err.is_err());
+    }
+
+    fn prompt_text(msg: &PromptMessage) -> &str {
+        match &msg.content {
+            rmcp::model::PromptMessageContent::Text { text } => text.as_str(),
+            _ => panic!("expected text content"),
+        }
+    }
+
+    #[tokio::test]
+    async fn memory_list_prompt_returns_no_memories_message() {
+        let hm = test_hivemind();
+        let result = hm.do_memory_list_prompt().await.unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(prompt_text(&result[0]).contains("No memories"));
+    }
+
+    #[tokio::test]
+    async fn memory_status_prompt_includes_count() {
+        let hm = test_hivemind();
+        hm.do_memory_store(MemoryStoreInput {
+            title: "test".to_string(), content: "c".to_string(),
+            layer: "personal".to_string(), tags: vec![], project: None,
+        }).await.unwrap();
+        let result = hm.do_memory_status_prompt().await.unwrap();
+        let text = prompt_text(&result[0]);
+        assert!(text.contains("1"), "status should show count of 1");
+    }
+
+    #[tokio::test]
+    async fn memory_search_prompt_returns_results() {
+        let hm = test_hivemind();
+        hm.do_memory_store(MemoryStoreInput {
+            title: "golang preferences".to_string(),
+            content: "use uber/zap and chi router".to_string(),
+            layer: "personal".to_string(),
+            tags: vec!["golang".to_string()],
+            project: None,
+        }).await.unwrap();
+        let result = hm.do_memory_search_prompt(MemorySearchPromptInput {
+            query: "uber".to_string(),
+        }).await.unwrap();
+        let text = prompt_text(&result[0]);
+        assert!(text.contains("uber") || text.contains("golang"));
     }
 
     #[tokio::test]
