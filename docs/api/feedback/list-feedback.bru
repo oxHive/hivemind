@@ -1,0 +1,19 @@
+meta {
+  name: List Feedback
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/api/v1/feedback
+  body: none
+  auth: none
+}
+
+params:query {
+  ~status: open
+}
+
+docs {
+  status filter: open | resolved | dismissed
+}

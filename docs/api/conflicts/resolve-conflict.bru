@@ -1,0 +1,23 @@
+meta {
+  name: Resolve Conflict
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{base_url}}/api/v1/conflicts/cfl_abc123/resolve
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "action": "keep"
+  }
+}
+
+docs {
+  action must be one of:
+    keep    — accept the winner (remote), discard loser
+    restore — revert to the loser (local), overwrite with it
+}

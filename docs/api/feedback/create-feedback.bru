@@ -1,0 +1,26 @@
+meta {
+  name: Create Feedback
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{base_url}}/api/v1/feedback
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "memory_id": "mem_abc123",
+    "type": "outdated",
+    "note": "This preference has changed — we now use slog instead of zap"
+  }
+}
+
+docs {
+  type must be one of:
+  incorrect | outdated | duplicate | wrong_connection | missing_connection | other
+
+  Provide memory_id or edge_id (not both required, at least one required).
+}

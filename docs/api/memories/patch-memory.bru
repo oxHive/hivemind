@@ -1,0 +1,18 @@
+meta {
+  name: Patch Memory
+  type: http
+  seq: 4
+}
+
+patch {
+  url: {{base_url}}/api/v1/memories/mem_abc123
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "content": "updated content — use uber/zap v2 and sqlc v2",
+    "tags": ["golang", "tooling", "updated"]
+  }
+}

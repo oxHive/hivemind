@@ -1,0 +1,21 @@
+meta {
+  name: Patch Feedback Status
+  type: http
+  seq: 3
+}
+
+patch {
+  url: {{base_url}}/api/v1/feedback/fb_abc123
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "status": "resolved"
+  }
+}
+
+docs {
+  status must be one of: open | resolved | dismissed
+}

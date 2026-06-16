@@ -1,0 +1,15 @@
+meta {
+  name: List Edges
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/api/v1/edges
+  body: none
+  auth: none
+}
+
+params:query {
+  ~status: pending
+}
