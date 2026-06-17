@@ -3,7 +3,11 @@ use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
-#[command(name = "hivemind", version, about = "HiveMind — persistent memory for AI coding agents")]
+#[command(
+    name = "hivemind",
+    version,
+    about = "HiveMind — persistent memory for AI coding agents"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -55,7 +59,9 @@ pub fn cmd_init() -> Result<()> {
 }
 
 fn home_dir() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."))
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 /// Create project + global config files and CLAUDE.md integration.
@@ -75,14 +81,8 @@ pub fn scaffold(
             &project_root.join(".hivemind.toml"),
             &project_toml(&project_name),
         )?,
-        write_if_absent(
-            &project_root.join(".hivemind.local.toml"),
-            LOCAL_TOML,
-        )?,
-        ensure_line(
-            &project_root.join(".gitignore"),
-            ".hivemind.local.toml",
-        )?,
+        write_if_absent(&project_root.join(".hivemind.local.toml"), LOCAL_TOML)?,
+        ensure_line(&project_root.join(".gitignore"), ".hivemind.local.toml")?,
         write_if_absent(
             &project_root.join("CLAUDE.md"),
             &project_claude_md(&project_name),
@@ -92,10 +92,7 @@ pub fn scaffold(
             GLOBAL_CLAUDE_MARKER,
             GLOBAL_CLAUDE_BLOCK,
         )?,
-        write_if_absent(
-            &config_dir.join("config.toml"),
-            GLOBAL_CONFIG,
-        )?,
+        write_if_absent(&config_dir.join("config.toml"), GLOBAL_CONFIG)?,
     ];
 
     Ok(report)
@@ -106,7 +103,10 @@ pub fn scaffold(
 /// customized ~/.claude/CLAUDE.md) from truncation if the process is interrupted
 /// mid-write. (tempfile is dev-only, so the temp file is created manually.)
 fn write_atomic(path: &Path, contents: &str) -> Result<()> {
-    let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
     std::fs::create_dir_all(parent)?;
     let file_name = path.file_name().and_then(|s| s.to_str()).unwrap_or("file");
     let tmp = parent.join(format!(".{file_name}.hivemind-tmp"));
@@ -242,9 +242,7 @@ Wait for explicit confirmation before calling memory_store.
 pub fn cmd_mcp_install(client: &str) -> Result<()> {
     match client {
         "claude" => install_claude(),
-        other => anyhow::bail!(
-            "unknown client \"{other}\" — supported clients: claude"
-        ),
+        other => anyhow::bail!("unknown client \"{other}\" — supported clients: claude"),
     }
 }
 
@@ -275,8 +273,11 @@ fn install_claude() -> Result<()> {
     // Register.
     let status = std::process::Command::new("claude")
         .args([
-            "mcp", "add", "hivemind",
-            "--transport", "http",
+            "mcp",
+            "add",
+            "hivemind",
+            "--transport",
+            "http",
             "http://127.0.0.1:3456/mcp",
         ])
         .status()?;
@@ -324,7 +325,10 @@ pub fn render_status(
         Some(r) => Some(crate::config::load_config_with_global(r, global_path)?),
         None => None,
     };
-    let project_label = config.as_ref().map(|c| c.project_name.as_str()).unwrap_or("—");
+    let project_label = config
+        .as_ref()
+        .map(|c| c.project_name.as_str())
+        .unwrap_or("—");
 
     writeln!(out, "HiveMind v{version} — {project_label}")?;
     writeln!(out, "─────────────────────────────────────────────────────")?;
@@ -335,14 +339,25 @@ pub fn render_status(
 
     let (Some(root), Some(config)) = (root, config) else {
         writeln!(out, "No .hivemind.toml found in this directory tree.")?;
-        writeln!(out, "Run `hivemind init` to set up memory hooks for this project.")?;
+        writeln!(
+            out,
+            "Run `hivemind init` to set up memory hooks for this project."
+        )?;
         return Ok(out);
     };
 
     let result = crate::session::execute_session_start(&config, store)?;
 
     writeln!(out, "Project:    {}", config.project_name)?;
-    writeln!(out, "Config:     .hivemind.toml{}", if root.join(".hivemind.local.toml").is_file() { " + .hivemind.local.toml" } else { "" })?;
+    writeln!(
+        out,
+        "Config:     .hivemind.toml{}",
+        if root.join(".hivemind.local.toml").is_file() {
+            " + .hivemind.local.toml"
+        } else {
+            ""
+        }
+    )?;
     writeln!(out)?;
     writeln!(out, "On session start will inject:")?;
     if result.loaded.is_empty() {
@@ -350,20 +365,48 @@ pub fn render_status(
     }
     for entry in &result.loaded {
         let layer = format!("[{}]", entry.entry.layer);
-        let local = if matches!(entry.source, crate::config::RecallSource::Local) { "  (local)" } else { "" };
-        writeln!(out, "  {:<11} {:<40} ~{} tokens{}", layer, entry.entry.title, entry.tokens, local)?;
+        let local = if matches!(entry.source, crate::config::RecallSource::Local) {
+            "  (local)"
+        } else {
+            ""
+        };
+        writeln!(
+            out,
+            "  {:<11} {:<40} ~{} tokens{}",
+            layer, entry.entry.title, entry.tokens, local
+        )?;
     }
     for skip in &result.skipped {
-        writeln!(out, "  [skipped]   {:<40} ({})", skip.query, skip.reason.as_str())?;
+        writeln!(
+            out,
+            "  [skipped]   {:<40} ({})",
+            skip.query,
+            skip.reason.as_str()
+        )?;
     }
-    writeln!(out, "  ──────────────────────────────────────────────────────────")?;
+    writeln!(
+        out,
+        "  ──────────────────────────────────────────────────────────"
+    )?;
     writeln!(out, "  Total:      ~{} tokens", result.used_tokens)?;
     writeln!(out, "  Budget:     {} tokens", result.max_tokens)?;
     let headroom = if result.truncated() { "⚠" } else { "✓" };
-    writeln!(out, "  Remaining:  ~{} tokens  {headroom}", result.remaining())?;
+    writeln!(
+        out,
+        "  Remaining:  ~{} tokens  {headroom}",
+        result.remaining()
+    )?;
     writeln!(out)?;
-    writeln!(out, "On file open rules:    {} active", config.file_open_rule_count)?;
-    writeln!(out, "On mention triggers:   {} (reserved, not yet active)", config.mention_trigger_count)?;
+    writeln!(
+        out,
+        "On file open rules:    {} active",
+        config.file_open_rule_count
+    )?;
+    writeln!(
+        out,
+        "On mention triggers:   {} (reserved, not yet active)",
+        config.mention_trigger_count
+    )?;
 
     Ok(out)
 }
@@ -407,7 +450,11 @@ mod tests {
         fs::write(&path, "original").unwrap();
         let (_, status) = write_if_absent(&path, "new content").unwrap();
         assert_eq!(status, "exists");
-        assert_eq!(fs::read_to_string(&path).unwrap(), "original", "must not overwrite");
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "original",
+            "must not overwrite"
+        );
     }
 
     #[test]
@@ -426,7 +473,10 @@ mod tests {
         fs::write(&path, "*.log\n").unwrap();
         let (_, status) = ensure_line(&path, "*.log").unwrap();
         assert_eq!(status, "exists");
-        assert_eq!(fs::read_to_string(&path).unwrap().matches("*.log").count(), 1);
+        assert_eq!(
+            fs::read_to_string(&path).unwrap().matches("*.log").count(),
+            1
+        );
     }
 
     #[test]
@@ -445,7 +495,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("CLAUDE.md");
         fs::write(&path, "# My rules\n").unwrap();
-        let (_, status) = append_block_if_absent(&path, "# HiveMind", "# HiveMind\nsome block\n").unwrap();
+        let (_, status) =
+            append_block_if_absent(&path, "# HiveMind", "# HiveMind\nsome block\n").unwrap();
         assert_eq!(status, "created");
         let content = fs::read_to_string(&path).unwrap();
         assert!(content.contains("My rules"));
@@ -457,9 +508,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("CLAUDE.md");
         fs::write(&path, "# HiveMind\nexisting block\n").unwrap();
-        let (_, status) = append_block_if_absent(&path, "# HiveMind", "# HiveMind\nnew block\n").unwrap();
+        let (_, status) =
+            append_block_if_absent(&path, "# HiveMind", "# HiveMind\nnew block\n").unwrap();
         assert_eq!(status, "exists");
-        assert_eq!(fs::read_to_string(&path).unwrap().matches("# HiveMind").count(), 1);
+        assert_eq!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .matches("# HiveMind")
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -518,9 +576,18 @@ mod tests {
         scaffold(proj.path(), home.path(), cfg.path()).unwrap();
 
         let gc = fs::read_to_string(&global).unwrap();
-        assert!(gc.contains("My personal rules"), "user content must be preserved");
-        assert!(gc.contains("Always write tests first."), "user content must be preserved");
-        assert!(gc.contains("# HiveMind Memory System"), "hook block appended");
+        assert!(
+            gc.contains("My personal rules"),
+            "user content must be preserved"
+        );
+        assert!(
+            gc.contains("Always write tests first."),
+            "user content must be preserved"
+        );
+        assert!(
+            gc.contains("# HiveMind Memory System"),
+            "hook block appended"
+        );
     }
 
     #[test]
@@ -532,15 +599,17 @@ mod tests {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         db::create_schema(&conn).unwrap();
         let store = SqliteStore::new(conn);
-        store.store(NewMemory {
-            title: "golang preferences".to_string(),
-            content: "uber/zap, sqlc, pgx v5".to_string(),
-            layer: Layer::Personal,
-            memory_type: MemoryType::Preference,
-            tags: vec!["golang".to_string()],
-            project: None,
-            source: None,
-        }).unwrap();
+        store
+            .store(NewMemory {
+                title: "golang preferences".to_string(),
+                content: "uber/zap, sqlc, pgx v5".to_string(),
+                layer: Layer::Personal,
+                memory_type: MemoryType::Preference,
+                tags: vec!["golang".to_string()],
+                project: None,
+                source: None,
+            })
+            .unwrap();
 
         let proj = tempfile::tempdir().unwrap();
         std::fs::write(
@@ -551,9 +620,15 @@ mod tests {
 
         let out = render_status(proj.path(), &missing_global, &store, "/tmp/x.db").unwrap();
         assert!(out.contains("demo"), "shows project name");
-        assert!(out.contains("golang preferences"), "lists the injected memory");
+        assert!(
+            out.contains("golang preferences"),
+            "lists the injected memory"
+        );
         assert!(out.contains("Budget:"), "shows the budget line");
-        assert!(out.contains("1 memories") || out.contains("1 memorie"), "shows memory count");
+        assert!(
+            out.contains("1 memories") || out.contains("1 memorie"),
+            "shows memory count"
+        );
     }
 
     #[test]
@@ -567,6 +642,9 @@ mod tests {
         let proj = tempfile::tempdir().unwrap();
         let missing_global = proj.path().join("no-global.toml");
         let out = render_status(proj.path(), &missing_global, &store, "/tmp/x.db").unwrap();
-        assert!(out.contains("hivemind init"), "suggests init when no config");
+        assert!(
+            out.contains("hivemind init"),
+            "suggests init when no config"
+        );
     }
 }

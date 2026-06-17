@@ -1,6 +1,6 @@
-use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::Deserialize;
+use std::path::{Path, PathBuf};
 
 pub const DEFAULT_MAX_TOKENS: usize = 2000;
 
@@ -176,7 +176,9 @@ pub fn global_config_dir() -> PathBuf {
     if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
         return PathBuf::from(xdg).join("hivemind");
     }
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
     home.join(".config").join("hivemind")
 }
 
@@ -186,7 +188,10 @@ pub fn global_config_path() -> PathBuf {
 
 pub fn load_config(project_path: &Path) -> Result<HiveMindConfig> {
     let root = discover_project_root(project_path).ok_or_else(|| {
-        anyhow::anyhow!("no .hivemind.toml found at or above {}", project_path.display())
+        anyhow::anyhow!(
+            "no .hivemind.toml found at or above {}",
+            project_path.display()
+        )
     })?;
     load_config_with_global(&root, &global_config_path())
 }
@@ -219,7 +224,10 @@ pub fn load_config_with_global(project_root: &Path, global_path: &Path) -> Resul
         .on_session_start
         .recalls
         .iter()
-        .map(|q| Recall { query: q.clone(), source: RecallSource::Project })
+        .map(|q| Recall {
+            query: q.clone(),
+            source: RecallSource::Project,
+        })
         .collect();
 
     let local_file = project_root.join(".hivemind.local.toml");
@@ -227,9 +235,13 @@ pub fn load_config_with_global(project_root: &Path, global_path: &Path) -> Resul
     if local_file.is_file() {
         let raw_local: RawLocal = toml::from_str(&std::fs::read_to_string(&local_file)?)
             .with_context(|| format!("parsing {}", local_file.display()))?;
-        max_tokens = max_tokens.saturating_add(raw_local.hooks.on_session_start.max_tokens.unwrap_or(0));
+        max_tokens =
+            max_tokens.saturating_add(raw_local.hooks.on_session_start.max_tokens.unwrap_or(0));
         for q in &raw_local.hooks.on_session_start.recalls {
-            recalls.push(Recall { query: q.clone(), source: RecallSource::Local });
+            recalls.push(Recall {
+                query: q.clone(),
+                source: RecallSource::Local,
+            });
         }
     }
 
@@ -272,7 +284,10 @@ pub fn load_server_settings(global_path: &std::path::Path) -> anyhow::Result<Ser
     let host = raw.server.host.unwrap_or_else(|| "127.0.0.1".to_string());
     let port = raw.server.port.unwrap_or(3456);
     let dashboard_port = raw.dashboard.port.unwrap_or(3457);
-    let api_url = raw.dashboard.api_url.unwrap_or_else(|| format!("http://{host}:{port}"));
+    let api_url = raw
+        .dashboard
+        .api_url
+        .unwrap_or_else(|| format!("http://{host}:{port}"));
     let sync = SyncSettings {
         enabled: raw.sync.enabled.unwrap_or(false),
         remote_url: raw.sync.remote_url.unwrap_or_default(),
@@ -281,7 +296,13 @@ pub fn load_server_settings(global_path: &std::path::Path) -> anyhow::Result<Ser
         sync_on_store: raw.sync.sync_on_store.unwrap_or(true),
         sync_on_startup: raw.sync.sync_on_startup.unwrap_or(true),
     };
-    Ok(ServerSettings { host, port, dashboard_port, api_url, sync })
+    Ok(ServerSettings {
+        host,
+        port,
+        dashboard_port,
+        api_url,
+        sync,
+    })
 }
 
 #[cfg(test)]
@@ -313,8 +334,11 @@ mod tests {
     #[test]
     fn load_uses_project_name_recalls_and_max_tokens() {
         let tmp = tempfile::tempdir().unwrap();
-        write(tmp.path(), ".hivemind.toml",
-            "[project]\nname=\"oxhive-api\"\n[hooks.on_session_start]\nmax_tokens=1500\nrecalls=[\"a\",\"b\"]\n");
+        write(
+            tmp.path(),
+            ".hivemind.toml",
+            "[project]\nname=\"oxhive-api\"\n[hooks.on_session_start]\nmax_tokens=1500\nrecalls=[\"a\",\"b\"]\n",
+        );
         let missing_global = tmp.path().join("no-global.toml");
         let cfg = load_config_with_global(tmp.path(), &missing_global).unwrap();
         assert_eq!(cfg.project_name, "oxhive-api");
@@ -327,10 +351,16 @@ mod tests {
     #[test]
     fn local_config_is_additive() {
         let tmp = tempfile::tempdir().unwrap();
-        write(tmp.path(), ".hivemind.toml",
-            "[project]\nname=\"p\"\n[hooks.on_session_start]\nmax_tokens=2000\nrecalls=[\"team\"]\n");
-        write(tmp.path(), ".hivemind.local.toml",
-            "[hooks.on_session_start]\nmax_tokens=500\nrecalls=[\"mine\"]\n");
+        write(
+            tmp.path(),
+            ".hivemind.toml",
+            "[project]\nname=\"p\"\n[hooks.on_session_start]\nmax_tokens=2000\nrecalls=[\"team\"]\n",
+        );
+        write(
+            tmp.path(),
+            ".hivemind.local.toml",
+            "[hooks.on_session_start]\nmax_tokens=500\nrecalls=[\"mine\"]\n",
+        );
         let missing_global = tmp.path().join("no-global.toml");
         let cfg = load_config_with_global(tmp.path(), &missing_global).unwrap();
         assert_eq!(cfg.max_tokens, 2500, "local max_tokens adds to team budget");
@@ -352,10 +382,13 @@ mod tests {
     #[test]
     fn counts_file_open_and_mention_rules() {
         let tmp = tempfile::tempdir().unwrap();
-        write(tmp.path(), ".hivemind.toml",
+        write(
+            tmp.path(),
+            ".hivemind.toml",
             "[project]\nname=\"p\"\n\
              [hooks.on_file_open]\nrules=[{pattern=\"*.go\",recall=\"x\"},{pattern=\"*.rs\",recall=\"y\"}]\n\
-             [hooks.on_mention]\ntriggers=[{keyword=\"@db\",recall=\"z\"}]\n");
+             [hooks.on_mention]\ntriggers=[{keyword=\"@db\",recall=\"z\"}]\n",
+        );
         let missing_global = tmp.path().join("no-global.toml");
         let cfg = load_config_with_global(tmp.path(), &missing_global).unwrap();
         assert_eq!(cfg.file_open_rule_count, 2);
@@ -375,8 +408,11 @@ mod tests {
     #[test]
     fn server_settings_reads_overrides() {
         let tmp = tempfile::tempdir().unwrap();
-        write(tmp.path(), "config.toml",
-            "[server]\nhost=\"0.0.0.0\"\nport=4000\n[dashboard]\nport=4001\napi_url=\"http://pi.local:4000\"\n");
+        write(
+            tmp.path(),
+            "config.toml",
+            "[server]\nhost=\"0.0.0.0\"\nport=4000\n[dashboard]\nport=4001\napi_url=\"http://pi.local:4000\"\n",
+        );
         let s = load_server_settings(&tmp.path().join("config.toml")).unwrap();
         assert_eq!(s.host, "0.0.0.0");
         assert_eq!(s.port, 4000);
@@ -398,8 +434,11 @@ mod tests {
     #[test]
     fn sync_settings_reads_from_global_config() {
         let tmp = tempfile::tempdir().unwrap();
-        write(tmp.path(), "config.toml",
-            "[sync]\nenabled=true\nremote_url=\"http://pi.local:3456\"\napi_key=\"secret\"\ninterval_seconds=60\nsync_on_store=false\n");
+        write(
+            tmp.path(),
+            "config.toml",
+            "[sync]\nenabled=true\nremote_url=\"http://pi.local:3456\"\napi_key=\"secret\"\ninterval_seconds=60\nsync_on_store=false\n",
+        );
         let s = load_server_settings(&tmp.path().join("config.toml")).unwrap();
         assert!(s.sync.enabled);
         assert_eq!(s.sync.remote_url, "http://pi.local:3456");
@@ -418,7 +457,11 @@ mod tests {
     #[test]
     fn load_config_succeeds_with_project_toml_present() {
         let tmp = tempfile::tempdir().unwrap();
-        write(tmp.path(), ".hivemind.toml", "[project]\nname=\"myproject\"\n");
+        write(
+            tmp.path(),
+            ".hivemind.toml",
+            "[project]\nname=\"myproject\"\n",
+        );
         let cfg = load_config(tmp.path()).unwrap();
         assert_eq!(cfg.project_name, "myproject");
     }

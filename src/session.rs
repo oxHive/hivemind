@@ -1,8 +1,8 @@
-use anyhow::Result;
 use crate::budget::count_entry_tokens;
 use crate::config::{HiveMindConfig, RecallSource};
 use crate::model::MemoryEntry;
 use crate::store::SqliteStore;
+use anyhow::Result;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SkipReason {
@@ -78,7 +78,11 @@ pub fn execute_session_start(
                     continue;
                 }
                 used_tokens += tokens;
-                loaded.push(LoadedEntry { entry, tokens, source: recall.source });
+                loaded.push(LoadedEntry {
+                    entry,
+                    tokens,
+                    source: recall.source,
+                });
             }
         }
     }
@@ -113,7 +117,8 @@ mod tests {
                 tags: vec![],
                 project: None,
                 source: None,
-            }).unwrap();
+            })
+            .unwrap();
         }
         s
     }
@@ -122,7 +127,13 @@ mod tests {
         HiveMindConfig {
             project_name: "test-proj".to_string(),
             max_tokens: max,
-            recalls: recalls.into_iter().map(|q| Recall { query: q.to_string(), source: RecallSource::Project }).collect(),
+            recalls: recalls
+                .into_iter()
+                .map(|q| Recall {
+                    query: q.to_string(),
+                    source: RecallSource::Project,
+                })
+                .collect(),
             condition_paths: vec![],
             file_open_rule_count: 0,
             mention_trigger_count: 0,
@@ -150,11 +161,18 @@ mod tests {
         let result_with_skip = SessionStartResult {
             project: "p".to_string(),
             loaded: vec![],
-            skipped: vec![SkippedEntry { query: "q".to_string(), reason: SkipReason::NotFound }],
+            skipped: vec![SkippedEntry {
+                query: "q".to_string(),
+                reason: SkipReason::NotFound,
+            }],
             used_tokens: 2001,
             max_tokens: 2000,
         };
-        assert_eq!(result_with_skip.remaining(), 0, "saturating_sub prevents underflow");
+        assert_eq!(
+            result_with_skip.remaining(),
+            0,
+            "saturating_sub prevents underflow"
+        );
         assert!(result_with_skip.truncated());
     }
 

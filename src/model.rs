@@ -172,9 +172,18 @@ mod tests {
 
     #[test]
     fn memory_type_roundtrips() {
-        assert_eq!("preference".parse::<MemoryType>().unwrap().to_string(), "preference");
-        assert_eq!("project".parse::<MemoryType>().unwrap().to_string(), "project");
-        assert_eq!("history".parse::<MemoryType>().unwrap().to_string(), "history");
+        assert_eq!(
+            "preference".parse::<MemoryType>().unwrap().to_string(),
+            "preference"
+        );
+        assert_eq!(
+            "project".parse::<MemoryType>().unwrap().to_string(),
+            "project"
+        );
+        assert_eq!(
+            "history".parse::<MemoryType>().unwrap().to_string(),
+            "history"
+        );
     }
 
     #[test]
@@ -195,6 +204,9 @@ mod tests {
         assert_ne!(created, EdgeCreate::Duplicate);
         assert_ne!(created, EdgeCreate::MissingEndpoint);
         assert_ne!(EdgeCreate::Duplicate, EdgeCreate::MissingEndpoint);
-        assert_eq!(EdgeCreate::Created("x".to_string()), EdgeCreate::Created("x".to_string()));
+        assert_eq!(
+            EdgeCreate::Created("x".to_string()),
+            EdgeCreate::Created("x".to_string())
+        );
     }
 }

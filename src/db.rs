@@ -118,16 +118,22 @@ mod tests {
             "CREATE TABLE memories (id TEXT PRIMARY KEY, layer TEXT NOT NULL, type TEXT NOT NULL,
              title TEXT NOT NULL, content TEXT NOT NULL, source TEXT, project TEXT,
              created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);",
-        ).unwrap();
+        )
+        .unwrap();
         conn.execute(
             "INSERT INTO memories (id, layer, type, title, content, created_at, updated_at)
              VALUES ('mem_old','personal','preference','old note','legacy kubernetes content',1,1)",
             [],
-        ).unwrap();
+        )
+        .unwrap();
         // Upgrading the schema must create the FTS index and backfill the existing row.
         create_schema(&conn).unwrap();
         let hits: i64 = conn
-            .query_row("SELECT COUNT(*) FROM memories_fts WHERE memories_fts MATCH 'kubernetes'", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM memories_fts WHERE memories_fts MATCH 'kubernetes'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(hits, 1, "pre-existing row was not backfilled into FTS");
     }
@@ -146,7 +152,10 @@ mod tests {
             .map(|r| r.unwrap())
             .collect();
 
-        assert!(tables.contains(&"memories".to_string()), "memories table missing");
+        assert!(
+            tables.contains(&"memories".to_string()),
+            "memories table missing"
+        );
         assert!(tables.contains(&"tags".to_string()), "tags table missing");
     }
 
@@ -165,9 +174,15 @@ mod tests {
             .prepare("SELECT name FROM sqlite_master WHERE name IN ('memories_fts','edges') ORDER BY name")
             .unwrap();
         let names: Vec<String> = stmt
-            .query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect();
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
         assert!(names.contains(&"edges".to_string()), "edges table missing");
-        assert!(names.contains(&"memories_fts".to_string()), "memories_fts missing");
+        assert!(
+            names.contains(&"memories_fts".to_string()),
+            "memories_fts missing"
+        );
     }
 
     #[test]
@@ -180,7 +195,11 @@ mod tests {
             [],
         ).unwrap();
         let hits: i64 = conn
-            .query_row("SELECT COUNT(*) FROM memories_fts WHERE memories_fts MATCH 'clippy'", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM memories_fts WHERE memories_fts MATCH 'clippy'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(hits, 1, "FTS insert trigger did not index the row");
     }
@@ -193,10 +212,16 @@ mod tests {
             "INSERT INTO memories (id, layer, type, title, content, created_at, updated_at)
              VALUES ('mem_x','personal','preference','Rust testing','clippy lints',1,1)",
             [],
-        ).unwrap();
-        conn.execute("DELETE FROM memories WHERE id='mem_x'", []).unwrap();
+        )
+        .unwrap();
+        conn.execute("DELETE FROM memories WHERE id='mem_x'", [])
+            .unwrap();
         let hits: i64 = conn
-            .query_row("SELECT COUNT(*) FROM memories_fts WHERE memories_fts MATCH 'clippy'", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM memories_fts WHERE memories_fts MATCH 'clippy'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(hits, 0, "FTS delete trigger did not remove the row");
     }
@@ -205,11 +230,13 @@ mod tests {
     fn create_schema_creates_kv_table() {
         let conn = Connection::open_in_memory().unwrap();
         create_schema(&conn).unwrap();
-        let exists: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE name='kv'",
-            [],
-            |r| r.get(0),
-        ).unwrap();
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name='kv'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(exists, 1, "kv table not created");
     }
 
@@ -221,7 +248,10 @@ mod tests {
             .prepare("SELECT name FROM sqlite_master WHERE name IN ('feedback','conflicts') ORDER BY name")
             .unwrap();
         let names: Vec<String> = stmt
-            .query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect();
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
         assert_eq!(names, vec!["conflicts".to_string(), "feedback".to_string()]);
     }
 }

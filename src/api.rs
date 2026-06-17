@@ -1,4 +1,8 @@
-use std::sync::Arc;
+use crate::{
+    config::SyncSettings,
+    model::{EdgeCreate, Layer, MemoryEntry, MemoryType, NewMemory, UpdateMemory},
+    store::SqliteStore,
+};
 use axum::{
     Json, Router,
     extract::{Extension, Path, Query, State},
@@ -8,16 +12,26 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::sync::Arc;
 use tower_http::cors::CorsLayer;
-use crate::{
-    config::SyncSettings,
-    model::{EdgeCreate, Layer, MemoryEntry, MemoryType, NewMemory, UpdateMemory},
-    store::SqliteStore,
-};
 
-const RELATIONSHIPS: &[&str] = &["shares_tag", "applies_to", "pairs_with", "used_in", "related_to", "custom"];
+const RELATIONSHIPS: &[&str] = &[
+    "shares_tag",
+    "applies_to",
+    "pairs_with",
+    "used_in",
+    "related_to",
+    "custom",
+];
 const EDGE_STATUSES: &[&str] = &["accepted", "pending", "rejected"];
-const FEEDBACK_TYPES: &[&str] = &["incorrect", "outdated", "duplicate", "wrong_connection", "missing_connection", "other"];
+const FEEDBACK_TYPES: &[&str] = &[
+    "incorrect",
+    "outdated",
+    "duplicate",
+    "wrong_connection",
+    "missing_connection",
+    "other",
+];
 const FEEDBACK_STATUSES: &[&str] = &["open", "resolved", "dismissed"];
 const CONFLICT_ACTIONS: &[&str] = &["keep", "restore"];
 
@@ -49,22 +63,34 @@ fn validate(value: &str, allowed: &[&str], what: &str) -> Result<(), ApiError> {
     if allowed.contains(&value) {
         Ok(())
     } else {
-        Err(bad_request(format!("invalid {what}: {value} (allowed: {})", allowed.join(", "))))
+        Err(bad_request(format!(
+            "invalid {what}: {value} (allowed: {})",
+            allowed.join(", ")
+        )))
     }
 }
 
 pub fn router(store: Store, sync: SyncSettings) -> Router {
     Router::new()
         .route("/api/v1/memories", get(list_memories).post(create_memory))
-        .route("/api/v1/memories/{id}", get(get_memory).patch(patch_memory).delete(delete_memory))
+        .route(
+            "/api/v1/memories/{id}",
+            get(get_memory).patch(patch_memory).delete(delete_memory),
+        )
         .route("/api/v1/search", get(search))
         .route("/api/v1/edges", get(list_edges).post(create_edge))
         .route("/api/v1/edges/{id}", patch(patch_edge))
         .route("/api/v1/feedback", get(list_feedback).post(create_feedback))
         .route("/api/v1/feedback/{id}", patch(patch_feedback))
         .route("/api/v1/conflicts", get(list_conflicts))
-        .route("/api/v1/conflicts/{id}/resolve", post(resolve_conflict_handler))
-        .route("/api/v1/settings/sync", get(get_sync_settings).post(save_sync_settings))
+        .route(
+            "/api/v1/conflicts/{id}/resolve",
+            post(resolve_conflict_handler),
+        )
+        .route(
+            "/api/v1/settings/sync",
+            get(get_sync_settings).post(save_sync_settings),
+        )
         .route("/api/v1/status", get(server_status))
         .route("/api/sync/status", get(sync_status))
         .route("/api/sync/push", post(sync_push))
@@ -128,7 +154,10 @@ async fn create_memory(
     State(store): State<Store>,
     Json(b): Json<CreateMemoryBody>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
-    let layer = b.layer.parse::<Layer>().map_err(|e| bad_request(e.to_string()))?;
+    let layer = b
+        .layer
+        .parse::<Layer>()
+        .map_err(|e| bad_request(e.to_string()))?;
     let result = store.store(NewMemory {
         title: b.title,
         content: b.content,
@@ -138,7 +167,10 @@ async fn create_memory(
         project: b.project,
         source: Some("dashboard".to_string()),
     })?;
-    Ok((StatusCode::CREATED, Json(json!({ "id": result.id, "auto_connected": result.auto_connected }))))
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({ "id": result.id, "auto_connected": result.auto_connected })),
+    ))
 }
 
 async fn get_memory(
@@ -165,12 +197,15 @@ async fn patch_memory(
     Path(id): Path<String>,
     Json(b): Json<PatchMemoryBody>,
 ) -> Result<Json<Value>, ApiError> {
-    let updated = store.update(&id, UpdateMemory {
-        title: b.title,
-        content: b.content,
-        tags: b.tags,
-        merge_content: b.merge_content,
-    })?;
+    let updated = store.update(
+        &id,
+        UpdateMemory {
+            title: b.title,
+            content: b.content,
+            tags: b.tags,
+            merge_content: b.merge_content,
+        },
+    )?;
     if !updated {
         return Err(not_found(format!("no memory {id}")));
     }
@@ -201,13 +236,18 @@ async fn search(
 ) -> Result<Json<Value>, ApiError> {
     let limit = p.limit.unwrap_or(20).clamp(1, 50) as usize;
     let hits = store.search(&p.q, limit)?;
-    let results: Vec<_> = hits.iter().map(|h| json!({
-        "id": h.id,
-        "title": h.title,
-        "snippet": h.snippet,
-        "layer": h.layer.to_string(),
-        "tags": h.tags,
-    })).collect();
+    let results: Vec<_> = hits
+        .iter()
+        .map(|h| {
+            json!({
+                "id": h.id,
+                "title": h.title,
+                "snippet": h.snippet,
+                "layer": h.layer.to_string(),
+                "tags": h.tags,
+            })
+        })
+        .collect();
     Ok(Json(json!({ "count": results.len(), "results": results })))
 }
 
@@ -243,7 +283,10 @@ async fn create_edge(
     validate(&b.relationship, RELATIONSHIPS, "relationship")?;
     match store.create_edge(&b.source_id, &b.target_id, &b.relationship)? {
         EdgeCreate::Created(id) => Ok((StatusCode::CREATED, Json(json!({ "id": id })))),
-        EdgeCreate::Duplicate => Err(ApiError(StatusCode::CONFLICT, "edge already exists".to_string())),
+        EdgeCreate::Duplicate => Err(ApiError(
+            StatusCode::CONFLICT,
+            "edge already exists".to_string(),
+        )),
         EdgeCreate::MissingEndpoint => Err(not_found("source or target memory does not exist")),
     }
 }
@@ -262,7 +305,9 @@ async fn patch_edge(
     if !store.set_edge_status(&id, &b.status)? {
         return Err(not_found(format!("no edge {id}")));
     }
-    Ok(Json(json!({ "updated": true, "id": id, "status": b.status })))
+    Ok(Json(
+        json!({ "updated": true, "id": id, "status": b.status }),
+    ))
 }
 
 // --- feedback ---
@@ -303,7 +348,12 @@ async fn create_feedback(
     if b.memory_id.is_none() && b.edge_id.is_none() {
         return Err(bad_request("provide memory_id or edge_id"));
     }
-    match store.create_feedback(b.memory_id.as_deref(), b.edge_id.as_deref(), &b.kind, b.note.as_deref())? {
+    match store.create_feedback(
+        b.memory_id.as_deref(),
+        b.edge_id.as_deref(),
+        &b.kind,
+        b.note.as_deref(),
+    )? {
         None => Err(not_found("referenced memory or edge does not exist")),
         Some(id) => Ok((StatusCode::CREATED, Json(json!({ "id": id })))),
     }
@@ -323,13 +373,17 @@ async fn patch_feedback(
     if !store.set_feedback_status(&id, &b.status)? {
         return Err(not_found(format!("no feedback {id}")));
     }
-    Ok(Json(json!({ "updated": true, "id": id, "status": b.status })))
+    Ok(Json(
+        json!({ "updated": true, "id": id, "status": b.status }),
+    ))
 }
 
 // --- conflicts + status ---
 
 #[derive(Deserialize)]
-struct ConflictQuery { status: Option<String> }
+struct ConflictQuery {
+    status: Option<String>,
+}
 
 async fn list_conflicts(
     State(store): State<Store>,
@@ -343,7 +397,8 @@ async fn server_status(
     State(store): State<Store>,
     Extension(sync): Extension<SyncSettings>,
 ) -> Result<Json<Value>, ApiError> {
-    let last_synced_at = store.get_kv("last_synced_at")?
+    let last_synced_at = store
+        .get_kv("last_synced_at")?
         .and_then(|v| v.parse::<i64>().ok());
     let conflict_count = store.list_conflicts(Some("open"))?.len();
     Ok(Json(json!({
@@ -362,8 +417,12 @@ async fn server_status(
 
 async fn sync_status(State(store): State<Store>) -> Result<Json<Value>, ApiError> {
     let server_time = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-    Ok(Json(json!({ "server_time": server_time, "memory_count": store.count()? })))
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    Ok(Json(
+        json!({ "server_time": server_time, "memory_count": store.count()? }),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -385,11 +444,15 @@ async fn sync_push(
             None => accepted += 1,
         }
     }
-    Ok(Json(json!({ "accepted": accepted, "conflicts": conflicts })))
+    Ok(Json(
+        json!({ "accepted": accepted, "conflicts": conflicts }),
+    ))
 }
 
 #[derive(Deserialize)]
-struct PullQuery { since: Option<i64> }
+struct PullQuery {
+    since: Option<i64>,
+}
 
 async fn sync_pull(
     State(store): State<Store>,
@@ -397,14 +460,20 @@ async fn sync_pull(
 ) -> Result<Json<Value>, ApiError> {
     let records = store.memories_since(q.since.unwrap_or(0))?;
     let server_time = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-    Ok(Json(json!({ "records": records, "server_time": server_time })))
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    Ok(Json(
+        json!({ "records": records, "server_time": server_time }),
+    ))
 }
 
 // --- conflict resolution ---
 
 #[derive(Deserialize)]
-struct ResolveBody { action: String }
+struct ResolveBody {
+    action: String,
+}
 
 async fn resolve_conflict_handler(
     State(store): State<Store>,
@@ -413,9 +482,13 @@ async fn resolve_conflict_handler(
 ) -> Result<Json<Value>, ApiError> {
     validate(&b.action, CONFLICT_ACTIONS, "action")?;
     if !store.resolve_conflict(&id, &b.action)? {
-        return Err(not_found(format!("conflict {id} not found or already resolved")));
+        return Err(not_found(format!(
+            "conflict {id} not found or already resolved"
+        )));
     }
-    Ok(Json(json!({ "resolved": true, "id": id, "action": b.action })))
+    Ok(Json(
+        json!({ "resolved": true, "id": id, "action": b.action }),
+    ))
 }
 
 // --- sync settings (read-only from file in v1) ---
@@ -431,23 +504,28 @@ async fn get_sync_settings(Extension(sync): Extension<SyncSettings>) -> Json<Val
 }
 
 async fn save_sync_settings(Json(_): Json<Value>) -> Json<Value> {
-    Json(json!({ "saved": false, "message": "Sync settings are managed via config.toml — restart hivemind after editing." }))
+    Json(
+        json!({ "saved": false, "message": "Sync settings are managed via config.toml — restart hivemind after editing." }),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db;
     use axum::body::Body;
     use axum::http::Request;
     use http_body_util::BodyExt;
     use tower::ServiceExt;
-    use crate::db;
 
     fn test_router() -> Router {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
         db::create_schema(&conn).unwrap();
-        router(Arc::new(SqliteStore::new(conn)), crate::config::SyncSettings::default())
+        router(
+            Arc::new(SqliteStore::new(conn)),
+            crate::config::SyncSettings::default(),
+        )
     }
 
     async fn req(app: Router, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
@@ -462,7 +540,11 @@ mod tests {
         let resp = app.oneshot(request).await.unwrap();
         let status = resp.status();
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
-        let val = if bytes.is_empty() { Value::Null } else { serde_json::from_slice(&bytes).unwrap() };
+        let val = if bytes.is_empty() {
+            Value::Null
+        } else {
+            serde_json::from_slice(&bytes).unwrap()
+        };
         (status, val)
     }
 
@@ -473,8 +555,17 @@ mod tests {
     #[tokio::test]
     async fn memories_crud_roundtrip() {
         let app = test_router();
-        let (st, created) = req(app.clone(), "POST", "/api/v1/memories",
-            Some(memory_body("golang preferences", "uber/zap, sqlc, pgx v5", &["golang"]))).await;
+        let (st, created) = req(
+            app.clone(),
+            "POST",
+            "/api/v1/memories",
+            Some(memory_body(
+                "golang preferences",
+                "uber/zap, sqlc, pgx v5",
+                &["golang"],
+            )),
+        )
+        .await;
         assert_eq!(st, StatusCode::CREATED);
         let id = created["id"].as_str().unwrap().to_string();
         assert!(id.starts_with("mem_"));
@@ -489,12 +580,23 @@ mod tests {
         assert_eq!(st, StatusCode::OK);
         assert_eq!(one["content"], "uber/zap, sqlc, pgx v5");
 
-        let (st, patched) = req(app.clone(), "PATCH", &format!("/api/v1/memories/{id}"),
-            Some(json!({ "content": "now pgx v6" }))).await;
+        let (st, patched) = req(
+            app.clone(),
+            "PATCH",
+            &format!("/api/v1/memories/{id}"),
+            Some(json!({ "content": "now pgx v6" })),
+        )
+        .await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(patched["updated"], true);
 
-        let (st, _) = req(app.clone(), "DELETE", &format!("/api/v1/memories/{id}"), None).await;
+        let (st, _) = req(
+            app.clone(),
+            "DELETE",
+            &format!("/api/v1/memories/{id}"),
+            None,
+        )
+        .await;
         assert_eq!(st, StatusCode::OK);
         let (st, _) = req(app.clone(), "GET", &format!("/api/v1/memories/{id}"), None).await;
         assert_eq!(st, StatusCode::NOT_FOUND);
@@ -503,8 +605,13 @@ mod tests {
     #[tokio::test]
     async fn list_memories_rejects_bad_layer_and_filters_good_one() {
         let app = test_router();
-        req(app.clone(), "POST", "/api/v1/memories",
-            Some(memory_body("p", "personal entry", &[]))).await;
+        req(
+            app.clone(),
+            "POST",
+            "/api/v1/memories",
+            Some(memory_body("p", "personal entry", &[])),
+        )
+        .await;
         let (st, _) = req(app.clone(), "GET", "/api/v1/memories?layer=bogus", None).await;
         assert_eq!(st, StatusCode::BAD_REQUEST);
         let (st, list) = req(app.clone(), "GET", "/api/v1/memories?layer=workspace", None).await;
@@ -515,8 +622,17 @@ mod tests {
     #[tokio::test]
     async fn search_returns_snippets() {
         let app = test_router();
-        req(app.clone(), "POST", "/api/v1/memories",
-            Some(memory_body("db choice", "standardized on pgx v5", &["golang"]))).await;
+        req(
+            app.clone(),
+            "POST",
+            "/api/v1/memories",
+            Some(memory_body(
+                "db choice",
+                "standardized on pgx v5",
+                &["golang"],
+            )),
+        )
+        .await;
         let (st, hits) = req(app.clone(), "GET", "/api/v1/search?q=pgx", None).await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(hits["count"], 1);
@@ -527,63 +643,127 @@ mod tests {
     #[tokio::test]
     async fn edges_flow_create_duplicate_and_status_patch() {
         let app = test_router();
-        let (_, a) = req(app.clone(), "POST", "/api/v1/memories",
-            Some(memory_body("a", "x", &[]))).await;
-        let (_, b) = req(app.clone(), "POST", "/api/v1/memories",
-            Some(memory_body("b", "y", &[]))).await;
-        let (a, b) = (a["id"].as_str().unwrap().to_string(), b["id"].as_str().unwrap().to_string());
+        let (_, a) = req(
+            app.clone(),
+            "POST",
+            "/api/v1/memories",
+            Some(memory_body("a", "x", &[])),
+        )
+        .await;
+        let (_, b) = req(
+            app.clone(),
+            "POST",
+            "/api/v1/memories",
+            Some(memory_body("b", "y", &[])),
+        )
+        .await;
+        let (a, b) = (
+            a["id"].as_str().unwrap().to_string(),
+            b["id"].as_str().unwrap().to_string(),
+        );
 
         let edge_body = json!({ "source_id": a, "target_id": b, "relationship": "pairs_with" });
-        let (st, created) = req(app.clone(), "POST", "/api/v1/edges", Some(edge_body.clone())).await;
+        let (st, created) = req(
+            app.clone(),
+            "POST",
+            "/api/v1/edges",
+            Some(edge_body.clone()),
+        )
+        .await;
         assert_eq!(st, StatusCode::CREATED);
         let edge_id = created["id"].as_str().unwrap().to_string();
 
         let (st, _) = req(app.clone(), "POST", "/api/v1/edges", Some(edge_body)).await;
         assert_eq!(st, StatusCode::CONFLICT);
 
-        let (st, _) = req(app.clone(), "POST", "/api/v1/edges",
-            Some(json!({ "source_id": a, "target_id": "mem_nope", "relationship": "pairs_with" }))).await;
+        let (st, _) = req(
+            app.clone(),
+            "POST",
+            "/api/v1/edges",
+            Some(json!({ "source_id": a, "target_id": "mem_nope", "relationship": "pairs_with" })),
+        )
+        .await;
         assert_eq!(st, StatusCode::NOT_FOUND);
 
-        let (st, _) = req(app.clone(), "POST", "/api/v1/edges",
-            Some(json!({ "source_id": a, "target_id": b, "relationship": "invented" }))).await;
+        let (st, _) = req(
+            app.clone(),
+            "POST",
+            "/api/v1/edges",
+            Some(json!({ "source_id": a, "target_id": b, "relationship": "invented" })),
+        )
+        .await;
         assert_eq!(st, StatusCode::BAD_REQUEST);
 
-        let (st, _) = req(app.clone(), "PATCH", &format!("/api/v1/edges/{edge_id}"),
-            Some(json!({ "status": "rejected" }))).await;
+        let (st, _) = req(
+            app.clone(),
+            "PATCH",
+            &format!("/api/v1/edges/{edge_id}"),
+            Some(json!({ "status": "rejected" })),
+        )
+        .await;
         assert_eq!(st, StatusCode::OK);
         let (_, edges) = req(app.clone(), "GET", "/api/v1/edges?status=rejected", None).await;
         assert_eq!(edges["count"], 1);
-        let (st, _) = req(app.clone(), "PATCH", "/api/v1/edges/edge_nope",
-            Some(json!({ "status": "accepted" }))).await;
+        let (st, _) = req(
+            app.clone(),
+            "PATCH",
+            "/api/v1/edges/edge_nope",
+            Some(json!({ "status": "accepted" })),
+        )
+        .await;
         assert_eq!(st, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
     async fn feedback_flow_and_conflicts_empty() {
         let app = test_router();
-        let (_, m) = req(app.clone(), "POST", "/api/v1/memories",
-            Some(memory_body("m", "x", &[]))).await;
+        let (_, m) = req(
+            app.clone(),
+            "POST",
+            "/api/v1/memories",
+            Some(memory_body("m", "x", &[])),
+        )
+        .await;
         let mid = m["id"].as_str().unwrap().to_string();
 
-        let (st, fb) = req(app.clone(), "POST", "/api/v1/feedback",
-            Some(json!({ "memory_id": mid, "type": "outdated", "note": "stale" }))).await;
+        let (st, fb) = req(
+            app.clone(),
+            "POST",
+            "/api/v1/feedback",
+            Some(json!({ "memory_id": mid, "type": "outdated", "note": "stale" })),
+        )
+        .await;
         assert_eq!(st, StatusCode::CREATED);
         let fb_id = fb["id"].as_str().unwrap().to_string();
 
-        let (st, _) = req(app.clone(), "POST", "/api/v1/feedback",
-            Some(json!({ "memory_id": "mem_nope", "type": "outdated" }))).await;
+        let (st, _) = req(
+            app.clone(),
+            "POST",
+            "/api/v1/feedback",
+            Some(json!({ "memory_id": "mem_nope", "type": "outdated" })),
+        )
+        .await;
         assert_eq!(st, StatusCode::NOT_FOUND);
-        let (st, _) = req(app.clone(), "POST", "/api/v1/feedback",
-            Some(json!({ "memory_id": mid, "type": "invented" }))).await;
+        let (st, _) = req(
+            app.clone(),
+            "POST",
+            "/api/v1/feedback",
+            Some(json!({ "memory_id": mid, "type": "invented" })),
+        )
+        .await;
         assert_eq!(st, StatusCode::BAD_REQUEST);
 
         let (_, open) = req(app.clone(), "GET", "/api/v1/feedback?status=open", None).await;
         assert_eq!(open["count"], 1);
         assert_eq!(open["items"][0]["type"], "outdated");
 
-        let (st, _) = req(app.clone(), "PATCH", &format!("/api/v1/feedback/{fb_id}"),
-            Some(json!({ "status": "resolved" }))).await;
+        let (st, _) = req(
+            app.clone(),
+            "PATCH",
+            &format!("/api/v1/feedback/{fb_id}"),
+            Some(json!({ "status": "resolved" })),
+        )
+        .await;
         assert_eq!(st, StatusCode::OK);
         let (_, open) = req(app.clone(), "GET", "/api/v1/feedback?status=open", None).await;
         assert_eq!(open["count"], 0);
@@ -596,8 +776,13 @@ mod tests {
     #[tokio::test]
     async fn status_reports_version_and_count() {
         let app = test_router();
-        req(app.clone(), "POST", "/api/v1/memories",
-            Some(memory_body("m", "x", &[]))).await;
+        req(
+            app.clone(),
+            "POST",
+            "/api/v1/memories",
+            Some(memory_body("m", "x", &[])),
+        )
+        .await;
         let (st, status) = req(app.clone(), "GET", "/api/v1/status", None).await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(status["version"], env!("CARGO_PKG_VERSION"));
@@ -621,8 +806,13 @@ mod tests {
             "title": "Test", "content": "Content", "source": null, "project": null,
             "tags": ["tag1"], "created_at": 1000, "updated_at": 1000
         });
-        let (status, body) = req(app, "POST", "/api/sync/push",
-            Some(json!({ "records": [record], "client_id": "test-client" }))).await;
+        let (status, body) = req(
+            app,
+            "POST",
+            "/api/sync/push",
+            Some(json!({ "records": [record], "client_id": "test-client" })),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["accepted"], 1);
         assert_eq!(body["conflicts"].as_array().unwrap().len(), 0);
@@ -631,8 +821,13 @@ mod tests {
     #[tokio::test]
     async fn sync_pull_returns_records_since() {
         let app = test_router();
-        req(app.clone(), "POST", "/api/v1/memories",
-            Some(json!({ "title": "T", "content": "C", "layer": "personal", "tags": [] }))).await;
+        req(
+            app.clone(),
+            "POST",
+            "/api/v1/memories",
+            Some(json!({ "title": "T", "content": "C", "layer": "personal", "tags": [] })),
+        )
+        .await;
         let (status, body) = req(app, "GET", "/api/sync/pull?since=0", None).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["records"].as_array().unwrap().len(), 1);
@@ -641,15 +836,25 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_conflict_returns_404_for_missing() {
-        let (status, _) = req(test_router(), "POST", "/api/v1/conflicts/cfl_missing/resolve",
-            Some(json!({ "action": "keep" }))).await;
+        let (status, _) = req(
+            test_router(),
+            "POST",
+            "/api/v1/conflicts/cfl_missing/resolve",
+            Some(json!({ "action": "keep" })),
+        )
+        .await;
         assert_eq!(status, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
     async fn resolve_conflict_rejects_invalid_action() {
-        let (status, _) = req(test_router(), "POST", "/api/v1/conflicts/any/resolve",
-            Some(json!({ "action": "delete" }))).await;
+        let (status, _) = req(
+            test_router(),
+            "POST",
+            "/api/v1/conflicts/any/resolve",
+            Some(json!({ "action": "delete" })),
+        )
+        .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
