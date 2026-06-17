@@ -1,6 +1,6 @@
-use std::sync::Arc;
-use anyhow::Result;
 use crate::{config::SyncSettings, model::MemoryEntry, store::SqliteStore};
+use anyhow::Result;
+use std::sync::Arc;
 
 pub struct SyncClient {
     remote_url: String,
@@ -27,29 +27,43 @@ impl SyncClient {
     }
 
     pub async fn sync_once(&self) -> Result<SyncReport> {
-        let last_synced_at = self.store.get_kv("last_synced_at")?
+        let last_synced_at = self
+            .store
+            .get_kv("last_synced_at")?
             .and_then(|v| v.parse::<i64>().ok())
             .unwrap_or(0);
 
         // Push local changes to remote
         let local_records = self.store.memories_since(last_synced_at)?;
         let pushed = local_records.len();
-        let push_resp: serde_json::Value = self.http
+        let push_resp: serde_json::Value = self
+            .http
             .post(format!("{}/api/sync/push", self.remote_url))
             .bearer_auth(&self.api_key)
             .json(&serde_json::json!({ "records": local_records, "client_id": "local" }))
-            .send().await?
+            .send()
+            .await?
             .error_for_status()?
-            .json().await?;
-        let push_conflicts = push_resp["conflicts"].as_array().map(|a| a.len()).unwrap_or(0);
+            .json()
+            .await?;
+        let push_conflicts = push_resp["conflicts"]
+            .as_array()
+            .map(|a| a.len())
+            .unwrap_or(0);
 
         // Pull remote changes
-        let pull_resp: serde_json::Value = self.http
-            .get(format!("{}/api/sync/pull?since={last_synced_at}", self.remote_url))
+        let pull_resp: serde_json::Value = self
+            .http
+            .get(format!(
+                "{}/api/sync/pull?since={last_synced_at}",
+                self.remote_url
+            ))
             .bearer_auth(&self.api_key)
-            .send().await?
+            .send()
+            .await?
             .error_for_status()?
-            .json().await?;
+            .json()
+            .await?;
 
         let mut pulled = 0usize;
         let mut pull_conflicts = 0usize;
@@ -65,19 +79,27 @@ impl SyncClient {
         }
 
         let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64;
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_secs() as i64;
         self.store.set_kv("last_synced_at", &now.to_string())?;
 
-        tracing::info!("sync: pushed={pushed} pulled={pulled} conflicts={}", push_conflicts + pull_conflicts);
-        Ok(SyncReport { pushed, pulled, conflicts: push_conflicts + pull_conflicts })
+        tracing::info!(
+            "sync: pushed={pushed} pulled={pulled} conflicts={}",
+            push_conflicts + pull_conflicts
+        );
+        Ok(SyncReport {
+            pushed,
+            pulled,
+            conflicts: push_conflicts + pull_conflicts,
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use crate::{config::SyncSettings, db, store::SqliteStore};
+    use std::sync::Arc;
 
     fn test_store() -> Arc<SqliteStore> {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
@@ -117,7 +139,11 @@ mod tests {
 
     #[test]
     fn sync_report_fields_are_accessible() {
-        let r = SyncReport { pushed: 3, pulled: 1, conflicts: 0 };
+        let r = SyncReport {
+            pushed: 3,
+            pulled: 1,
+            conflicts: 0,
+        };
         assert_eq!(r.pushed, 3);
         assert_eq!(r.pulled, 1);
         assert_eq!(r.conflicts, 0);

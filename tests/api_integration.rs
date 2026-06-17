@@ -1,11 +1,11 @@
+use reqwest::StatusCode;
+use serde_json::{Value, json};
 /// Integration tests: spin up a real HTTP server on a random port and test
 /// the full request/response lifecycle over the network stack via reqwest.
 ///
 /// These complement the in-file unit tests (which use tower's `oneshot`) by
 /// verifying actual HTTP serialization, routing, and middleware behavior.
 use std::sync::Arc;
-use reqwest::StatusCode;
-use serde_json::{json, Value};
 use tokio::net::TcpListener;
 
 async fn start_server() -> (String, tokio::task::JoinHandle<()>) {
@@ -100,9 +100,12 @@ async fn memory_create_rejects_invalid_layer() {
     let (base, _server) = start_server().await;
     let client = reqwest::Client::new();
 
-    let (status, body) = post_json(&client, &format!("{base}/api/v1/memories"),
-        json!({ "title": "t", "content": "c", "layer": "invalid", "tags": [] })
-    ).await;
+    let (status, body) = post_json(
+        &client,
+        &format!("{base}/api/v1/memories"),
+        json!({ "title": "t", "content": "c", "layer": "invalid", "tags": [] }),
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(body["error"].as_str().unwrap().contains("invalid layer"));
 }
@@ -112,14 +115,20 @@ async fn memory_patch_updates_content() {
     let (base, _server) = start_server().await;
     let client = reqwest::Client::new();
 
-    let (_, created) = post_json(&client, &format!("{base}/api/v1/memories"),
-        json!({ "title": "original", "content": "old", "layer": "personal", "tags": [] })
-    ).await;
+    let (_, created) = post_json(
+        &client,
+        &format!("{base}/api/v1/memories"),
+        json!({ "title": "original", "content": "old", "layer": "personal", "tags": [] }),
+    )
+    .await;
     let id = created["id"].as_str().unwrap().to_string();
 
-    let (status, _) = patch_json(&client, &format!("{base}/api/v1/memories/{id}"),
-        json!({ "content": "updated content" })
-    ).await;
+    let (status, _) = patch_json(
+        &client,
+        &format!("{base}/api/v1/memories/{id}"),
+        json!({ "content": "updated content" }),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
 
     let (_, body) = get(&client, &format!("{base}/api/v1/memories/{id}")).await;
@@ -132,9 +141,12 @@ async fn memory_delete_removes_entry() {
     let (base, _server) = start_server().await;
     let client = reqwest::Client::new();
 
-    let (_, created) = post_json(&client, &format!("{base}/api/v1/memories"),
-        json!({ "title": "to-delete", "content": "bye", "layer": "personal", "tags": [] })
-    ).await;
+    let (_, created) = post_json(
+        &client,
+        &format!("{base}/api/v1/memories"),
+        json!({ "title": "to-delete", "content": "bye", "layer": "personal", "tags": [] }),
+    )
+    .await;
     let id = created["id"].as_str().unwrap();
 
     let status = delete(&client, &format!("{base}/api/v1/memories/{id}")).await;
@@ -149,13 +161,19 @@ async fn memory_list_filters_by_layer() {
     let (base, _server) = start_server().await;
     let client = reqwest::Client::new();
 
-    post_json(&client, &format!("{base}/api/v1/memories"),
-        json!({ "title": "personal one", "content": "c", "layer": "personal", "tags": [] })
-    ).await;
-    post_json(&client, &format!("{base}/api/v1/memories"),
+    post_json(
+        &client,
+        &format!("{base}/api/v1/memories"),
+        json!({ "title": "personal one", "content": "c", "layer": "personal", "tags": [] }),
+    )
+    .await;
+    post_json(
+        &client,
+        &format!("{base}/api/v1/memories"),
         json!({ "title": "workspace one", "content": "c", "layer": "workspace",
-                "tags": [], "project": "myproject" })
-    ).await;
+                "tags": [], "project": "myproject" }),
+    )
+    .await;
 
     let (status, body) = get(&client, &format!("{base}/api/v1/memories?layer=personal")).await;
     assert_eq!(status, StatusCode::OK);
@@ -178,7 +196,10 @@ async fn search_finds_stored_memory() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["count"], 1);
     assert_eq!(body["results"][0]["title"], "db driver choice");
-    assert!(body["results"][0].get("content").is_none(), "search returns snippets not full content");
+    assert!(
+        body["results"][0].get("content").is_none(),
+        "search returns snippets not full content"
+    );
 }
 
 #[tokio::test]
@@ -198,23 +219,38 @@ async fn edge_create_list_and_update_status() {
     let (base, _server) = start_server().await;
     let client = reqwest::Client::new();
 
-    let (_, a) = post_json(&client, &format!("{base}/api/v1/memories"),
-        json!({ "title": "a", "content": "x", "layer": "personal", "tags": [] })
-    ).await;
-    let (_, b) = post_json(&client, &format!("{base}/api/v1/memories"),
-        json!({ "title": "b", "content": "y", "layer": "personal", "tags": [] })
-    ).await;
-    let (aid, bid) = (a["id"].as_str().unwrap().to_string(), b["id"].as_str().unwrap().to_string());
+    let (_, a) = post_json(
+        &client,
+        &format!("{base}/api/v1/memories"),
+        json!({ "title": "a", "content": "x", "layer": "personal", "tags": [] }),
+    )
+    .await;
+    let (_, b) = post_json(
+        &client,
+        &format!("{base}/api/v1/memories"),
+        json!({ "title": "b", "content": "y", "layer": "personal", "tags": [] }),
+    )
+    .await;
+    let (aid, bid) = (
+        a["id"].as_str().unwrap().to_string(),
+        b["id"].as_str().unwrap().to_string(),
+    );
 
-    let (status, edge) = post_json(&client, &format!("{base}/api/v1/edges"),
-        json!({ "source_id": aid, "target_id": bid, "relationship": "pairs_with" })
-    ).await;
+    let (status, edge) = post_json(
+        &client,
+        &format!("{base}/api/v1/edges"),
+        json!({ "source_id": aid, "target_id": bid, "relationship": "pairs_with" }),
+    )
+    .await;
     assert_eq!(status, StatusCode::CREATED);
     let eid = edge["id"].as_str().unwrap().to_string();
 
-    let (status, _) = patch_json(&client, &format!("{base}/api/v1/edges/{eid}"),
-        json!({ "status": "accepted" })
-    ).await;
+    let (status, _) = patch_json(
+        &client,
+        &format!("{base}/api/v1/edges/{eid}"),
+        json!({ "status": "accepted" }),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
 
     let (_, edges) = get(&client, &format!("{base}/api/v1/edges?status=accepted")).await;
@@ -226,12 +262,18 @@ async fn edge_create_rejects_duplicate() {
     let (base, _server) = start_server().await;
     let client = reqwest::Client::new();
 
-    let (_, a) = post_json(&client, &format!("{base}/api/v1/memories"),
-        json!({ "title": "a", "content": "x", "layer": "personal", "tags": [] })
-    ).await;
-    let (_, b) = post_json(&client, &format!("{base}/api/v1/memories"),
-        json!({ "title": "b", "content": "y", "layer": "personal", "tags": [] })
-    ).await;
+    let (_, a) = post_json(
+        &client,
+        &format!("{base}/api/v1/memories"),
+        json!({ "title": "a", "content": "x", "layer": "personal", "tags": [] }),
+    )
+    .await;
+    let (_, b) = post_json(
+        &client,
+        &format!("{base}/api/v1/memories"),
+        json!({ "title": "b", "content": "y", "layer": "personal", "tags": [] }),
+    )
+    .await;
     let (aid, bid) = (a["id"].as_str().unwrap(), b["id"].as_str().unwrap());
 
     let body = json!({ "source_id": aid, "target_id": bid, "relationship": "pairs_with" });
@@ -247,14 +289,20 @@ async fn feedback_create_and_resolve() {
     let (base, _server) = start_server().await;
     let client = reqwest::Client::new();
 
-    let (_, mem) = post_json(&client, &format!("{base}/api/v1/memories"),
-        json!({ "title": "stale pref", "content": "old content", "layer": "personal", "tags": [] })
-    ).await;
+    let (_, mem) = post_json(
+        &client,
+        &format!("{base}/api/v1/memories"),
+        json!({ "title": "stale pref", "content": "old content", "layer": "personal", "tags": [] }),
+    )
+    .await;
     let mid = mem["id"].as_str().unwrap();
 
-    let (status, fb) = post_json(&client, &format!("{base}/api/v1/feedback"),
-        json!({ "memory_id": mid, "type": "outdated", "note": "this is stale" })
-    ).await;
+    let (status, fb) = post_json(
+        &client,
+        &format!("{base}/api/v1/feedback"),
+        json!({ "memory_id": mid, "type": "outdated", "note": "this is stale" }),
+    )
+    .await;
     assert_eq!(status, StatusCode::CREATED);
     let fb_id = fb["id"].as_str().unwrap().to_string();
 
@@ -262,9 +310,12 @@ async fn feedback_create_and_resolve() {
     assert_eq!(open["count"], 1);
     assert_eq!(open["items"][0]["type"], "outdated");
 
-    let (status, _) = patch_json(&client, &format!("{base}/api/v1/feedback/{fb_id}"),
-        json!({ "status": "resolved" })
-    ).await;
+    let (status, _) = patch_json(
+        &client,
+        &format!("{base}/api/v1/feedback/{fb_id}"),
+        json!({ "status": "resolved" }),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
 
     let (_, open) = get(&client, &format!("{base}/api/v1/feedback?status=open")).await;
@@ -283,9 +334,12 @@ async fn sync_push_and_pull_roundtrip() {
         "title": "synced memory", "content": "via push", "source": null, "project": null,
         "tags": [], "created_at": 1000, "updated_at": 1000
     });
-    let (status, body) = post_json(&client, &format!("{base}/api/sync/push"),
-        json!({ "records": [record], "client_id": "test-node" })
-    ).await;
+    let (status, body) = post_json(
+        &client,
+        &format!("{base}/api/sync/push"),
+        json!({ "records": [record], "client_id": "test-node" }),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["accepted"], 1);
 

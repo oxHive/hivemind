@@ -1,10 +1,10 @@
-use std::sync::Arc;
 use anyhow::Result;
 use clap::Parser;
 use oxhivemind::cli::{self, Cli, Command, McpAction};
 use oxhivemind::{config, db, http, server, store};
 use rmcp::ServiceExt;
 use server::HiveMind;
+use std::sync::Arc;
 use store::SqliteStore;
 
 fn main() -> Result<()> {

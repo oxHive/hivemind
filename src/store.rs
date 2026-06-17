@@ -1,7 +1,10 @@
-use std::sync::Mutex;
+use crate::model::{
+    ConflictItem, Edge, EdgeCreate, FeedbackItem, Layer, MemoryEntry, MemoryType, NewMemory,
+    StoreResult,
+};
 use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension};
-use crate::model::{NewMemory, MemoryEntry, Layer, MemoryType, StoreResult, Edge, EdgeCreate, FeedbackItem, ConflictItem};
+use std::sync::Mutex;
 
 fn gen_id() -> String {
     format!("mem_{}", uuid::Uuid::new_v4().simple())
@@ -20,7 +23,9 @@ pub struct SqliteStore {
 
 impl SqliteStore {
     pub fn new(conn: Connection) -> Self {
-        Self { conn: Mutex::new(conn) }
+        Self {
+            conn: Mutex::new(conn),
+        }
     }
 
     pub fn store(&self, new: NewMemory) -> Result<StoreResult> {
@@ -36,7 +41,10 @@ impl SqliteStore {
             .cloned()
             .collect();
 
-        let mut conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
         let tx = conn.transaction()?;
 
         tx.execute(
@@ -96,55 +104,73 @@ impl SqliteStore {
     }
 
     pub fn recall_by_id(&self, id: &str) -> Result<Option<MemoryEntry>> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
         let result = conn.query_row(
             "SELECT id, layer, type, title, content, source, project, created_at, updated_at
              FROM memories WHERE id = ?1",
             rusqlite::params![id],
-            |row| Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, Option<String>>(5)?,
-                row.get::<_, Option<String>>(6)?,
-                row.get::<_, i64>(7)?,
-                row.get::<_, i64>(8)?,
-            )),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, i64>(7)?,
+                    row.get::<_, i64>(8)?,
+                ))
+            },
         );
         match result {
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e.into()),
             Ok((rid, layer_s, type_s, title, content, source, project, created_at, updated_at)) => {
-                Self::row_to_entry(&conn, rid, layer_s, type_s, title, content, source, project, created_at, updated_at).map(Some)
+                Self::row_to_entry(
+                    &conn, rid, layer_s, type_s, title, content, source, project, created_at,
+                    updated_at,
+                )
+                .map(Some)
             }
         }
     }
 
     pub fn recall_by_title(&self, title: &str) -> Result<Option<MemoryEntry>> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
         let result = conn.query_row(
             "SELECT id, layer, type, title, content, source, project, created_at, updated_at
              FROM memories WHERE title = ?1 ORDER BY updated_at DESC LIMIT 1",
             rusqlite::params![title],
-            |row| Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, Option<String>>(5)?,
-                row.get::<_, Option<String>>(6)?,
-                row.get::<_, i64>(7)?,
-                row.get::<_, i64>(8)?,
-            )),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, i64>(7)?,
+                    row.get::<_, i64>(8)?,
+                ))
+            },
         );
         match result {
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e.into()),
             Ok((rid, layer_s, type_s, title, content, source, project, created_at, updated_at)) => {
-                Self::row_to_entry(&conn, rid, layer_s, type_s, title, content, source, project, created_at, updated_at).map(Some)
+                Self::row_to_entry(
+                    &conn, rid, layer_s, type_s, title, content, source, project, created_at,
+                    updated_at,
+                )
+                .map(Some)
             }
         }
     }
@@ -160,7 +186,11 @@ impl SqliteStore {
         // or operator keywords in the input.
         let fts_query = trimmed
             .split_whitespace()
-            .map(|t| t.chars().filter(|c| c.is_alphanumeric()).collect::<String>())
+            .map(|t| {
+                t.chars()
+                    .filter(|c| c.is_alphanumeric())
+                    .collect::<String>()
+            })
             .filter(|t| !t.is_empty())
             .map(|t| format!("\"{}\"", t.replace('"', "\"\"")))
             .collect::<Vec<_>>()
@@ -170,7 +200,10 @@ impl SqliteStore {
             return Ok(Vec::new());
         }
 
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
         let rows = {
             let mut stmt = conn.prepare(
                 "SELECT m.id, m.title, m.layer, snippet(memories_fts, 1, '[', ']', '…', 12)
@@ -180,30 +213,38 @@ impl SqliteStore {
                  ORDER BY rank
                  LIMIT ?2",
             )?;
-            stmt
-                .query_map(rusqlite::params![fts_query, limit as i64], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                    ))
-                })?
-                .collect::<rusqlite::Result<Vec<_>>>()?
+            stmt.query_map(rusqlite::params![fts_query, limit as i64], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?
         };
 
         let mut hits = Vec::with_capacity(rows.len());
         for (id, title, layer_s, snippet) in rows {
             let layer = layer_s.parse::<Layer>()?;
             let tags = Self::fetch_tags(&conn, &id)?;
-            hits.push(crate::model::SearchHit { id, title, snippet, layer, tags });
+            hits.push(crate::model::SearchHit {
+                id,
+                title,
+                snippet,
+                layer,
+                tags,
+            });
         }
         Ok(hits)
     }
 
     pub fn update(&self, id: &str, upd: crate::model::UpdateMemory) -> Result<bool> {
         let now = now_secs();
-        let mut conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
         let tx = conn.transaction()?;
 
         let existing: Option<(String, String)> = tx
@@ -232,7 +273,10 @@ impl SqliteStore {
         )?;
 
         if let Some(tags) = upd.tags {
-            tx.execute("DELETE FROM tags WHERE memory_id = ?1", rusqlite::params![id])?;
+            tx.execute(
+                "DELETE FROM tags WHERE memory_id = ?1",
+                rusqlite::params![id],
+            )?;
             let mut seen = std::collections::HashSet::new();
             for tag in tags.iter().filter(|t| seen.insert((*t).clone())) {
                 tx.execute(
@@ -262,40 +306,57 @@ impl SqliteStore {
     }
 
     pub fn count(&self) -> Result<usize> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
         let n: i64 = conn.query_row("SELECT COUNT(*) FROM memories", [], |r| r.get(0))?;
         Ok(n as usize)
     }
 
     /// Newest-first listing. `rowid DESC` breaks same-second timestamp ties.
     pub fn list_memories(&self, layer: Option<Layer>, limit: usize) -> Result<Vec<MemoryEntry>> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
         let base = "SELECT id, layer, type, title, content, source, project, created_at, updated_at
                     FROM memories";
         let rows = match &layer {
             Some(l) => {
-                let mut stmt = conn.prepare(
-                    &format!("{base} WHERE layer = ?1 ORDER BY updated_at DESC, rowid DESC LIMIT ?2"))?;
-                stmt.query_map(rusqlite::params![l.to_string(), limit as i64], Self::row_tuple)?
-                    .collect::<rusqlite::Result<Vec<_>>>()?
+                let mut stmt = conn.prepare(&format!(
+                    "{base} WHERE layer = ?1 ORDER BY updated_at DESC, rowid DESC LIMIT ?2"
+                ))?;
+                stmt.query_map(
+                    rusqlite::params![l.to_string(), limit as i64],
+                    Self::row_tuple,
+                )?
+                .collect::<rusqlite::Result<Vec<_>>>()?
             }
             None => {
-                let mut stmt = conn.prepare(
-                    &format!("{base} ORDER BY updated_at DESC, rowid DESC LIMIT ?1"))?;
+                let mut stmt = conn.prepare(&format!(
+                    "{base} ORDER BY updated_at DESC, rowid DESC LIMIT ?1"
+                ))?;
                 stmt.query_map(rusqlite::params![limit as i64], Self::row_tuple)?
                     .collect::<rusqlite::Result<Vec<_>>>()?
             }
         };
         let mut entries = Vec::with_capacity(rows.len());
-        for (rid, layer_s, type_s, title, content, source, project, created_at, updated_at) in rows {
+        for (rid, layer_s, type_s, title, content, source, project, created_at, updated_at) in rows
+        {
             entries.push(Self::row_to_entry(
-                &conn, rid, layer_s, type_s, title, content, source, project, created_at, updated_at)?);
+                &conn, rid, layer_s, type_s, title, content, source, project, created_at,
+                updated_at,
+            )?);
         }
         Ok(entries)
     }
 
     pub fn list_edges(&self, status: Option<&str>) -> Result<Vec<Edge>> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
         let base = "SELECT id, source_id, target_id, relationship, weight, inferred_by, status, reason, created_at, updated_at
                     FROM edges";
         let map = |row: &rusqlite::Row| -> rusqlite::Result<Edge> {
@@ -314,25 +375,40 @@ impl SqliteStore {
         };
         let edges = match status {
             Some(st) => {
-                let mut stmt = conn.prepare(&format!("{base} WHERE status = ?1 ORDER BY created_at DESC, rowid DESC"))?;
-                stmt.query_map(rusqlite::params![st], map)?.collect::<rusqlite::Result<Vec<_>>>()?
+                let mut stmt = conn.prepare(&format!(
+                    "{base} WHERE status = ?1 ORDER BY created_at DESC, rowid DESC"
+                ))?;
+                stmt.query_map(rusqlite::params![st], map)?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
             }
             None => {
-                let mut stmt = conn.prepare(&format!("{base} ORDER BY created_at DESC, rowid DESC"))?;
-                stmt.query_map([], map)?.collect::<rusqlite::Result<Vec<_>>>()?
+                let mut stmt =
+                    conn.prepare(&format!("{base} ORDER BY created_at DESC, rowid DESC"))?;
+                stmt.query_map([], map)?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
             }
         };
         Ok(edges)
     }
 
     /// Create a user-confirmed (manual, accepted) edge between two memories.
-    pub fn create_edge(&self, source_id: &str, target_id: &str, relationship: &str) -> Result<EdgeCreate> {
+    pub fn create_edge(
+        &self,
+        source_id: &str,
+        target_id: &str,
+        relationship: &str,
+    ) -> Result<EdgeCreate> {
         let now = now_secs();
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
         for id in [source_id, target_id] {
             let exists: i64 = conn.query_row(
                 "SELECT EXISTS(SELECT 1 FROM memories WHERE id = ?1)",
-                rusqlite::params![id], |r| r.get(0))?;
+                rusqlite::params![id],
+                |r| r.get(0),
+            )?;
             if exists == 0 {
                 return Ok(EdgeCreate::MissingEndpoint);
             }
@@ -352,7 +428,10 @@ impl SqliteStore {
     }
 
     pub fn set_edge_status(&self, id: &str, status: &str) -> Result<bool> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
         let n = conn.execute(
             "UPDATE edges SET status = ?1, updated_at = ?2 WHERE id = ?3",
             rusqlite::params![status, now_secs(), id],
@@ -368,18 +447,29 @@ impl SqliteStore {
         kind: &str,
         note: Option<&str>,
     ) -> Result<Option<String>> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
         if let Some(mid) = memory_id {
             let exists: i64 = conn.query_row(
                 "SELECT EXISTS(SELECT 1 FROM memories WHERE id = ?1)",
-                rusqlite::params![mid], |r| r.get(0))?;
-            if exists == 0 { return Ok(None); }
+                rusqlite::params![mid],
+                |r| r.get(0),
+            )?;
+            if exists == 0 {
+                return Ok(None);
+            }
         }
         if let Some(eid) = edge_id {
             let exists: i64 = conn.query_row(
                 "SELECT EXISTS(SELECT 1 FROM edges WHERE id = ?1)",
-                rusqlite::params![eid], |r| r.get(0))?;
-            if exists == 0 { return Ok(None); }
+                rusqlite::params![eid],
+                |r| r.get(0),
+            )?;
+            if exists == 0 {
+                return Ok(None);
+            }
         }
         let id = format!("fb_{}", uuid::Uuid::new_v4().simple());
         conn.execute(
@@ -391,7 +481,10 @@ impl SqliteStore {
     }
 
     pub fn list_feedback(&self, status: Option<&str>) -> Result<Vec<FeedbackItem>> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
         let base = "SELECT id, memory_id, edge_id, type, note, status, created_at FROM feedback";
         let map = |row: &rusqlite::Row| -> rusqlite::Result<FeedbackItem> {
             Ok(FeedbackItem {
@@ -406,19 +499,27 @@ impl SqliteStore {
         };
         let items = match status {
             Some(st) => {
-                let mut stmt = conn.prepare(&format!("{base} WHERE status = ?1 ORDER BY created_at DESC, rowid DESC"))?;
-                stmt.query_map(rusqlite::params![st], map)?.collect::<rusqlite::Result<Vec<_>>>()?
+                let mut stmt = conn.prepare(&format!(
+                    "{base} WHERE status = ?1 ORDER BY created_at DESC, rowid DESC"
+                ))?;
+                stmt.query_map(rusqlite::params![st], map)?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
             }
             None => {
-                let mut stmt = conn.prepare(&format!("{base} ORDER BY created_at DESC, rowid DESC"))?;
-                stmt.query_map([], map)?.collect::<rusqlite::Result<Vec<_>>>()?
+                let mut stmt =
+                    conn.prepare(&format!("{base} ORDER BY created_at DESC, rowid DESC"))?;
+                stmt.query_map([], map)?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
             }
         };
         Ok(items)
     }
 
     pub fn set_feedback_status(&self, id: &str, status: &str) -> Result<bool> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
         let n = conn.execute(
             "UPDATE feedback SET status = ?1 WHERE id = ?2",
             rusqlite::params![status, id],
@@ -427,7 +528,10 @@ impl SqliteStore {
     }
 
     pub fn get_kv(&self, key: &str) -> Result<Option<String>> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         let mut stmt = conn.prepare("SELECT value FROM kv WHERE key = ?1")?;
         match stmt.query_row(rusqlite::params![key], |r| r.get(0)) {
             Ok(v) => Ok(Some(v)),
@@ -437,7 +541,10 @@ impl SqliteStore {
     }
 
     pub fn set_kv(&self, key: &str, value: &str) -> Result<()> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         conn.execute(
             "INSERT INTO kv (key, value) VALUES (?1, ?2)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -457,7 +564,10 @@ impl SqliteStore {
     ) -> Result<String> {
         let id = format!("cfl_{}", uuid::Uuid::new_v4().simple());
         let now = now_secs();
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         conn.execute(
             "INSERT INTO conflicts (id, memory_id, winner, loser, winner_src, loser_src, detected_at, status)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'open')",
@@ -467,11 +577,14 @@ impl SqliteStore {
     }
 
     pub fn resolve_conflict(&self, id: &str, action: &str) -> Result<bool> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         if action == "restore" {
             let row: Option<(Option<String>, String)> = {
                 let mut stmt = conn.prepare(
-                    "SELECT memory_id, loser FROM conflicts WHERE id = ?1 AND status = 'open'"
+                    "SELECT memory_id, loser FROM conflicts WHERE id = ?1 AND status = 'open'",
                 )?;
                 stmt.query_row(rusqlite::params![id], |r| Ok((r.get(0)?, r.get(1)?)))
                     .optional()?
@@ -483,7 +596,11 @@ impl SqliteStore {
                 )?;
             }
         }
-        let new_status = if action == "restore" { "restored" } else { "resolved" };
+        let new_status = if action == "restore" {
+            "restored"
+        } else {
+            "resolved"
+        };
         let n = conn.execute(
             "UPDATE conflicts SET status = ?1 WHERE id = ?2 AND status = 'open'",
             rusqlite::params![new_status, id],
@@ -493,7 +610,10 @@ impl SqliteStore {
 
     /// Conflicts are written by Phase 5 sync; the dashboard already reads them.
     pub fn list_conflicts(&self, status: Option<&str>) -> Result<Vec<ConflictItem>> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
         let map = |row: &rusqlite::Row| -> rusqlite::Result<ConflictItem> {
             Ok(ConflictItem {
                 id: row.get(0)?,
@@ -512,26 +632,32 @@ impl SqliteStore {
                     FROM conflicts c LEFT JOIN memories m ON c.memory_id = m.id";
         let items = match status {
             Some(st) => {
-                let sql = format!("{base} WHERE c.status = ?1 ORDER BY c.detected_at DESC, c.rowid DESC");
+                let sql =
+                    format!("{base} WHERE c.status = ?1 ORDER BY c.detected_at DESC, c.rowid DESC");
                 let mut stmt = conn.prepare(&sql)?;
-                stmt.query_map(rusqlite::params![st], map)?.collect::<rusqlite::Result<Vec<_>>>()?
+                stmt.query_map(rusqlite::params![st], map)?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
             }
             None => {
                 let sql = format!("{base} ORDER BY c.detected_at DESC, c.rowid DESC");
                 let mut stmt = conn.prepare(&sql)?;
-                stmt.query_map([], map)?.collect::<rusqlite::Result<Vec<_>>>()?
+                stmt.query_map([], map)?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
             }
         };
         Ok(items)
     }
 
     pub fn get_conflict_by_id(&self, id: &str) -> Result<Option<ConflictItem>> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         let mut stmt = conn.prepare(
             "SELECT c.id, c.memory_id, c.winner, c.loser, c.winner_src, c.loser_src,
                     c.detected_at, c.status, m.title
              FROM conflicts c LEFT JOIN memories m ON c.memory_id = m.id
-             WHERE c.id = ?1"
+             WHERE c.id = ?1",
         )?;
         stmt.query_row(rusqlite::params![id], |row| {
             Ok(ConflictItem {
@@ -545,34 +671,52 @@ impl SqliteStore {
                 status: row.get(7)?,
                 title: row.get(8)?,
             })
-        }).optional().map_err(Into::into)
+        })
+        .optional()
+        .map_err(Into::into)
     }
 
     pub fn memories_since(&self, since_ts: i64) -> Result<Vec<MemoryEntry>> {
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         let mut stmt = conn.prepare(
             "SELECT id, layer, type, title, content, source, project, created_at, updated_at
-             FROM memories WHERE updated_at > ?1 ORDER BY updated_at ASC"
+             FROM memories WHERE updated_at > ?1 ORDER BY updated_at ASC",
         )?;
-        let rows = stmt.query_map(rusqlite::params![since_ts], Self::row_tuple)?
+        let rows = stmt
+            .query_map(rusqlite::params![since_ts], Self::row_tuple)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         let mut entries = Vec::with_capacity(rows.len());
-        for (rid, layer_s, type_s, title, content, source, project, created_at, updated_at) in rows {
-            entries.push(Self::row_to_entry(&conn, rid, layer_s, type_s, title, content, source, project, created_at, updated_at)?);
+        for (rid, layer_s, type_s, title, content, source, project, created_at, updated_at) in rows
+        {
+            entries.push(Self::row_to_entry(
+                &conn, rid, layer_s, type_s, title, content, source, project, created_at,
+                updated_at,
+            )?);
         }
         Ok(entries)
     }
 
-    pub fn upsert_memory(&self, entry: &crate::model::MemoryEntry) -> Result<Option<crate::model::ConflictItem>> {
+    pub fn upsert_memory(
+        &self,
+        entry: &crate::model::MemoryEntry,
+    ) -> Result<Option<crate::model::ConflictItem>> {
         let now = now_secs();
-        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
         let tx = conn.unchecked_transaction()?;
 
-        let existing: Option<(i64, String, String)> = tx.query_row(
-            "SELECT updated_at, content, title FROM memories WHERE id = ?1",
-            rusqlite::params![entry.id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        ).optional()?;
+        let existing: Option<(i64, String, String)> = tx
+            .query_row(
+                "SELECT updated_at, content, title FROM memories WHERE id = ?1",
+                rusqlite::params![entry.id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
 
         let conflict = if let Some((local_ts, local_content, local_title)) = existing {
             if entry.updated_at == local_ts {
@@ -580,9 +724,19 @@ impl SqliteStore {
                 return Ok(None);
             }
             let (winner, loser, winner_src, loser_src) = if entry.updated_at > local_ts {
-                (entry.content.as_str(), local_content.as_str(), "remote", "local")
+                (
+                    entry.content.as_str(),
+                    local_content.as_str(),
+                    "remote",
+                    "local",
+                )
             } else {
-                (local_content.as_str(), entry.content.as_str(), "local", "remote")
+                (
+                    local_content.as_str(),
+                    entry.content.as_str(),
+                    "local",
+                    "remote",
+                )
             };
             if entry.updated_at > local_ts {
                 tx.execute(
@@ -593,9 +747,15 @@ impl SqliteStore {
                         entry.updated_at, entry.id,
                     ],
                 )?;
-                tx.execute("DELETE FROM tags WHERE memory_id = ?1", rusqlite::params![entry.id])?;
+                tx.execute(
+                    "DELETE FROM tags WHERE memory_id = ?1",
+                    rusqlite::params![entry.id],
+                )?;
                 for t in &entry.tags {
-                    tx.execute("INSERT INTO tags (memory_id, tag) VALUES (?1, ?2)", rusqlite::params![entry.id, t])?;
+                    tx.execute(
+                        "INSERT INTO tags (memory_id, tag) VALUES (?1, ?2)",
+                        rusqlite::params![entry.id, t],
+                    )?;
                 }
             }
             let cfl_id = format!("cfl_{}", uuid::Uuid::new_v4().simple());
@@ -626,7 +786,10 @@ impl SqliteStore {
                 ],
             )?;
             for t in &entry.tags {
-                tx.execute("INSERT INTO tags (memory_id, tag) VALUES (?1, ?2)", rusqlite::params![entry.id, t])?;
+                tx.execute(
+                    "INSERT INTO tags (memory_id, tag) VALUES (?1, ?2)",
+                    rusqlite::params![entry.id, t],
+                )?;
             }
             None
         };
@@ -636,9 +799,15 @@ impl SqliteStore {
     }
 
     pub fn delete(&self, id: &str) -> Result<bool> {
-        let mut conn = self.conn.lock().map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
         let tx = conn.transaction()?;
-        tx.execute("DELETE FROM tags WHERE memory_id = ?1", rusqlite::params![id])?;
+        tx.execute(
+            "DELETE FROM tags WHERE memory_id = ?1",
+            rusqlite::params![id],
+        )?;
         tx.execute(
             "DELETE FROM edges WHERE source_id = ?1 OR target_id = ?1",
             rusqlite::params![id],
@@ -650,26 +819,60 @@ impl SqliteStore {
     }
 
     #[allow(clippy::type_complexity)]
-    fn row_tuple(row: &rusqlite::Row) -> rusqlite::Result<(
-        String, String, String, String, String,
-        Option<String>, Option<String>, i64, i64,
+    fn row_tuple(
+        row: &rusqlite::Row,
+    ) -> rusqlite::Result<(
+        String,
+        String,
+        String,
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+        i64,
+        i64,
     )> {
         Ok((
-            row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?,
-            row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?,
+            row.get(0)?,
+            row.get(1)?,
+            row.get(2)?,
+            row.get(3)?,
+            row.get(4)?,
+            row.get(5)?,
+            row.get(6)?,
+            row.get(7)?,
+            row.get(8)?,
         ))
     }
 
     #[allow(clippy::too_many_arguments)]
     fn row_to_entry(
         conn: &Connection,
-        rid: String, layer_s: String, type_s: String, title: String, content: String,
-        source: Option<String>, project: Option<String>, created_at: i64, updated_at: i64,
+        rid: String,
+        layer_s: String,
+        type_s: String,
+        title: String,
+        content: String,
+        source: Option<String>,
+        project: Option<String>,
+        created_at: i64,
+        updated_at: i64,
     ) -> Result<MemoryEntry> {
         let layer = layer_s.parse::<Layer>()?;
         let memory_type = type_s.parse::<MemoryType>()?;
         let tags = Self::fetch_tags(conn, &rid)?;
-        Ok(MemoryEntry { id: rid, layer, memory_type, title, content, source, project, tags, created_at, updated_at })
+        Ok(MemoryEntry {
+            id: rid,
+            layer,
+            memory_type,
+            title,
+            content,
+            source,
+            project,
+            tags,
+            created_at,
+            updated_at,
+        })
     }
 
     fn fetch_tags(conn: &Connection, memory_id: &str) -> Result<Vec<String>> {
@@ -684,7 +887,10 @@ impl SqliteStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{db, model::{Layer, MemoryType, NewMemory}};
+    use crate::{
+        db,
+        model::{Layer, MemoryType, NewMemory},
+    };
 
     fn open_test_store() -> SqliteStore {
         let conn = Connection::open_in_memory().unwrap();
@@ -718,11 +924,15 @@ mod tests {
         let id = s.store(sample()).unwrap().id;
         let conn = s.conn.lock().unwrap();
         let title: String = conn
-            .query_row("SELECT title FROM memories WHERE id=?1", [&id], |r| r.get(0))
+            .query_row("SELECT title FROM memories WHERE id=?1", [&id], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(title, "golang preferences");
         let tag_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM tags WHERE memory_id=?1", [&id], |r| r.get(0))
+            .query_row("SELECT COUNT(*) FROM tags WHERE memory_id=?1", [&id], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(tag_count, 2);
     }
@@ -773,7 +983,9 @@ mod tests {
         let id = s.store(new).unwrap().id;
         let conn = s.conn.lock().unwrap();
         let tag_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM tags WHERE memory_id=?1", [&id], |r| r.get(0))
+            .query_row("SELECT COUNT(*) FROM tags WHERE memory_id=?1", [&id], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(tag_count, 2, "expected 2 unique tags, got {tag_count}");
     }
@@ -784,23 +996,30 @@ mod tests {
         let first = s.store(sample()).unwrap();
         assert_eq!(first.auto_connected, 0, "first memory connects to nothing");
 
-        let second = s.store(NewMemory {
-            title: "go http patterns".to_string(),
-            content: "chi router, middleware chain".to_string(),
-            layer: Layer::Personal,
-            memory_type: MemoryType::Preference,
-            tags: vec!["golang".to_string()],
-            project: None,
-            source: None,
-        }).unwrap();
-        assert_eq!(second.auto_connected, 1, "should connect to the golang memory");
+        let second = s
+            .store(NewMemory {
+                title: "go http patterns".to_string(),
+                content: "chi router, middleware chain".to_string(),
+                layer: Layer::Personal,
+                memory_type: MemoryType::Preference,
+                tags: vec!["golang".to_string()],
+                project: None,
+                source: None,
+            })
+            .unwrap();
+        assert_eq!(
+            second.auto_connected, 1,
+            "should connect to the golang memory"
+        );
 
         let conn = s.conn.lock().unwrap();
         let edge_count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM edges WHERE source_id=?1 AND relationship='shares_tag'",
-                [&second.id], |r| r.get(0),
-            ).unwrap();
+                [&second.id],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(edge_count, 1);
     }
 
@@ -849,7 +1068,8 @@ mod tests {
                 tags: vec![format!("t{i}")],
                 project: None,
                 source: None,
-            }).unwrap();
+            })
+            .unwrap();
         }
         assert_eq!(s.search("apple", 2).unwrap().len(), 2);
     }
@@ -858,12 +1078,17 @@ mod tests {
     fn update_replaces_title_and_content() {
         let s = open_test_store();
         let id = s.store(sample()).unwrap().id;
-        let found = s.update(&id, crate::model::UpdateMemory {
-            title: Some("golang prefs v2".to_string()),
-            content: Some("now also: chi router".to_string()),
-            tags: None,
-            merge_content: false,
-        }).unwrap();
+        let found = s
+            .update(
+                &id,
+                crate::model::UpdateMemory {
+                    title: Some("golang prefs v2".to_string()),
+                    content: Some("now also: chi router".to_string()),
+                    tags: None,
+                    merge_content: false,
+                },
+            )
+            .unwrap();
         assert!(found);
         let e = s.recall_by_id(&id).unwrap().unwrap();
         assert_eq!(e.title, "golang prefs v2");
@@ -875,12 +1100,16 @@ mod tests {
     fn update_merge_content_appends() {
         let s = open_test_store();
         let id = s.store(sample()).unwrap().id;
-        s.update(&id, crate::model::UpdateMemory {
-            title: None,
-            content: Some("addendum line".to_string()),
-            tags: None,
-            merge_content: true,
-        }).unwrap();
+        s.update(
+            &id,
+            crate::model::UpdateMemory {
+                title: None,
+                content: Some("addendum line".to_string()),
+                tags: None,
+                merge_content: true,
+            },
+        )
+        .unwrap();
         let e = s.recall_by_id(&id).unwrap().unwrap();
         assert!(e.content.contains("pgx v5 driver"), "old content kept");
         assert!(e.content.contains("addendum line"), "new content appended");
@@ -890,12 +1119,20 @@ mod tests {
     fn update_replaces_tags_when_provided() {
         let s = open_test_store();
         let id = s.store(sample()).unwrap().id;
-        s.update(&id, crate::model::UpdateMemory {
-            title: None,
-            content: None,
-            tags: Some(vec!["rust".to_string(), "rust".to_string(), "mcp".to_string()]),
-            merge_content: false,
-        }).unwrap();
+        s.update(
+            &id,
+            crate::model::UpdateMemory {
+                title: None,
+                content: None,
+                tags: Some(vec![
+                    "rust".to_string(),
+                    "rust".to_string(),
+                    "mcp".to_string(),
+                ]),
+                merge_content: false,
+            },
+        )
+        .unwrap();
         let e = s.recall_by_id(&id).unwrap().unwrap();
         assert_eq!(e.tags.len(), 2, "tags replaced and deduped");
         assert!(e.tags.contains(&"mcp".to_string()));
@@ -905,7 +1142,9 @@ mod tests {
     #[test]
     fn update_returns_false_for_missing() {
         let s = open_test_store();
-        let found = s.update("mem_nope", crate::model::UpdateMemory::default()).unwrap();
+        let found = s
+            .update("mem_nope", crate::model::UpdateMemory::default())
+            .unwrap();
         assert!(!found);
     }
 
@@ -913,12 +1152,16 @@ mod tests {
     fn update_reindexes_fts() {
         let s = open_test_store();
         let id = s.store(sample()).unwrap().id;
-        s.update(&id, crate::model::UpdateMemory {
-            title: None,
-            content: Some("kubernetes operators".to_string()),
-            tags: None,
-            merge_content: false,
-        }).unwrap();
+        s.update(
+            &id,
+            crate::model::UpdateMemory {
+                title: None,
+                content: Some("kubernetes operators".to_string()),
+                tags: None,
+                merge_content: false,
+            },
+        )
+        .unwrap();
         assert_eq!(s.search("kubernetes", 5).unwrap().len(), 1);
         assert!(s.search("pgx", 5).unwrap().is_empty());
     }
@@ -933,7 +1176,9 @@ mod tests {
         assert!(s.search("pgx", 5).unwrap().is_empty(), "FTS entry removed");
         let conn = s.conn.lock().unwrap();
         let tag_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM tags WHERE memory_id=?1", [&id], |r| r.get(0))
+            .query_row("SELECT COUNT(*) FROM tags WHERE memory_id=?1", [&id], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(tag_count, 0, "tags removed");
     }
@@ -942,22 +1187,27 @@ mod tests {
     fn delete_removes_connected_edges() {
         let s = open_test_store();
         let first = s.store(sample()).unwrap().id;
-        let second = s.store(NewMemory {
-            title: "go again".to_string(),
-            content: "more golang".to_string(),
-            layer: Layer::Personal,
-            memory_type: MemoryType::Preference,
-            tags: vec!["golang".to_string()],
-            project: None,
-            source: None,
-        }).unwrap().id;
+        let second = s
+            .store(NewMemory {
+                title: "go again".to_string(),
+                content: "more golang".to_string(),
+                layer: Layer::Personal,
+                memory_type: MemoryType::Preference,
+                tags: vec!["golang".to_string()],
+                project: None,
+                source: None,
+            })
+            .unwrap()
+            .id;
         s.delete(&second).unwrap();
         let edge_count: i64 = {
             let conn = s.conn.lock().unwrap();
             conn.query_row(
                 "SELECT COUNT(*) FROM edges WHERE source_id=?1 OR target_id=?1",
-                [&second], |r| r.get(0),
-            ).unwrap()
+                [&second],
+                |r| r.get(0),
+            )
+            .unwrap()
         };
         assert_eq!(edge_count, 0, "edges referencing deleted memory removed");
         assert!(s.recall_by_id(&first).unwrap().is_some());
@@ -1012,15 +1262,17 @@ mod tests {
     fn store_does_not_connect_when_no_shared_tags() {
         let s = open_test_store();
         s.store(sample()).unwrap();
-        let other = s.store(NewMemory {
-            title: "unrelated".to_string(),
-            content: "nothing in common".to_string(),
-            layer: Layer::Personal,
-            memory_type: MemoryType::Preference,
-            tags: vec!["cooking".to_string()],
-            project: None,
-            source: None,
-        }).unwrap();
+        let other = s
+            .store(NewMemory {
+                title: "unrelated".to_string(),
+                content: "nothing in common".to_string(),
+                layer: Layer::Personal,
+                memory_type: MemoryType::Preference,
+                tags: vec!["cooking".to_string()],
+                project: None,
+                source: None,
+            })
+            .unwrap();
         assert_eq!(other.auto_connected, 0);
     }
 
@@ -1036,7 +1288,8 @@ mod tests {
             tags: vec!["t".to_string()],
             project: Some("proj".to_string()),
             source: None,
-        }).unwrap();
+        })
+        .unwrap();
         let list = s.list_memories(None, 50).unwrap();
         assert_eq!(list.len(), 2);
         assert_eq!(list[0].title, "second", "newest first");
@@ -1056,7 +1309,8 @@ mod tests {
                 tags: vec![],
                 project: Some("p".to_string()),
                 source: None,
-            }).unwrap();
+            })
+            .unwrap();
         }
         let ws = s.list_memories(Some(Layer::Workspace), 50).unwrap();
         assert_eq!(ws.len(), 2);
@@ -1068,11 +1322,18 @@ mod tests {
     fn create_edge_creates_accepted_manual_edge() {
         let s = open_test_store();
         let a = s.store(sample()).unwrap().id;
-        let b = s.store(NewMemory {
-            title: "other".to_string(), content: "x".to_string(),
-            layer: Layer::Personal, memory_type: MemoryType::Preference,
-            tags: vec![], project: None, source: None,
-        }).unwrap().id;
+        let b = s
+            .store(NewMemory {
+                title: "other".to_string(),
+                content: "x".to_string(),
+                layer: Layer::Personal,
+                memory_type: MemoryType::Preference,
+                tags: vec![],
+                project: None,
+                source: None,
+            })
+            .unwrap()
+            .id;
         let created = s.create_edge(&a, &b, "pairs_with").unwrap();
         let id = match created {
             crate::model::EdgeCreate::Created(id) => id,
@@ -1089,14 +1350,27 @@ mod tests {
     fn create_edge_detects_duplicate_and_missing_endpoint() {
         let s = open_test_store();
         let a = s.store(sample()).unwrap().id;
-        let b = s.store(NewMemory {
-            title: "other".to_string(), content: "x".to_string(),
-            layer: Layer::Personal, memory_type: MemoryType::Preference,
-            tags: vec![], project: None, source: None,
-        }).unwrap().id;
+        let b = s
+            .store(NewMemory {
+                title: "other".to_string(),
+                content: "x".to_string(),
+                layer: Layer::Personal,
+                memory_type: MemoryType::Preference,
+                tags: vec![],
+                project: None,
+                source: None,
+            })
+            .unwrap()
+            .id;
         s.create_edge(&a, &b, "pairs_with").unwrap();
-        assert_eq!(s.create_edge(&a, &b, "pairs_with").unwrap(), crate::model::EdgeCreate::Duplicate);
-        assert_eq!(s.create_edge(&a, "mem_nope", "pairs_with").unwrap(), crate::model::EdgeCreate::MissingEndpoint);
+        assert_eq!(
+            s.create_edge(&a, &b, "pairs_with").unwrap(),
+            crate::model::EdgeCreate::Duplicate
+        );
+        assert_eq!(
+            s.create_edge(&a, "mem_nope", "pairs_with").unwrap(),
+            crate::model::EdgeCreate::MissingEndpoint
+        );
     }
 
     #[test]
@@ -1105,10 +1379,15 @@ mod tests {
         s.store(sample()).unwrap();
         // Sharing the "golang" tag auto-creates an accepted edge.
         s.store(NewMemory {
-            title: "go http".to_string(), content: "chi router".to_string(),
-            layer: Layer::Personal, memory_type: MemoryType::Preference,
-            tags: vec!["golang".to_string()], project: None, source: None,
-        }).unwrap();
+            title: "go http".to_string(),
+            content: "chi router".to_string(),
+            layer: Layer::Personal,
+            memory_type: MemoryType::Preference,
+            tags: vec!["golang".to_string()],
+            project: None,
+            source: None,
+        })
+        .unwrap();
         let accepted = s.list_edges(Some("accepted")).unwrap();
         assert_eq!(accepted.len(), 1);
         assert!(s.list_edges(Some("pending")).unwrap().is_empty());
@@ -1124,8 +1403,10 @@ mod tests {
     fn feedback_roundtrip_and_status_filter() {
         let s = open_test_store();
         let mem = s.store(sample()).unwrap().id;
-        let id = s.create_feedback(Some(&mem), None, "outdated", Some("pgx is now v6"))
-            .unwrap().expect("memory exists");
+        let id = s
+            .create_feedback(Some(&mem), None, "outdated", Some("pgx is now v6"))
+            .unwrap()
+            .expect("memory exists");
         assert!(id.starts_with("fb_"), "id was {id}");
 
         let open = s.list_feedback(Some("open")).unwrap();
@@ -1142,7 +1423,11 @@ mod tests {
     #[test]
     fn create_feedback_rejects_missing_memory() {
         let s = open_test_store();
-        assert!(s.create_feedback(Some("mem_nope"), None, "incorrect", None).unwrap().is_none());
+        assert!(
+            s.create_feedback(Some("mem_nope"), None, "incorrect", None)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -1161,16 +1446,24 @@ mod tests {
     fn set_and_get_kv_roundtrip() {
         let s = open_test_store();
         s.set_kv("last_synced_at", "1000000000").unwrap();
-        assert_eq!(s.get_kv("last_synced_at").unwrap().as_deref(), Some("1000000000"));
+        assert_eq!(
+            s.get_kv("last_synced_at").unwrap().as_deref(),
+            Some("1000000000")
+        );
         // upsert overwrites
         s.set_kv("last_synced_at", "2000000000").unwrap();
-        assert_eq!(s.get_kv("last_synced_at").unwrap().as_deref(), Some("2000000000"));
+        assert_eq!(
+            s.get_kv("last_synced_at").unwrap().as_deref(),
+            Some("2000000000")
+        );
     }
 
     #[test]
     fn write_conflict_creates_open_record() {
         let s = open_test_store();
-        let id = s.write_conflict(None, "remote content", "local content", "remote", "local").unwrap();
+        let id = s
+            .write_conflict(None, "remote content", "local content", "remote", "local")
+            .unwrap();
         assert!(id.starts_with("cfl_"));
         let conflicts = s.list_conflicts(Some("open")).unwrap();
         assert_eq!(conflicts.len(), 1);
@@ -1193,16 +1486,33 @@ mod tests {
     #[test]
     fn resolve_conflict_restore_updates_memory_content() {
         let s = open_test_store();
-        let mem_id = s.store(crate::model::NewMemory {
-            title: "t".into(), content: "new content".into(),
-            layer: crate::model::Layer::Personal,
-            memory_type: crate::model::MemoryType::Preference,
-            tags: vec![], project: None, source: None,
-        }).unwrap().id;
-        let cfl_id = s.write_conflict(Some(&mem_id), "new content", "old content", "remote", "local").unwrap();
+        let mem_id = s
+            .store(crate::model::NewMemory {
+                title: "t".into(),
+                content: "new content".into(),
+                layer: crate::model::Layer::Personal,
+                memory_type: crate::model::MemoryType::Preference,
+                tags: vec![],
+                project: None,
+                source: None,
+            })
+            .unwrap()
+            .id;
+        let cfl_id = s
+            .write_conflict(
+                Some(&mem_id),
+                "new content",
+                "old content",
+                "remote",
+                "local",
+            )
+            .unwrap();
         assert!(s.resolve_conflict(&cfl_id, "restore").unwrap());
         let mem = s.recall_by_id(&mem_id).unwrap().unwrap();
-        assert_eq!(mem.content, "old content", "restore should write the loser content back");
+        assert_eq!(
+            mem.content, "old content",
+            "restore should write the loser content back"
+        );
         let restored = s.list_conflicts(Some("restored")).unwrap();
         assert_eq!(restored.len(), 1);
     }
@@ -1217,14 +1527,21 @@ mod tests {
     fn list_conflicts_filters_by_status() {
         let s = open_test_store();
         s.write_conflict(None, "w", "l", "remote", "local").unwrap();
-        let id2 = s.write_conflict(None, "w2", "l2", "remote", "local").unwrap();
+        let id2 = s
+            .write_conflict(None, "w2", "l2", "remote", "local")
+            .unwrap();
         s.resolve_conflict(&id2, "keep").unwrap();
         assert_eq!(s.list_conflicts(Some("open")).unwrap().len(), 1);
         assert_eq!(s.list_conflicts(Some("resolved")).unwrap().len(), 1);
         assert_eq!(s.list_conflicts(None).unwrap().len(), 2);
     }
 
-    fn remote_entry(id: &str, title: &str, content: &str, updated_at: i64) -> crate::model::MemoryEntry {
+    fn remote_entry(
+        id: &str,
+        title: &str,
+        content: &str,
+        updated_at: i64,
+    ) -> crate::model::MemoryEntry {
         crate::model::MemoryEntry {
             id: id.to_string(),
             layer: crate::model::Layer::Personal,
@@ -1263,7 +1580,10 @@ mod tests {
         let s = open_test_store();
         let entry = remote_entry("mem_abc", "Remote Title", "Remote content", now_secs());
         let conflict = s.upsert_memory(&entry).unwrap();
-        assert!(conflict.is_none(), "new memory should not produce a conflict");
+        assert!(
+            conflict.is_none(),
+            "new memory should not produce a conflict"
+        );
         let recalled = s.recall_by_id("mem_abc").unwrap().unwrap();
         assert_eq!(recalled.title, "Remote Title");
         assert_eq!(recalled.tags, vec!["test"]);
@@ -1272,12 +1592,18 @@ mod tests {
     #[test]
     fn upsert_memory_remote_wins_when_newer() {
         let s = open_test_store();
-        let local_id = s.store(crate::model::NewMemory {
-            title: "Local title".into(), content: "Local content".into(),
-            layer: crate::model::Layer::Personal,
-            memory_type: crate::model::MemoryType::Preference,
-            tags: vec![], project: None, source: Some("local".to_string()),
-        }).unwrap().id;
+        let local_id = s
+            .store(crate::model::NewMemory {
+                title: "Local title".into(),
+                content: "Local content".into(),
+                layer: crate::model::Layer::Personal,
+                memory_type: crate::model::MemoryType::Preference,
+                tags: vec![],
+                project: None,
+                source: Some("local".to_string()),
+            })
+            .unwrap()
+            .id;
 
         let remote_ts = now_secs() + 100;
         let entry = remote_entry(&local_id, "Remote title", "Remote content", remote_ts);
@@ -1290,18 +1616,27 @@ mod tests {
         assert_eq!(c.loser_src, "local");
 
         let recalled = s.recall_by_id(&local_id).unwrap().unwrap();
-        assert_eq!(recalled.content, "Remote content", "memory should be updated to winner");
+        assert_eq!(
+            recalled.content, "Remote content",
+            "memory should be updated to winner"
+        );
     }
 
     #[test]
     fn upsert_memory_local_wins_when_newer() {
         let s = open_test_store();
-        let local_id = s.store(crate::model::NewMemory {
-            title: "Local title".into(), content: "Local content".into(),
-            layer: crate::model::Layer::Personal,
-            memory_type: crate::model::MemoryType::Preference,
-            tags: vec![], project: None, source: Some("local".to_string()),
-        }).unwrap().id;
+        let local_id = s
+            .store(crate::model::NewMemory {
+                title: "Local title".into(),
+                content: "Local content".into(),
+                layer: crate::model::Layer::Personal,
+                memory_type: crate::model::MemoryType::Preference,
+                tags: vec![],
+                project: None,
+                source: Some("local".to_string()),
+            })
+            .unwrap()
+            .id;
 
         let entry = remote_entry(&local_id, "Remote title", "Remote content", 1);
         let conflict = s.upsert_memory(&entry).unwrap();
@@ -1311,7 +1646,10 @@ mod tests {
         assert_eq!(c.loser_src, "remote");
 
         let recalled = s.recall_by_id(&local_id).unwrap().unwrap();
-        assert_eq!(recalled.content, "Local content", "local content should be unchanged");
+        assert_eq!(
+            recalled.content, "Local content",
+            "local content should be unchanged"
+        );
     }
 
     #[test]
@@ -1323,7 +1661,9 @@ mod tests {
     #[test]
     fn get_conflict_by_id_returns_the_conflict() {
         let s = open_test_store();
-        let id = s.write_conflict(None, "winner content", "loser content", "remote", "local").unwrap();
+        let id = s
+            .write_conflict(None, "winner content", "loser content", "remote", "local")
+            .unwrap();
         let c = s.get_conflict_by_id(&id).unwrap().unwrap();
         assert_eq!(c.id, id);
         assert_eq!(c.winner, "winner content");
