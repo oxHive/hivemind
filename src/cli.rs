@@ -27,6 +27,20 @@ pub enum Command {
         #[arg(long)]
         open: bool,
     },
+    /// Manage MCP client integrations
+    Mcp {
+        #[command(subcommand)]
+        action: McpAction,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum McpAction {
+    /// Register HiveMind as an MCP server in a supported AI coding client
+    Install {
+        /// Client to register with: claude
+        client: String,
+    },
 }
 
 pub fn cmd_init() -> Result<()> {
@@ -224,6 +238,61 @@ When the user shares something worth persisting (preferences, project context,
 design decisions), suggest: \"That seems worth remembering — should I store it?\"
 Wait for explicit confirmation before calling memory_store.
 ";
+
+pub fn cmd_mcp_install(client: &str) -> Result<()> {
+    match client {
+        "claude" => install_claude(),
+        other => anyhow::bail!(
+            "unknown client \"{other}\" — supported clients: claude"
+        ),
+    }
+}
+
+fn install_claude() -> Result<()> {
+    // Verify the claude CLI is available.
+    let claude_check = std::process::Command::new("claude")
+        .arg("--version")
+        .output();
+    if claude_check.is_err() {
+        anyhow::bail!(
+            "claude CLI not found in PATH\n\
+             Install Claude Code first: https://claude.ai/download\n\
+             Then re-run: hivemind mcp install claude"
+        );
+    }
+
+    // Check if already registered so we can skip gracefully.
+    let list_out = std::process::Command::new("claude")
+        .args(["mcp", "list"])
+        .output()?;
+    let list_str = String::from_utf8_lossy(&list_out.stdout);
+    if list_str.contains("hivemind") {
+        println!("HiveMind is already registered with Claude Code.");
+        println!("Run `hivemind up` to start the server, then open a new Claude Code session.");
+        return Ok(());
+    }
+
+    // Register.
+    let status = std::process::Command::new("claude")
+        .args([
+            "mcp", "add", "hivemind",
+            "--transport", "http",
+            "http://127.0.0.1:3456/mcp",
+        ])
+        .status()?;
+
+    if !status.success() {
+        anyhow::bail!("claude mcp add failed — run `claude mcp list` to inspect existing servers");
+    }
+
+    println!("HiveMind registered with Claude Code.");
+    println!();
+    println!("Next steps:");
+    println!("  1. Run `hivemind up` to start the server");
+    println!("  2. Open a new Claude Code session");
+    println!("  3. Type /memory-status to verify");
+    Ok(())
+}
 
 pub fn cmd_status() -> Result<()> {
     let cwd = std::env::current_dir()?;

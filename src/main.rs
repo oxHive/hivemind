@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use anyhow::Result;
 use clap::Parser;
-use oxhivemind::cli::{self, Cli, Command};
+use oxhivemind::cli::{self, Cli, Command, McpAction};
 use oxhivemind::{config, db, http, server, store};
 use rmcp::ServiceExt;
 use server::HiveMind;
@@ -15,6 +15,9 @@ fn main() -> Result<()> {
         Some(Command::Status) => cli::cmd_status(),
         Some(Command::Up { headless }) => run_up(headless),
         Some(Command::Dashboard { open }) => run_dashboard(open),
+        Some(Command::Mcp { action }) => match action {
+            McpAction::Install { client } => cli::cmd_mcp_install(&client),
+        },
     }
 }
 
