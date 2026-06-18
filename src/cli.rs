@@ -572,7 +572,13 @@ fn install_opencode() -> Result<()> {
             return Ok(());
         }
         let status = std::process::Command::new("opencode")
-            .args(["mcp", "add", "--remote", "hivemind", "http://127.0.0.1:3456/mcp"])
+            .args([
+                "mcp",
+                "add",
+                "--remote",
+                "hivemind",
+                "http://127.0.0.1:3456/mcp",
+            ])
             .status()?;
         if !status.success() {
             anyhow::bail!("opencode mcp add failed — check `opencode mcp list`");
@@ -618,7 +624,14 @@ fn install_kimi() -> Result<()> {
             return Ok(());
         }
         let status = std::process::Command::new("kimi")
-            .args(["mcp", "add", "--transport", "http", "hivemind", "http://127.0.0.1:3456/mcp"])
+            .args([
+                "mcp",
+                "add",
+                "--transport",
+                "http",
+                "hivemind",
+                "http://127.0.0.1:3456/mcp",
+            ])
             .status()?;
         if !status.success() {
             anyhow::bail!("kimi mcp add failed — check `kimi mcp list`");
@@ -702,11 +715,7 @@ fn install_windsurf() -> Result<()> {
 
 /// Read an mcpServers-style JSON config, insert or update the named server entry, write back.
 /// Creates the file and parent directories if absent.
-fn upsert_json_mcp(
-    path: &std::path::Path,
-    name: &str,
-    entry: serde_json::Value,
-) -> Result<()> {
+fn upsert_json_mcp(path: &std::path::Path, name: &str, entry: serde_json::Value) -> Result<()> {
     std::fs::create_dir_all(path.parent().unwrap())?;
 
     let mut root: serde_json::Value = if path.exists() {

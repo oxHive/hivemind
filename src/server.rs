@@ -922,7 +922,7 @@ mod tests {
                 content: "prefer tabs over spaces".to_string(),
                 layer: "personal".to_string(),
                 tags: vec!["style".to_string()],
-            memory_type: None,
+                memory_type: None,
                 project: None,
             })
             .await
@@ -941,7 +941,7 @@ mod tests {
                 content: "use clippy, rustfmt, and deny warnings".to_string(),
                 layer: "personal".to_string(),
                 tags: vec!["rust".to_string()],
-            memory_type: None,
+                memory_type: None,
                 project: None,
             })
             .await
@@ -1074,7 +1074,7 @@ mod tests {
                 content: "uses docker swarm".to_string(),
                 layer: "personal".to_string(),
                 tags: vec!["devops".to_string()],
-            memory_type: None,
+                memory_type: None,
                 project: None,
             })
             .await
@@ -1247,7 +1247,7 @@ mod tests {
                 content: "use clippy and rustfmt".to_string(),
                 layer: "personal".to_string(),
                 tags: vec!["rust".to_string()],
-            memory_type: None,
+                memory_type: None,
                 project: None,
             })
             .await
@@ -1287,7 +1287,7 @@ mod tests {
                 content: "c".to_string(),
                 layer: "personal".to_string(),
                 tags: vec![],
-            memory_type: None,
+                memory_type: None,
                 project: None,
             })
             .await
@@ -1399,7 +1399,7 @@ mod tests {
                 content: "stale content".to_string(),
                 layer: "personal".to_string(),
                 tags: vec![],
-            memory_type: None,
+                memory_type: None,
                 project: None,
             })
             .await
@@ -1464,7 +1464,7 @@ mod tests {
                 content: "delete me".to_string(),
                 layer: "personal".to_string(),
                 tags: vec!["tmp".to_string()],
-            memory_type: None,
+                memory_type: None,
                 project: None,
             })
             .await

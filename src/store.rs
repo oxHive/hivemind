@@ -50,8 +50,8 @@ impl SqliteStore {
             Err(e) => Err(e.into()),
             Ok((rid, layer_s, type_s, title, content, source, project, created_at, updated_at)) => {
                 Self::row_to_entry(
-                    &conn, rid, layer_s, type_s, title, content, source, project,
-                    created_at, updated_at,
+                    &conn, rid, layer_s, type_s, title, content, source, project, created_at,
+                    updated_at,
                 )
                 .map(Some)
             }
