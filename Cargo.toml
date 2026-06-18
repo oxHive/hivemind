@@ -19,7 +19,7 @@ path = "src/lib.rs"
 rmcp = { version = "1", features = ["server", "macros", "transport-streamable-http-server"] }
 axum = "0.8"
 tower-http = { version = "0.6", features = ["cors"] }
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.33", features = ["bundled"] }
 refinery = { version = "0.8", features = ["rusqlite"] }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
