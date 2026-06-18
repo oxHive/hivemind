@@ -2,6 +2,8 @@
 name = "oxhivemind"
 version = "0.1.0"
 edition = "2024"
+description = "A persistent memory MCP server for AI agents"
+license = "AGPL-3.0-only"
 
 [[bin]]
 name = "hivemind"
