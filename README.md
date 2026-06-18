@@ -9,6 +9,63 @@ Persistent memory for AI coding agents. HiveMind runs a local MCP server that gi
 3. At the start of every session, Claude automatically recalls the memories configured for your project.
 4. You ask Claude to store anything worth keeping — it never auto-stores.
 
+### The session start flow in detail
+
+When you open a new Claude Code session in a project that has `.hivemind.toml`:
+
+1. Claude reads CLAUDE.md, which instructs it to call `hivemind_session_start` once.
+2. Claude calls the MCP tool with the current project path.
+3. HiveMind reads `.hivemind.toml` (and `.hivemind.local.toml` if present), resolves each `recalls` entry against the SQLite database (by exact title, then FTS), and returns the results as structured JSON — staying within `max_tokens`.
+4. Claude incorporates the returned memories silently and proceeds with your request.
+
+That's it. One tool call, one round-trip to the database, zero per-prompt overhead after that.
+
+### Context budget
+
+The `max_tokens` cap prevents session start from consuming too much of Claude's context window. Memories are loaded in order; if an entry would push past the budget, it is skipped (but later, smaller entries still get a chance). The `hivemind status` command shows a preview of exactly what would be injected and how many tokens it costs.
+
+---
+
+## Fetching memories during a session
+
+The `recalls` list in `.hivemind.toml` is only for **automatic injection at session start**. You can always fetch any memory on demand during a session:
+
+- **By title or ID** — ask Claude: *"recall the memory titled 'golang preferences'"* → Claude calls `memory_recall`
+- **By keyword** — ask Claude: *"search my memories for postgres"* → Claude calls `memory_search` (FTS, returns snippets)
+- **Browse all** — use the `/memory-list` prompt
+
+Memories not listed in `recalls` are not gone — they're just not auto-loaded. They live in the database and are available any time you ask.
+
+---
+
+## How HiveMind differs from Claude Code's built-in hooks
+
+Claude Code has its own hook system in `.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "my-memory-tool search" }] }
+    ]
+  }
+}
+```
+
+This runs a shell command and injects its stdout into the conversation. It works, but the trade-offs differ:
+
+| | Claude Code `UserPromptSubmit` hook | HiveMind `[hooks.on_session_start]` |
+|---|---|---|
+| **When it runs** | On **every message** you send | **Once** per session |
+| **Context overhead** | Added to every prompt, every time | Injected once; zero cost after that |
+| **Token budget** | None — dumps all output unconditionally | `max_tokens` cap with per-entry skipping |
+| **Data source** | Anything a shell command outputs | SQLite FTS store, queryable by title/ID/keyword |
+| **Selectivity** | Whatever the command returns | You specify exactly which memories per project |
+| **Persistence** | Stateless — reruns the command fresh each call | Stateful — memories survive machines and reinstalls |
+| **On-demand access** | Only what the hook returns | Full MCP tools (`memory_recall`, `memory_search`, etc.) |
+
+**The short version:** the hook approach re-injects context on every single message, which burns tokens proportionally to how often you prompt. HiveMind injects once at session start and then stays out of the way — the rest of the session is just Claude using what it loaded, with on-demand tools if it needs more.
+
 ---
 
 ## Installation
@@ -91,7 +148,7 @@ recalls = [
 ]
 ```
 
-`recalls` is a list of memory titles to auto-inject at session start. Each entry is looked up by exact title. The combined size is capped at `max_tokens`.
+`recalls` is a list of memory titles to auto-inject at session start. Each entry is looked up by exact title, then falls back to FTS. The combined size is capped at `max_tokens`.
 
 ### Personal config — `.hivemind.local.toml`
 
@@ -150,6 +207,8 @@ interval_seconds = 300
 sync_on_store = true     # push immediately when a memory is stored
 sync_on_startup = true   # pull on server start
 ```
+
+The `api_key` is used only to authenticate **server-to-server sync requests** between two HiveMind instances. It is not used by Claude or the dashboard. Both machines must have the same key. Leave it empty for single-machine setups — the sync endpoints will accept all requests from localhost.
 
 ---
 
