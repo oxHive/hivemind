@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use oxhivemind::cli::{self, Cli, Command, McpAction};
+use oxhivemind::cli::{self, Cli, Command, McpAction, ServiceAction};
 use oxhivemind::{config, db, http, server, store};
 use rmcp::ServiceExt;
 use server::HiveMind;
@@ -17,6 +17,11 @@ fn main() -> Result<()> {
         Some(Command::Dashboard { open }) => run_dashboard(open),
         Some(Command::Mcp { action }) => match action {
             McpAction::Install { client } => cli::cmd_mcp_install(&client),
+        },
+        Some(Command::Service { action }) => match action {
+            ServiceAction::Install => cli::cmd_service_install(),
+            ServiceAction::Uninstall => cli::cmd_service_uninstall(),
+            ServiceAction::Status => cli::cmd_service_status(),
         },
     }
 }

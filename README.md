@@ -207,6 +207,28 @@ hivemind init
 # 3. Open a new Claude Code session — memory hooks are now active
 ```
 
+### Run as a background service (recommended)
+
+Instead of keeping a terminal open, install HiveMind as a user-level service so it starts automatically on login:
+
+```sh
+hivemind service install
+```
+
+This writes a unit file (Linux) or launchd plist (macOS) and enables it immediately — no `sudo` required.
+
+| Platform | Mechanism | Unit file location |
+|----------|-----------|-------------------|
+| Linux | systemd user unit | `~/.config/systemd/user/hivemind.service` |
+| macOS | launchd LaunchAgent | `~/Library/LaunchAgents/com.oxhive.hivemind.plist` |
+
+On macOS, logs are written to `~/Library/Logs/hivemind.log`.
+
+```sh
+hivemind service status    # check if running
+hivemind service uninstall # stop and remove
+```
+
 `hivemind init` creates:
 
 | File | Description |
@@ -238,6 +260,9 @@ hivemind mcp install kimi        Register with Kimi Code CLI
 hivemind mcp install codex       Register with OpenAI Codex CLI
 hivemind mcp install cursor      Register with Cursor
 hivemind mcp install windsurf    Register with Windsurf
+hivemind service install         Install and enable as a background service
+hivemind service uninstall       Stop and remove the background service
+hivemind service status          Show background service status
 hivemind dashboard --open        Open the dashboard (requires server running)
 ```
 
