@@ -745,7 +745,20 @@ fn upsert_json_mcp(path: &std::path::Path, name: &str, entry: serde_json::Value)
     Ok(())
 }
 
+/// Print a one-time hint when `hivemind init` has never been run.
+/// Called from commands that work without init but benefit from it.
+pub fn warn_if_not_initialized() {
+    let config_path = crate::config::global_config_path();
+    if !config_path.exists() {
+        eprintln!("hint: looks like you haven't run `hivemind init` yet.");
+        eprintln!("      Run it in your project directory to create config files and register");
+        eprintln!("      HiveMind with your AI coding client.");
+        eprintln!();
+    }
+}
+
 pub fn cmd_status() -> Result<()> {
+    warn_if_not_initialized();
     let cwd = std::env::current_dir()?;
     let db_path = crate::db::resolve_db_path();
     let conn = crate::db::open(&db_path)?;
