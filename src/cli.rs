@@ -36,6 +36,21 @@ pub enum Command {
         #[command(subcommand)]
         action: McpAction,
     },
+    /// Manage HiveMind as a background service
+    Service {
+        #[command(subcommand)]
+        action: ServiceAction,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum ServiceAction {
+    /// Install and enable HiveMind as a user-level background service
+    Install,
+    /// Stop and remove the HiveMind background service
+    Uninstall,
+    /// Show the status of the HiveMind background service
+    Status,
 }
 
 #[derive(Subcommand)]
@@ -238,6 +253,244 @@ When the user shares something worth persisting (preferences, project context,
 design decisions), suggest: \"That seems worth remembering — should I store it?\"
 Wait for explicit confirmation before calling memory_store.
 ";
+
+// ── service management ────────────────────────────────────────────────────────
+
+pub fn cmd_service_install() -> Result<()> {
+    #[cfg(target_os = "macos")]
+    return service_install_macos();
+    #[cfg(target_os = "linux")]
+    return service_install_linux();
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    anyhow::bail!("hivemind service install is only supported on Linux and macOS");
+}
+
+pub fn cmd_service_uninstall() -> Result<()> {
+    #[cfg(target_os = "macos")]
+    return service_uninstall_macos();
+    #[cfg(target_os = "linux")]
+    return service_uninstall_linux();
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    anyhow::bail!("hivemind service uninstall is only supported on Linux and macOS");
+}
+
+pub fn cmd_service_status() -> Result<()> {
+    #[cfg(target_os = "macos")]
+    return service_status_macos();
+    #[cfg(target_os = "linux")]
+    return service_status_linux();
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    anyhow::bail!("hivemind service status is only supported on Linux and macOS");
+}
+
+// ── Linux / systemd user unit ─────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
+fn systemd_unit_dir() -> PathBuf {
+    std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home_dir().join(".config"))
+        .join("systemd")
+        .join("user")
+}
+
+#[cfg(target_os = "linux")]
+fn systemd_unit_path() -> PathBuf {
+    systemd_unit_dir().join("hivemind.service")
+}
+
+#[cfg(target_os = "linux")]
+fn service_install_linux() -> Result<()> {
+    let exe = std::env::current_exe()?;
+    let unit = format!(
+        "[Unit]\n\
+         Description=HiveMind MCP memory server\n\
+         After=network.target\n\
+         \n\
+         [Service]\n\
+         Type=simple\n\
+         ExecStart={exe}\n\
+         Restart=on-failure\n\
+         RestartSec=5\n\
+         \n\
+         [Install]\n\
+         WantedBy=default.target\n",
+        exe = exe.display()
+    );
+
+    let unit_path = systemd_unit_path();
+    std::fs::create_dir_all(unit_path.parent().unwrap())?;
+    std::fs::write(&unit_path, &unit)?;
+    println!("Unit file written: {}", unit_path.display());
+
+    // daemon-reload so systemd sees the new unit.
+    let reload = std::process::Command::new("systemctl")
+        .args(["--user", "daemon-reload"])
+        .status();
+    match reload {
+        Ok(s) if s.success() => {}
+        _ => {
+            println!("Warning: systemctl --user daemon-reload failed — run it manually.");
+        }
+    }
+
+    let enable = std::process::Command::new("systemctl")
+        .args(["--user", "enable", "--now", "hivemind"])
+        .status();
+    match enable {
+        Ok(s) if s.success() => {
+            println!("HiveMind service enabled and started.");
+        }
+        _ => {
+            println!("Warning: could not enable/start the service automatically.");
+            println!("Run: systemctl --user enable --now hivemind");
+        }
+    }
+
+    println!();
+    println!("HiveMind will now start automatically on login.");
+    println!("Check status: hivemind service status");
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn service_uninstall_linux() -> Result<()> {
+    let _ = std::process::Command::new("systemctl")
+        .args(["--user", "disable", "--now", "hivemind"])
+        .status();
+
+    let unit_path = systemd_unit_path();
+    if unit_path.exists() {
+        std::fs::remove_file(&unit_path)?;
+        println!("Removed: {}", unit_path.display());
+    } else {
+        println!("Unit file not found — nothing to remove.");
+    }
+
+    let _ = std::process::Command::new("systemctl")
+        .args(["--user", "daemon-reload"])
+        .status();
+
+    println!("HiveMind service uninstalled.");
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn service_status_linux() -> Result<()> {
+    let status = std::process::Command::new("systemctl")
+        .args(["--user", "status", "hivemind"])
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("service is not running or not installed");
+    }
+    Ok(())
+}
+
+// ── macOS / launchd ───────────────────────────────────────────────────────────
+
+#[cfg(target_os = "macos")]
+const LAUNCH_AGENT_LABEL: &str = "com.oxhive.hivemind";
+
+#[cfg(target_os = "macos")]
+fn launch_agent_path() -> PathBuf {
+    home_dir()
+        .join("Library")
+        .join("LaunchAgents")
+        .join(format!("{LAUNCH_AGENT_LABEL}.plist"))
+}
+
+#[cfg(target_os = "macos")]
+fn service_install_macos() -> Result<()> {
+    let exe = std::env::current_exe()?;
+    let plist_path = launch_agent_path();
+    let plist = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+         <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \
+         \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
+         <plist version=\"1.0\">\n\
+         <dict>\n\
+           <key>Label</key>\n\
+           <string>{label}</string>\n\
+           <key>ProgramArguments</key>\n\
+           <array>\n\
+             <string>{exe}</string>\n\
+             <string>up</string>\n\
+             <string>--headless</string>\n\
+           </array>\n\
+           <key>RunAtLoad</key>\n\
+           <true/>\n\
+           <key>KeepAlive</key>\n\
+           <true/>\n\
+           <key>StandardOutPath</key>\n\
+           <string>{log_dir}/hivemind.log</string>\n\
+           <key>StandardErrorPath</key>\n\
+           <string>{log_dir}/hivemind.log</string>\n\
+         </dict>\n\
+         </plist>\n",
+        label = LAUNCH_AGENT_LABEL,
+        exe = exe.display(),
+        log_dir = home_dir().join("Library").join("Logs").display(),
+    );
+
+    std::fs::create_dir_all(plist_path.parent().unwrap())?;
+    std::fs::write(&plist_path, &plist)?;
+    println!("Plist written: {}", plist_path.display());
+
+    let load = std::process::Command::new("launchctl")
+        .args(["load", "-w", plist_path.to_str().unwrap()])
+        .status();
+    match load {
+        Ok(s) if s.success() => {
+            println!("HiveMind service loaded and started.");
+        }
+        _ => {
+            println!("Warning: launchctl load failed — run manually:");
+            println!("  launchctl load -w {}", plist_path.display());
+        }
+    }
+
+    println!();
+    println!("HiveMind will now start automatically on login.");
+    println!("Logs: ~/Library/Logs/hivemind.log");
+    println!("Check status: hivemind service status");
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn service_uninstall_macos() -> Result<()> {
+    let plist_path = launch_agent_path();
+
+    let _ = std::process::Command::new("launchctl")
+        .args(["unload", "-w", plist_path.to_str().unwrap()])
+        .status();
+
+    if plist_path.exists() {
+        std::fs::remove_file(&plist_path)?;
+        println!("Removed: {}", plist_path.display());
+    } else {
+        println!("Plist not found — nothing to remove.");
+    }
+
+    println!("HiveMind service uninstalled.");
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn service_status_macos() -> Result<()> {
+    let output = std::process::Command::new("launchctl")
+        .args(["list", LAUNCH_AGENT_LABEL])
+        .output()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if output.status.success() && !stdout.trim().is_empty() {
+        print!("{stdout}");
+    } else {
+        println!("HiveMind service is not loaded.");
+        println!("Run: hivemind service install");
+    }
+    Ok(())
+}
+
+// ── mcp install ───────────────────────────────────────────────────────────────
 
 pub fn cmd_mcp_install(client: &str) -> Result<()> {
     match client {
