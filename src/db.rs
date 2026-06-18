@@ -135,7 +135,8 @@ mod tests {
         conn.execute(
             "INSERT INTO memories (id, layer, type, title, content, created_at, updated_at)
              VALUES ('mem_x','personal','preference','Rust testing','clippy lints',1,1)",
-        [])
+            [],
+        )
         .unwrap();
         conn.execute("DELETE FROM memories WHERE id='mem_x'", [])
             .unwrap();
