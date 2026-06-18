@@ -117,9 +117,9 @@ fn detect_registered_clients(home: &Path) -> Vec<&'static str> {
 
     // File-based clients: just grep for "hivemind" in their config
     let file_clients: &[(&str, &[&str])] = &[
-        ("cursor",   &[".cursor", "mcp.json"]),
+        ("cursor", &[".cursor", "mcp.json"]),
         ("windsurf", &[".codeium", "windsurf", "mcp_config.json"]),
-        ("kimi",     &[".kimi", "mcp.json"]),
+        ("kimi", &[".kimi", "mcp.json"]),
     ];
     for (name, parts) in file_clients {
         let path = parts.iter().fold(home.to_path_buf(), |p, s| p.join(s));
