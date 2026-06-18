@@ -834,10 +834,22 @@ fn upsert_json_mcp(path: &std::path::Path, name: &str, entry: serde_json::Value)
 /// Called from commands that work without init but benefit from it.
 pub fn warn_if_not_initialized() {
     let config_path = crate::config::global_config_path();
+    let home = home_dir();
+
     if !config_path.exists() {
         eprintln!("hint: looks like you haven't run `hivemind init` yet.");
-        eprintln!("      Run it in your project directory to create config files and register");
-        eprintln!("      HiveMind with your AI coding client.");
+        eprintln!("      Run it in your project directory to create config files and");
+        eprintln!("      register HiveMind with your AI coding client.");
+        eprintln!();
+        return;
+    }
+
+    // init was run but no AI client has been registered yet
+    if detect_registered_clients(&home).is_empty() {
+        eprintln!("hint: no AI client is registered with HiveMind yet.");
+        eprintln!("      The server will start, but your AI client won't connect to it.");
+        eprintln!("      Register once with:  hivemind mcp install claude");
+        eprintln!("      (or cursor, windsurf, opencode, kimi, codex)");
         eprintln!();
     }
 }
