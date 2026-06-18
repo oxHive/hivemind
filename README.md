@@ -74,13 +74,107 @@ This runs a shell command and injects its stdout into the conversation. It works
 cargo install oxhivemind
 ```
 
-Then register it with Claude Code:
+### Claude Code
 
 ```sh
 hivemind mcp install claude
 ```
 
 This runs `claude mcp add hivemind --transport http http://127.0.0.1:3456/mcp` for you.
+
+### OpenCode
+
+Add to `opencode.json` in your project root (or `~/.config/opencode/opencode.json` for global):
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "hivemind": {
+      "type": "remote",
+      "url": "http://127.0.0.1:3456/mcp",
+      "enabled": true
+    }
+  }
+}
+```
+
+Or via CLI: `opencode mcp add --remote hivemind http://127.0.0.1:3456/mcp`
+
+Docs: [opencode.ai/docs/mcp-servers](https://opencode.ai/docs/mcp-servers/)
+
+### Kimi Code CLI
+
+```sh
+kimi mcp add --transport http hivemind http://127.0.0.1:3456/mcp
+```
+
+This writes to `~/.kimi/mcp.json`. To add manually:
+
+```json
+{
+  "mcpServers": {
+    "hivemind": {
+      "url": "http://127.0.0.1:3456/mcp"
+    }
+  }
+}
+```
+
+Docs: [moonshotai.github.io/kimi-cli/en/customization/mcp.html](https://moonshotai.github.io/kimi-cli/en/customization/mcp.html)
+
+### OpenAI Codex CLI
+
+Add to `~/.codex/config.toml` (or `.codex/config.toml` for project-scoped):
+
+```toml
+[mcp_servers.hivemind]
+url = "http://127.0.0.1:3456/mcp"
+```
+
+Docs: [developers.openai.com/codex/mcp](https://developers.openai.com/codex/mcp)
+
+### Cursor
+
+Add to `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (project):
+
+```json
+{
+  "mcpServers": {
+    "hivemind": {
+      "url": "http://127.0.0.1:3456/mcp"
+    }
+  }
+}
+```
+
+Docs: [cursor.com/docs/mcp](https://cursor.com/docs/mcp)
+
+### Windsurf
+
+Add to `~/.codeium/windsurf/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "hivemind": {
+      "serverUrl": "http://127.0.0.1:3456/mcp"
+    }
+  }
+}
+```
+
+Docs: [docs.windsurf.com/windsurf/cascade/mcp](https://docs.windsurf.com/windsurf/cascade/mcp)
+
+### Other MCP-compatible clients
+
+Any client that supports the MCP streamable HTTP transport can connect to:
+
+```
+http://127.0.0.1:3456/mcp
+```
+
+No authentication is required for local connections.
 
 ---
 
