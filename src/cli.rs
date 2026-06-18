@@ -69,8 +69,93 @@ pub fn cmd_init() -> Result<()> {
     for (path, status) in &report {
         println!("  {status:7}  {}", path.display());
     }
-    println!("\nHiveMind initialized. Restart your Claude Code session to load memory hooks.");
+    println!();
+
+    match detect_registered_clients(&home) {
+        registered if registered.is_empty() => {
+            println!("HiveMind initialized.");
+            println!();
+            println!("Next steps:");
+            println!("  1. Register with your AI coding client (run once, not per project):");
+            println!("       hivemind mcp install claude      # Claude Code");
+            println!("       hivemind mcp install cursor      # Cursor");
+            println!("       hivemind mcp install windsurf    # Windsurf");
+            println!("       hivemind mcp install opencode    # OpenCode");
+            println!("       hivemind mcp install kimi        # Kimi Code CLI");
+            println!("       hivemind mcp install codex       # OpenAI Codex CLI");
+            println!("  2. Start the server:  hivemind service install  (or: hivemind up)");
+            println!("  3. Open a new session in your AI client — memory hooks are now active.");
+        }
+        registered => {
+            let list = registered.join(", ");
+            println!("HiveMind initialized.");
+            println!("MCP client already registered: {list}");
+            println!();
+            println!("Next steps:");
+            println!("  1. Start the server:  hivemind service install  (or: hivemind up)");
+            println!("  2. Open a new session — memory hooks are now active.");
+        }
+    }
+
     Ok(())
+}
+
+/// Returns names of AI clients that already have HiveMind registered.
+fn detect_registered_clients(home: &Path) -> Vec<&'static str> {
+    let mut found = Vec::new();
+
+    // Claude Code: ask the CLI
+    let claude_ok = std::process::Command::new("claude")
+        .args(["mcp", "list"])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).contains("hivemind"))
+        .unwrap_or(false);
+    if claude_ok {
+        found.push("claude");
+    }
+
+    // File-based clients: just grep for "hivemind" in their config
+    let file_clients: &[(&str, &[&str])] = &[
+        ("cursor",   &[".cursor", "mcp.json"]),
+        ("windsurf", &[".codeium", "windsurf", "mcp_config.json"]),
+        ("kimi",     &[".kimi", "mcp.json"]),
+    ];
+    for (name, parts) in file_clients {
+        let path = parts.iter().fold(home.to_path_buf(), |p, s| p.join(s));
+        if path.exists() {
+            if let Ok(contents) = std::fs::read_to_string(&path) {
+                if contents.contains("hivemind") {
+                    found.push(name);
+                }
+            }
+        }
+    }
+
+    // OpenCode global config
+    let xdg_config = std::env::var_os("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| home.join(".config"));
+    let opencode_cfg = xdg_config.join("opencode").join("opencode.json");
+    if opencode_cfg.exists() {
+        if let Ok(contents) = std::fs::read_to_string(&opencode_cfg) {
+            if contents.contains("hivemind") {
+                found.push("opencode");
+            }
+        }
+    }
+
+    // Codex: TOML config
+    let codex_cfg = home.join(".codex").join("config.toml");
+    if codex_cfg.exists() {
+        if let Ok(contents) = std::fs::read_to_string(&codex_cfg) {
+            if contents.contains("[mcp_servers.hivemind]") {
+                found.push("codex");
+            }
+        }
+    }
+
+    found
 }
 
 fn home_dir() -> PathBuf {
