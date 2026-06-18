@@ -59,6 +59,7 @@ async fn run_server() -> Result<()> {
 
 #[tokio::main]
 async fn run_up(headless: bool) -> Result<()> {
+    cli::warn_if_not_initialized();
     init_tracing();
     let settings = config::load_server_settings(&config::global_config_path())?;
     let store = open_store()?;
