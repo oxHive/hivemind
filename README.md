@@ -362,6 +362,67 @@ Shows the active config, memory count, database path, and a preview of exactly w
 
 ---
 
+## Troubleshooting
+
+### "hint: looks like you haven't run `hivemind init` yet"
+
+You ran `hivemind up` or `hivemind status` before initializing. Run `hivemind init` in your project directory first:
+
+```sh
+cd ~/projects/myapp
+hivemind init
+```
+
+This creates `.hivemind.toml`, scaffolds CLAUDE.md, and writes the global config file that makes the hint go away.
+
+### "hint: no AI client is registered with HiveMind yet"
+
+You ran `hivemind init` but haven't told your AI client about the MCP server yet. The server will start, but your AI client won't connect to it. Run the install command for your client once:
+
+```sh
+hivemind mcp install claude      # Claude Code
+hivemind mcp install cursor      # Cursor
+hivemind mcp install windsurf    # Windsurf
+hivemind mcp install opencode    # OpenCode
+hivemind mcp install kimi        # Kimi Code CLI
+hivemind mcp install codex       # OpenAI Codex CLI
+```
+
+This only needs to be done once per machine, not per project.
+
+**How HiveMind detects whether a client is registered:**
+
+| Client | Detection method |
+|--------|-----------------|
+| Claude Code | Runs `claude mcp list` and checks for "hivemind" |
+| Cursor | Reads `~/.cursor/mcp.json`, checks for "hivemind" |
+| Windsurf | Reads `~/.codeium/windsurf/mcp_config.json`, checks for "hivemind" |
+| Kimi | Reads `~/.kimi/mcp.json`, checks for "hivemind" |
+| OpenCode | Reads `~/.config/opencode/opencode.json` (or `$XDG_CONFIG_HOME`), checks for "hivemind" |
+| Codex CLI | Reads `~/.codex/config.toml`, checks for `[mcp_servers.hivemind]` |
+
+Detection failures are silent — a missing config file or unavailable CLI simply means "not registered." If you've registered a client manually and still see the hint, verify that "hivemind" appears in the config file at the path listed above.
+
+### Claude connects but session start fails
+
+If `hivemind_session_start` errors during a session, the most likely cause is that the server isn't running. Check:
+
+```sh
+hivemind service status    # if installed as a service
+# or
+hivemind up                # to start manually
+```
+
+### Session start succeeds but no memories are injected
+
+`hivemind_session_start` loads only the entries listed in `[hooks.on_session_start].recalls` in `.hivemind.toml`. If that list is empty or no entries match titles in the database, nothing is injected. Check with:
+
+```sh
+hivemind status    # previews exactly what would be injected
+```
+
+---
+
 ## FAQ
 
 **Does HiveMind inject memories into every prompt I send?**
