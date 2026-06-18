@@ -25,6 +25,9 @@ pub struct MemoryStoreInput {
     pub content: String,
     /// "personal" (follows you) or "workspace" (project-scoped)
     pub layer: String,
+    /// Memory type: "preference", "project", or "history" (default: "preference")
+    #[serde(default)]
+    pub memory_type: Option<String>,
     /// Tags for search and auto-linking
     pub tags: Vec<String>,
     /// Project name — required when layer is "workspace"
@@ -124,7 +127,7 @@ pub struct HiveMind {
 }
 
 impl HiveMind {
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn new(store: SqliteStore) -> Self {
         Self {
             store: Arc::new(store),
@@ -151,12 +154,18 @@ impl HiveMind {
             .layer
             .parse::<Layer>()
             .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
+        let memory_type = match p.memory_type.as_deref() {
+            None | Some("") | Some("preference") => MemoryType::Preference,
+            Some(s) => s
+                .parse::<MemoryType>()
+                .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?,
+        };
         let title = p.title.clone();
         let new_memory = NewMemory {
             title: p.title,
             content: p.content,
             layer,
-            memory_type: MemoryType::Preference,
+            memory_type,
             tags: p.tags,
             project: p.project,
             source: Some("claude_code".to_string()),
@@ -555,10 +564,9 @@ impl HiveMind {
              {}\n\n\
              ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\
              Analyze the memories above and identify meaningful connections not yet captured.\n\
-             For each suggested connection, call memory_store_edge with:\n\
-               - source_id: the source memory ID\n\
-               - target_id: the target memory ID\n\
-               - relationship: one of: shares_tag | applies_to | pairs_with | used_in | related_to | custom\n\
+             For each suggested connection, call POST /api/v1/edges with a JSON body:\n\
+               {{ \"source_id\": \"<id>\", \"target_id\": \"<id>\", \"relationship\": \"<type>\" }}\n\
+             Relationship types: shares_tag | applies_to | pairs_with | used_in | related_to | custom\n\
              New edges are created with status='pending' and will appear in the dashboard for review.\n\
              Suggest 3–7 connections. Skip obvious ones (same tag already linked). Focus on cross-domain insights.",
             memories.len(),
@@ -868,9 +876,9 @@ mod tests {
     use crate::{db, store::SqliteStore};
 
     fn test_hivemind() -> HiveMind {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
-        db::create_schema(&conn).unwrap();
+        db::run_migrations(&mut conn).unwrap();
         HiveMind::new(SqliteStore::new(conn))
     }
 
@@ -914,6 +922,7 @@ mod tests {
                 content: "prefer tabs over spaces".to_string(),
                 layer: "personal".to_string(),
                 tags: vec!["style".to_string()],
+            memory_type: None,
                 project: None,
             })
             .await
@@ -932,6 +941,7 @@ mod tests {
                 content: "use clippy, rustfmt, and deny warnings".to_string(),
                 layer: "personal".to_string(),
                 tags: vec!["rust".to_string()],
+            memory_type: None,
                 project: None,
             })
             .await
@@ -962,6 +972,7 @@ mod tests {
             content: "domain at center, infra at edge".to_string(),
             layer: "personal".to_string(),
             tags: vec!["architecture".to_string()],
+            memory_type: None,
             project: None,
         })
         .await
@@ -1012,6 +1023,7 @@ mod tests {
             content: "we standardized on pgx v5 for postgres".to_string(),
             layer: "personal".to_string(),
             tags: vec!["golang".to_string(), "database".to_string()],
+            memory_type: None,
             project: None,
         })
         .await
@@ -1062,6 +1074,7 @@ mod tests {
                 content: "uses docker swarm".to_string(),
                 layer: "personal".to_string(),
                 tags: vec!["devops".to_string()],
+            memory_type: None,
                 project: None,
             })
             .await
@@ -1120,6 +1133,7 @@ mod tests {
             content: "use uber/zap, sqlc, pgx v5".to_string(),
             layer: "personal".to_string(),
             tags: vec!["golang".to_string()],
+            memory_type: None,
             project: None,
         })
         .await
@@ -1191,6 +1205,7 @@ mod tests {
             content: "c".to_string(),
             layer: "personal".to_string(),
             tags: vec![],
+            memory_type: None,
             project: None,
         })
         .await
@@ -1208,6 +1223,7 @@ mod tests {
             content: "use uber/zap and chi router".to_string(),
             layer: "personal".to_string(),
             tags: vec!["golang".to_string()],
+            memory_type: None,
             project: None,
         })
         .await
@@ -1231,6 +1247,7 @@ mod tests {
                 content: "use clippy and rustfmt".to_string(),
                 layer: "personal".to_string(),
                 tags: vec!["rust".to_string()],
+            memory_type: None,
                 project: None,
             })
             .await
@@ -1270,6 +1287,7 @@ mod tests {
                 content: "c".to_string(),
                 layer: "personal".to_string(),
                 tags: vec![],
+            memory_type: None,
                 project: None,
             })
             .await
@@ -1345,6 +1363,7 @@ mod tests {
             content: "use uber/zap and chi router".to_string(),
             layer: "personal".to_string(),
             tags: vec!["golang".to_string()],
+            memory_type: None,
             project: None,
         })
         .await
@@ -1354,6 +1373,7 @@ mod tests {
             content: "prometheus, grafana, loki".to_string(),
             layer: "personal".to_string(),
             tags: vec!["observability".to_string()],
+            memory_type: None,
             project: None,
         })
         .await
@@ -1365,8 +1385,8 @@ mod tests {
             "should include memory titles"
         );
         assert!(
-            text.contains("memory_store_edge"),
-            "should instruct Claude to call memory_store_edge"
+            text.contains("/api/v1/edges"),
+            "should instruct Claude to use the REST API to create edges"
         );
     }
 
@@ -1379,6 +1399,7 @@ mod tests {
                 content: "stale content".to_string(),
                 layer: "personal".to_string(),
                 tags: vec![],
+            memory_type: None,
                 project: None,
             })
             .await
@@ -1443,6 +1464,7 @@ mod tests {
                 content: "delete me".to_string(),
                 layer: "personal".to_string(),
                 tags: vec!["tmp".to_string()],
+            memory_type: None,
                 project: None,
             })
             .await

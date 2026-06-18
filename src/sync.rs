@@ -102,9 +102,9 @@ mod tests {
     use std::sync::Arc;
 
     fn test_store() -> Arc<SqliteStore> {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
-        db::create_schema(&conn).unwrap();
+        db::run_migrations(&mut conn).unwrap();
         Arc::new(SqliteStore::new(conn))
     }
 

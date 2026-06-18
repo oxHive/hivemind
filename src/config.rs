@@ -21,10 +21,6 @@ pub struct HiveMindConfig {
     pub project_name: String,
     pub max_tokens: usize,
     pub recalls: Vec<Recall>,
-    /// Parsed from `[hooks.on_session_start.conditions]`. Reserved for the
-    /// path-scoped workspace-memory injection feature; not yet enforced.
-    #[allow(dead_code)]
-    pub condition_paths: Vec<String>,
     pub file_open_rule_count: usize,
     pub mention_trigger_count: usize,
 }
@@ -58,14 +54,6 @@ struct RawSessionStart {
     max_tokens: Option<usize>,
     #[serde(default)]
     recalls: Vec<String>,
-    #[serde(default)]
-    conditions: RawConditions,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct RawConditions {
-    #[serde(default)]
-    paths: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -258,7 +246,6 @@ pub fn load_config_with_global(project_root: &Path, global_path: &Path) -> Resul
         project_name,
         max_tokens,
         recalls,
-        condition_paths: raw_project.hooks.on_session_start.conditions.paths,
         file_open_rule_count: raw_project.hooks.on_file_open.rules.len(),
         mention_trigger_count: raw_project.hooks.on_mention.triggers.len(),
     })

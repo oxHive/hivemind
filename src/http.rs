@@ -25,6 +25,7 @@ pub fn app_router(
     store: Arc<SqliteStore>,
     sync: SyncSettings,
     trigger: Arc<tokio::sync::Notify>,
+    dashboard_origin: &str,
 ) -> Router {
     let mcp = StreamableHttpService::new(
         {
@@ -35,7 +36,7 @@ pub fn app_router(
         Arc::new(LocalSessionManager::default()),
         Default::default(),
     );
-    api::router(store, sync).nest_service("/mcp", mcp)
+    api::router(store, sync, dashboard_origin).nest_service("/mcp", mcp)
 }
 
 pub fn dashboard_router(api_url: &str) -> Router {
@@ -90,7 +91,13 @@ pub async fn run_up(
     headless: bool,
 ) -> Result<()> {
     let trigger = Arc::new(tokio::sync::Notify::new());
-    let app = app_router(store.clone(), settings.sync.clone(), trigger.clone());
+    let dashboard_origin = format!("http://{}:{}", settings.host, settings.dashboard_port);
+    let app = app_router(
+        store.clone(),
+        settings.sync.clone(),
+        trigger.clone(),
+        &dashboard_origin,
+    );
 
     if settings.sync.enabled {
         let client = Arc::new(syncer::SyncClient::new(&settings.sync, store.clone()));
@@ -172,9 +179,9 @@ mod tests {
     use tower::ServiceExt;
 
     fn test_store() -> Arc<SqliteStore> {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
-        db::create_schema(&conn).unwrap();
+        db::run_migrations(&mut conn).unwrap();
         Arc::new(SqliteStore::new(conn))
     }
 
@@ -184,6 +191,7 @@ mod tests {
             test_store(),
             crate::config::SyncSettings::default(),
             Arc::new(tokio::sync::Notify::new()),
+            "http://127.0.0.1:3457",
         );
         let resp = app
             .oneshot(
