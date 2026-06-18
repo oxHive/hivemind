@@ -84,7 +84,11 @@ This runs `claude mcp add hivemind --transport http http://127.0.0.1:3456/mcp` f
 
 ### OpenCode
 
-Add to `opencode.json` in your project root (or `~/.config/opencode/opencode.json` for global):
+```sh
+hivemind mcp install opencode
+```
+
+Writes to `~/.config/opencode/opencode.json` (uses the `opencode` CLI if available, otherwise writes the config file directly). Manual config:
 
 ```json
 {
@@ -99,17 +103,15 @@ Add to `opencode.json` in your project root (or `~/.config/opencode/opencode.jso
 }
 ```
 
-Or via CLI: `opencode mcp add --remote hivemind http://127.0.0.1:3456/mcp`
-
 Docs: [opencode.ai/docs/mcp-servers](https://opencode.ai/docs/mcp-servers/)
 
 ### Kimi Code CLI
 
 ```sh
-kimi mcp add --transport http hivemind http://127.0.0.1:3456/mcp
+hivemind mcp install kimi
 ```
 
-This writes to `~/.kimi/mcp.json`. To add manually:
+Uses the `kimi` CLI if available, otherwise writes to `~/.kimi/mcp.json` directly. Manual config:
 
 ```json
 {
@@ -125,7 +127,11 @@ Docs: [moonshotai.github.io/kimi-cli/en/customization/mcp.html](https://moonshot
 
 ### OpenAI Codex CLI
 
-Add to `~/.codex/config.toml` (or `.codex/config.toml` for project-scoped):
+```sh
+hivemind mcp install codex
+```
+
+Appends to `~/.codex/config.toml`. Manual config:
 
 ```toml
 [mcp_servers.hivemind]
@@ -136,7 +142,11 @@ Docs: [developers.openai.com/codex/mcp](https://developers.openai.com/codex/mcp)
 
 ### Cursor
 
-Add to `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (project):
+```sh
+hivemind mcp install cursor
+```
+
+Writes to `~/.cursor/mcp.json`. Restart Cursor after running. Manual config:
 
 ```json
 {
@@ -152,7 +162,11 @@ Docs: [cursor.com/docs/mcp](https://cursor.com/docs/mcp)
 
 ### Windsurf
 
-Add to `~/.codeium/windsurf/mcp_config.json`:
+```sh
+hivemind mcp install windsurf
+```
+
+Writes to `~/.codeium/windsurf/mcp_config.json`. Restart Windsurf after running. Manual config:
 
 ```json
 {
@@ -163,6 +177,8 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
   }
 }
 ```
+
+Note: Windsurf uses `serverUrl` where other clients use `url`.
 
 Docs: [docs.windsurf.com/windsurf/cascade/mcp](https://docs.windsurf.com/windsurf/cascade/mcp)
 
@@ -212,12 +228,17 @@ It also appends a HiveMind block to `~/.claude/CLAUDE.md` (preserving any existi
 ## Commands
 
 ```
-hivemind up                  Start the server (MCP + REST API + dashboard)
-hivemind up --headless       Start without the dashboard UI
-hivemind init                Scaffold config files for the current project
-hivemind status              Show config, memory count, and session-start preview
-hivemind mcp install claude  Register with Claude Code
-hivemind dashboard --open    Open the dashboard (requires server running)
+hivemind up                      Start the server (MCP + REST API + dashboard)
+hivemind up --headless           Start without the dashboard UI
+hivemind init                    Scaffold config files for the current project
+hivemind status                  Show config, memory count, and session-start preview
+hivemind mcp install claude      Register with Claude Code
+hivemind mcp install opencode    Register with OpenCode
+hivemind mcp install kimi        Register with Kimi Code CLI
+hivemind mcp install codex       Register with OpenAI Codex CLI
+hivemind mcp install cursor      Register with Cursor
+hivemind mcp install windsurf    Register with Windsurf
+hivemind dashboard --open        Open the dashboard (requires server running)
 ```
 
 ---

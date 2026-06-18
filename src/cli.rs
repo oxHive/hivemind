@@ -42,7 +42,7 @@ pub enum Command {
 pub enum McpAction {
     /// Register HiveMind as an MCP server in a supported AI coding client
     Install {
-        /// Client to register with: claude
+        /// Client to register with: claude, opencode, kimi, codex, cursor, windsurf
         client: String,
     },
 }
@@ -242,7 +242,14 @@ Wait for explicit confirmation before calling memory_store.
 pub fn cmd_mcp_install(client: &str) -> Result<()> {
     match client {
         "claude" => install_claude(),
-        other => anyhow::bail!("unknown client \"{other}\" — supported clients: claude"),
+        "opencode" => install_opencode(),
+        "kimi" => install_kimi(),
+        "codex" => install_codex(),
+        "cursor" => install_cursor(),
+        "windsurf" => install_windsurf(),
+        other => anyhow::bail!(
+            "unknown client \"{other}\" — supported: claude, opencode, kimi, codex, cursor, windsurf"
+        ),
     }
 }
 
@@ -292,6 +299,187 @@ fn install_claude() -> Result<()> {
     println!("  1. Run `hivemind up` to start the server");
     println!("  2. Open a new Claude Code session");
     println!("  3. Type /memory-status to verify");
+    Ok(())
+}
+
+fn install_opencode() -> Result<()> {
+    // Try the CLI first; fall back to writing the config file directly.
+    let cli_available = std::process::Command::new("opencode")
+        .arg("--version")
+        .output()
+        .is_ok();
+
+    if cli_available {
+        let list_out = std::process::Command::new("opencode")
+            .args(["mcp", "list"])
+            .output()?;
+        if String::from_utf8_lossy(&list_out.stdout).contains("hivemind") {
+            println!("HiveMind is already registered with OpenCode.");
+            println!("Run `hivemind up` to start the server, then open a new OpenCode session.");
+            return Ok(());
+        }
+        let status = std::process::Command::new("opencode")
+            .args(["mcp", "add", "--remote", "hivemind", "http://127.0.0.1:3456/mcp"])
+            .status()?;
+        if !status.success() {
+            anyhow::bail!("opencode mcp add failed — check `opencode mcp list`");
+        }
+    } else {
+        // Write to the global opencode config.
+        let xdg_config = std::env::var_os("XDG_CONFIG_HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| home_dir().join(".config"));
+        let config_path = xdg_config.join("opencode").join("opencode.json");
+        upsert_json_mcp(
+            &config_path,
+            "hivemind",
+            serde_json::json!({
+                "type": "remote",
+                "url": "http://127.0.0.1:3456/mcp",
+                "enabled": true
+            }),
+        )?;
+        println!("Written to {}", config_path.display());
+    }
+
+    println!("HiveMind registered with OpenCode.");
+    println!();
+    println!("Next steps:");
+    println!("  1. Run `hivemind up` to start the server");
+    println!("  2. Open a new OpenCode session");
+    Ok(())
+}
+
+fn install_kimi() -> Result<()> {
+    let cli_available = std::process::Command::new("kimi")
+        .arg("--version")
+        .output()
+        .is_ok();
+
+    if cli_available {
+        let list_out = std::process::Command::new("kimi")
+            .args(["mcp", "list"])
+            .output()?;
+        if String::from_utf8_lossy(&list_out.stdout).contains("hivemind") {
+            println!("HiveMind is already registered with Kimi.");
+            return Ok(());
+        }
+        let status = std::process::Command::new("kimi")
+            .args(["mcp", "add", "--transport", "http", "hivemind", "http://127.0.0.1:3456/mcp"])
+            .status()?;
+        if !status.success() {
+            anyhow::bail!("kimi mcp add failed — check `kimi mcp list`");
+        }
+    } else {
+        let config_path = home_dir().join(".kimi").join("mcp.json");
+        upsert_json_mcp(
+            &config_path,
+            "hivemind",
+            serde_json::json!({ "url": "http://127.0.0.1:3456/mcp" }),
+        )?;
+        println!("Written to {}", config_path.display());
+    }
+
+    println!("HiveMind registered with Kimi Code CLI.");
+    println!();
+    println!("Next steps:");
+    println!("  1. Run `hivemind up` to start the server");
+    println!("  2. Open a new Kimi session");
+    Ok(())
+}
+
+fn install_codex() -> Result<()> {
+    let config_path = home_dir().join(".codex").join("config.toml");
+    std::fs::create_dir_all(config_path.parent().unwrap())?;
+
+    let existing = std::fs::read_to_string(&config_path).unwrap_or_default();
+    if existing.contains("[mcp_servers.hivemind]") {
+        println!("HiveMind is already registered with Codex CLI.");
+        println!("Run `hivemind up` to start the server, then open a new Codex session.");
+        return Ok(());
+    }
+
+    let block = "\n[mcp_servers.hivemind]\nurl = \"http://127.0.0.1:3456/mcp\"\n";
+    let new_content = format!("{}{}", existing.trim_end(), block);
+    std::fs::write(&config_path, new_content)?;
+    println!("Written to {}", config_path.display());
+
+    println!("HiveMind registered with OpenAI Codex CLI.");
+    println!();
+    println!("Next steps:");
+    println!("  1. Run `hivemind up` to start the server");
+    println!("  2. Open a new Codex session");
+    Ok(())
+}
+
+fn install_cursor() -> Result<()> {
+    let config_path = home_dir().join(".cursor").join("mcp.json");
+    upsert_json_mcp(
+        &config_path,
+        "hivemind",
+        serde_json::json!({ "url": "http://127.0.0.1:3456/mcp" }),
+    )?;
+    println!("Written to {}", config_path.display());
+    println!("HiveMind registered with Cursor.");
+    println!();
+    println!("Next steps:");
+    println!("  1. Run `hivemind up` to start the server");
+    println!("  2. Restart Cursor completely for the change to take effect");
+    Ok(())
+}
+
+fn install_windsurf() -> Result<()> {
+    let config_path = home_dir()
+        .join(".codeium")
+        .join("windsurf")
+        .join("mcp_config.json");
+    upsert_json_mcp(
+        &config_path,
+        "hivemind",
+        serde_json::json!({ "serverUrl": "http://127.0.0.1:3456/mcp" }),
+    )?;
+    println!("Written to {}", config_path.display());
+    println!("HiveMind registered with Windsurf.");
+    println!();
+    println!("Next steps:");
+    println!("  1. Run `hivemind up` to start the server");
+    println!("  2. Restart Windsurf for the change to take effect");
+    Ok(())
+}
+
+/// Read an mcpServers-style JSON config, insert or update the named server entry, write back.
+/// Creates the file and parent directories if absent.
+fn upsert_json_mcp(
+    path: &std::path::Path,
+    name: &str,
+    entry: serde_json::Value,
+) -> Result<()> {
+    std::fs::create_dir_all(path.parent().unwrap())?;
+
+    let mut root: serde_json::Value = if path.exists() {
+        let raw = std::fs::read_to_string(path)?;
+        serde_json::from_str(&raw).unwrap_or(serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+
+    // OpenCode uses {"mcp": {...}}; all other clients use {"mcpServers": {...}}.
+    // Detect from existing file structure; fall back based on whether entry has "type" field.
+    let servers_key = if root.get("mcp").is_some() || entry.get("type").is_some() {
+        "mcp"
+    } else {
+        "mcpServers"
+    };
+
+    root.as_object_mut()
+        .unwrap()
+        .entry(servers_key)
+        .or_insert(serde_json::json!({}))
+        .as_object_mut()
+        .unwrap()
+        .insert(name.to_string(), entry);
+
+    std::fs::write(path, serde_json::to_string_pretty(&root)?)?;
     Ok(())
 }
 
