@@ -123,12 +123,11 @@ fn detect_registered_clients(home: &Path) -> Vec<&'static str> {
     ];
     for (name, parts) in file_clients {
         let path = parts.iter().fold(home.to_path_buf(), |p, s| p.join(s));
-        if path.exists() {
-            if let Ok(contents) = std::fs::read_to_string(&path) {
-                if contents.contains("hivemind") {
-                    found.push(name);
-                }
-            }
+        if path.exists()
+            && let Ok(contents) = std::fs::read_to_string(&path)
+            && contents.contains("hivemind")
+        {
+            found.push(name);
         }
     }
 
@@ -137,22 +136,20 @@ fn detect_registered_clients(home: &Path) -> Vec<&'static str> {
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| home.join(".config"));
     let opencode_cfg = xdg_config.join("opencode").join("opencode.json");
-    if opencode_cfg.exists() {
-        if let Ok(contents) = std::fs::read_to_string(&opencode_cfg) {
-            if contents.contains("hivemind") {
-                found.push("opencode");
-            }
-        }
+    if opencode_cfg.exists()
+        && let Ok(contents) = std::fs::read_to_string(&opencode_cfg)
+        && contents.contains("hivemind")
+    {
+        found.push("opencode");
     }
 
     // Codex: TOML config
     let codex_cfg = home.join(".codex").join("config.toml");
-    if codex_cfg.exists() {
-        if let Ok(contents) = std::fs::read_to_string(&codex_cfg) {
-            if contents.contains("[mcp_servers.hivemind]") {
-                found.push("codex");
-            }
-        }
+    if codex_cfg.exists()
+        && let Ok(contents) = std::fs::read_to_string(&codex_cfg)
+        && contents.contains("[mcp_servers.hivemind]")
+    {
+        found.push("codex");
     }
 
     found
