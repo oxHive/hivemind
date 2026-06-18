@@ -105,8 +105,8 @@ mod tests {
     use crate::store::SqliteStore;
 
     fn store_with(entries: &[(&str, &str)]) -> SqliteStore {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        db::create_schema(&conn).unwrap();
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        db::run_migrations(&mut conn).unwrap();
         let s = SqliteStore::new(conn);
         for (title, content) in entries {
             s.store(NewMemory {
@@ -134,7 +134,6 @@ mod tests {
                     source: RecallSource::Project,
                 })
                 .collect(),
-            condition_paths: vec![],
             file_open_rule_count: 0,
             mention_trigger_count: 0,
         }

@@ -4,7 +4,7 @@ use crate::model::{
 };
 use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension};
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 fn gen_id() -> String {
     format!("mem_{}", uuid::Uuid::new_v4().simple())
@@ -28,23 +28,43 @@ impl SqliteStore {
         }
     }
 
+    fn lock_conn(&self) -> Result<MutexGuard<'_, Connection>> {
+        self.conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))
+    }
+
+    fn dedup_tags(tags: &[String]) -> Vec<String> {
+        let mut seen = std::collections::HashSet::new();
+        tags.iter()
+            .filter(|t| seen.insert(t.as_str()))
+            .cloned()
+            .collect()
+    }
+
+    fn recall_one(&self, sql: &str, param: &str) -> Result<Option<MemoryEntry>> {
+        let conn = self.lock_conn()?;
+        let result = conn.query_row(sql, rusqlite::params![param], Self::row_tuple);
+        match result {
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+            Ok((rid, layer_s, type_s, title, content, source, project, created_at, updated_at)) => {
+                Self::row_to_entry(
+                    &conn, rid, layer_s, type_s, title, content, source, project,
+                    created_at, updated_at,
+                )
+                .map(Some)
+            }
+        }
+    }
+
     pub fn store(&self, new: NewMemory) -> Result<StoreResult> {
         let id = gen_id();
         let now = now_secs();
 
-        // Deduplicate tags, preserving insertion order.
-        let mut seen = std::collections::HashSet::new();
-        let tags: Vec<String> = new
-            .tags
-            .iter()
-            .filter(|t| seen.insert((*t).clone()))
-            .cloned()
-            .collect();
+        let tags = Self::dedup_tags(&new.tags);
 
-        let mut conn = self
-            .conn
-            .lock()
-            .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let mut conn = self.lock_conn()?;
         let tx = conn.transaction()?;
 
         tx.execute(
@@ -104,75 +124,19 @@ impl SqliteStore {
     }
 
     pub fn recall_by_id(&self, id: &str) -> Result<Option<MemoryEntry>> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
-        let result = conn.query_row(
-            "SELECT id, layer, type, title, content, source, project, created_at, updated_at
+        self.recall_one(
+            "SELECT id, layer, type, title, content, source, project, created_at, updated_at \
              FROM memories WHERE id = ?1",
-            rusqlite::params![id],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, Option<String>>(5)?,
-                    row.get::<_, Option<String>>(6)?,
-                    row.get::<_, i64>(7)?,
-                    row.get::<_, i64>(8)?,
-                ))
-            },
-        );
-        match result {
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e.into()),
-            Ok((rid, layer_s, type_s, title, content, source, project, created_at, updated_at)) => {
-                Self::row_to_entry(
-                    &conn, rid, layer_s, type_s, title, content, source, project, created_at,
-                    updated_at,
-                )
-                .map(Some)
-            }
-        }
+            id,
+        )
     }
 
     pub fn recall_by_title(&self, title: &str) -> Result<Option<MemoryEntry>> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
-        let result = conn.query_row(
-            "SELECT id, layer, type, title, content, source, project, created_at, updated_at
+        self.recall_one(
+            "SELECT id, layer, type, title, content, source, project, created_at, updated_at \
              FROM memories WHERE title = ?1 ORDER BY updated_at DESC LIMIT 1",
-            rusqlite::params![title],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, Option<String>>(5)?,
-                    row.get::<_, Option<String>>(6)?,
-                    row.get::<_, i64>(7)?,
-                    row.get::<_, i64>(8)?,
-                ))
-            },
-        );
-        match result {
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e.into()),
-            Ok((rid, layer_s, type_s, title, content, source, project, created_at, updated_at)) => {
-                Self::row_to_entry(
-                    &conn, rid, layer_s, type_s, title, content, source, project, created_at,
-                    updated_at,
-                )
-                .map(Some)
-            }
-        }
+            title,
+        )
     }
 
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<crate::model::SearchHit>> {
@@ -200,10 +164,7 @@ impl SqliteStore {
             return Ok(Vec::new());
         }
 
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let conn = self.lock_conn()?;
         let rows = {
             let mut stmt = conn.prepare(
                 "SELECT m.id, m.title, m.layer, snippet(memories_fts, 1, '[', ']', '…', 12)
@@ -241,10 +202,7 @@ impl SqliteStore {
 
     pub fn update(&self, id: &str, upd: crate::model::UpdateMemory) -> Result<bool> {
         let now = now_secs();
-        let mut conn = self
-            .conn
-            .lock()
-            .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let mut conn = self.lock_conn()?;
         let tx = conn.transaction()?;
 
         let existing: Option<(String, String)> = tx
@@ -277,8 +235,7 @@ impl SqliteStore {
                 "DELETE FROM tags WHERE memory_id = ?1",
                 rusqlite::params![id],
             )?;
-            let mut seen = std::collections::HashSet::new();
-            for tag in tags.iter().filter(|t| seen.insert((*t).clone())) {
+            for tag in Self::dedup_tags(&tags) {
                 tx.execute(
                     "INSERT INTO tags (memory_id, tag) VALUES (?1, ?2)",
                     rusqlite::params![id, tag],
@@ -306,20 +263,14 @@ impl SqliteStore {
     }
 
     pub fn count(&self) -> Result<usize> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let conn = self.lock_conn()?;
         let n: i64 = conn.query_row("SELECT COUNT(*) FROM memories", [], |r| r.get(0))?;
         Ok(n as usize)
     }
 
     /// Newest-first listing. `rowid DESC` breaks same-second timestamp ties.
     pub fn list_memories(&self, layer: Option<Layer>, limit: usize) -> Result<Vec<MemoryEntry>> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let conn = self.lock_conn()?;
         let base = "SELECT id, layer, type, title, content, source, project, created_at, updated_at
                     FROM memories";
         let rows = match &layer {
@@ -353,10 +304,7 @@ impl SqliteStore {
     }
 
     pub fn list_edges(&self, status: Option<&str>) -> Result<Vec<Edge>> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let conn = self.lock_conn()?;
         let base = "SELECT id, source_id, target_id, relationship, weight, inferred_by, status, reason, created_at, updated_at
                     FROM edges";
         let map = |row: &rusqlite::Row| -> rusqlite::Result<Edge> {
@@ -399,10 +347,7 @@ impl SqliteStore {
         relationship: &str,
     ) -> Result<EdgeCreate> {
         let now = now_secs();
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let conn = self.lock_conn()?;
         for id in [source_id, target_id] {
             let exists: i64 = conn.query_row(
                 "SELECT EXISTS(SELECT 1 FROM memories WHERE id = ?1)",
@@ -428,10 +373,7 @@ impl SqliteStore {
     }
 
     pub fn set_edge_status(&self, id: &str, status: &str) -> Result<bool> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let conn = self.lock_conn()?;
         let n = conn.execute(
             "UPDATE edges SET status = ?1, updated_at = ?2 WHERE id = ?3",
             rusqlite::params![status, now_secs(), id],
@@ -447,10 +389,7 @@ impl SqliteStore {
         kind: &str,
         note: Option<&str>,
     ) -> Result<Option<String>> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let conn = self.lock_conn()?;
         if let Some(mid) = memory_id {
             let exists: i64 = conn.query_row(
                 "SELECT EXISTS(SELECT 1 FROM memories WHERE id = ?1)",
@@ -481,10 +420,7 @@ impl SqliteStore {
     }
 
     pub fn list_feedback(&self, status: Option<&str>) -> Result<Vec<FeedbackItem>> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let conn = self.lock_conn()?;
         let base = "SELECT id, memory_id, edge_id, type, note, status, created_at FROM feedback";
         let map = |row: &rusqlite::Row| -> rusqlite::Result<FeedbackItem> {
             Ok(FeedbackItem {
@@ -516,10 +452,7 @@ impl SqliteStore {
     }
 
     pub fn set_feedback_status(&self, id: &str, status: &str) -> Result<bool> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let conn = self.lock_conn()?;
         let n = conn.execute(
             "UPDATE feedback SET status = ?1 WHERE id = ?2",
             rusqlite::params![status, id],
@@ -528,10 +461,7 @@ impl SqliteStore {
     }
 
     pub fn get_kv(&self, key: &str) -> Result<Option<String>> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare("SELECT value FROM kv WHERE key = ?1")?;
         match stmt.query_row(rusqlite::params![key], |r| r.get(0)) {
             Ok(v) => Ok(Some(v)),
@@ -541,10 +471,7 @@ impl SqliteStore {
     }
 
     pub fn set_kv(&self, key: &str, value: &str) -> Result<()> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self.lock_conn()?;
         conn.execute(
             "INSERT INTO kv (key, value) VALUES (?1, ?2)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -553,8 +480,8 @@ impl SqliteStore {
         Ok(())
     }
 
-    #[allow(dead_code)]
-    pub fn write_conflict(
+    #[cfg(test)]
+    pub(crate) fn write_conflict(
         &self,
         memory_id: Option<&str>,
         winner: &str,
@@ -564,10 +491,7 @@ impl SqliteStore {
     ) -> Result<String> {
         let id = format!("cfl_{}", uuid::Uuid::new_v4().simple());
         let now = now_secs();
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self.lock_conn()?;
         conn.execute(
             "INSERT INTO conflicts (id, memory_id, winner, loser, winner_src, loser_src, detected_at, status)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'open')",
@@ -577,10 +501,7 @@ impl SqliteStore {
     }
 
     pub fn resolve_conflict(&self, id: &str, action: &str) -> Result<bool> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self.lock_conn()?;
         if action == "restore" {
             let row: Option<(Option<String>, String)> = {
                 let mut stmt = conn.prepare(
@@ -610,10 +531,7 @@ impl SqliteStore {
 
     /// Conflicts are written by Phase 5 sync; the dashboard already reads them.
     pub fn list_conflicts(&self, status: Option<&str>) -> Result<Vec<ConflictItem>> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let conn = self.lock_conn()?;
         let map = |row: &rusqlite::Row| -> rusqlite::Result<ConflictItem> {
             Ok(ConflictItem {
                 id: row.get(0)?,
@@ -649,10 +567,7 @@ impl SqliteStore {
     }
 
     pub fn get_conflict_by_id(&self, id: &str) -> Result<Option<ConflictItem>> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT c.id, c.memory_id, c.winner, c.loser, c.winner_src, c.loser_src,
                     c.detected_at, c.status, m.title
@@ -677,10 +592,7 @@ impl SqliteStore {
     }
 
     pub fn memories_since(&self, since_ts: i64) -> Result<Vec<MemoryEntry>> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, layer, type, title, content, source, project, created_at, updated_at
              FROM memories WHERE updated_at > ?1 ORDER BY updated_at ASC",
@@ -704,11 +616,8 @@ impl SqliteStore {
         entry: &crate::model::MemoryEntry,
     ) -> Result<Option<crate::model::ConflictItem>> {
         let now = now_secs();
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| anyhow::anyhow!("db mutex poisoned"))?;
-        let tx = conn.unchecked_transaction()?;
+        let mut conn = self.lock_conn()?;
+        let tx = conn.transaction()?;
 
         let existing: Option<(i64, String, String)> = tx
             .query_row(
@@ -799,10 +708,7 @@ impl SqliteStore {
     }
 
     pub fn delete(&self, id: &str) -> Result<bool> {
-        let mut conn = self
-            .conn
-            .lock()
-            .map_err(|_| anyhow::anyhow!("db connection mutex poisoned"))?;
+        let mut conn = self.lock_conn()?;
         let tx = conn.transaction()?;
         tx.execute(
             "DELETE FROM tags WHERE memory_id = ?1",
@@ -893,9 +799,9 @@ mod tests {
     };
 
     fn open_test_store() -> SqliteStore {
-        let conn = Connection::open_in_memory().unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
-        db::create_schema(&conn).unwrap();
+        db::run_migrations(&mut conn).unwrap();
         SqliteStore::new(conn)
     }
 

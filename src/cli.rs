@@ -596,8 +596,8 @@ mod tests {
         use crate::model::{Layer, MemoryType, NewMemory};
         use crate::store::SqliteStore;
 
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        db::create_schema(&conn).unwrap();
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        db::run_migrations(&mut conn).unwrap();
         let store = SqliteStore::new(conn);
         store
             .store(NewMemory {
@@ -635,8 +635,8 @@ mod tests {
     fn render_status_without_config_reports_missing() {
         use crate::db;
         use crate::store::SqliteStore;
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        db::create_schema(&conn).unwrap();
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        db::run_migrations(&mut conn).unwrap();
         let store = SqliteStore::new(conn);
 
         let proj = tempfile::tempdir().unwrap();

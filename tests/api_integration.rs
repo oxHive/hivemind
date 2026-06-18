@@ -9,12 +9,12 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 
 async fn start_server() -> (String, tokio::task::JoinHandle<()>) {
-    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    let mut conn = rusqlite::Connection::open_in_memory().unwrap();
     conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
-    oxhivemind::db::create_schema(&conn).unwrap();
+    oxhivemind::db::run_migrations(&mut conn).unwrap();
     let store = Arc::new(oxhivemind::store::SqliteStore::new(conn));
 
-    let router = oxhivemind::api::router(store, oxhivemind::config::SyncSettings::default());
+    let router = oxhivemind::api::router(store, oxhivemind::config::SyncSettings::default(), "http://127.0.0.1:3457");
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let base = format!("http://{addr}");

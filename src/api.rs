@@ -6,7 +6,7 @@ use crate::{
 use axum::{
     Json, Router,
     extract::{Extension, Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, Method, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, patch, post},
 };
@@ -70,7 +70,21 @@ fn validate(value: &str, allowed: &[&str], what: &str) -> Result<(), ApiError> {
     }
 }
 
-pub fn router(store: Store, sync: SyncSettings) -> Router {
+fn require_sync_auth(headers: &HeaderMap, api_key: &str) -> Result<(), ApiError> {
+    if api_key.is_empty() {
+        return Ok(());
+    }
+    let expected = format!("Bearer {api_key}");
+    match headers.get(header::AUTHORIZATION) {
+        Some(v) if v.as_bytes() == expected.as_bytes() => Ok(()),
+        _ => Err(ApiError(
+            StatusCode::UNAUTHORIZED,
+            "sync endpoint requires a valid API key".to_string(),
+        )),
+    }
+}
+
+pub fn router(store: Store, sync: SyncSettings, dashboard_origin: &str) -> Router {
     Router::new()
         .route("/api/v1/memories", get(list_memories).post(create_memory))
         .route(
@@ -97,7 +111,24 @@ pub fn router(store: Store, sync: SyncSettings) -> Router {
         .route("/api/sync/pull", get(sync_pull))
         .with_state(store)
         .layer(Extension(sync))
-        .layer(CorsLayer::permissive())
+        .layer(
+            CorsLayer::new()
+                .allow_origin(
+                    dashboard_origin
+                        .parse::<axum::http::HeaderValue>()
+                        .unwrap_or_else(|_| {
+                            axum::http::HeaderValue::from_static("http://127.0.0.1:3457")
+                        }),
+                )
+                .allow_methods([
+                    Method::GET,
+                    Method::POST,
+                    Method::PATCH,
+                    Method::DELETE,
+                    Method::OPTIONS,
+                ])
+                .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]),
+        )
 }
 
 fn entry_json(e: &MemoryEntry) -> Value {
@@ -145,6 +176,8 @@ struct CreateMemoryBody {
     content: String,
     layer: String,
     #[serde(default)]
+    memory_type: Option<String>,
+    #[serde(default)]
     tags: Vec<String>,
     #[serde(default)]
     project: Option<String>,
@@ -158,11 +191,17 @@ async fn create_memory(
         .layer
         .parse::<Layer>()
         .map_err(|e| bad_request(e.to_string()))?;
+    let memory_type = match b.memory_type.as_deref() {
+        None | Some("") | Some("preference") => MemoryType::Preference,
+        Some(s) => s
+            .parse::<MemoryType>()
+            .map_err(|e| bad_request(e.to_string()))?,
+    };
     let result = store.store(NewMemory {
         title: b.title,
         content: b.content,
         layer,
-        memory_type: MemoryType::Preference,
+        memory_type,
         tags: b.tags,
         project: b.project,
         source: Some("dashboard".to_string()),
@@ -389,6 +428,9 @@ async fn list_conflicts(
     State(store): State<Store>,
     Query(p): Query<ConflictQuery>,
 ) -> Result<Json<Value>, ApiError> {
+    if let Some(ref st) = p.status {
+        validate(st, &["open", "resolved"], "conflict status")?;
+    }
     let items = store.list_conflicts(p.status.as_deref())?;
     Ok(Json(json!({ "count": items.len(), "conflicts": items })))
 }
@@ -415,7 +457,12 @@ async fn server_status(
 
 // --- sync server endpoints ---
 
-async fn sync_status(State(store): State<Store>) -> Result<Json<Value>, ApiError> {
+async fn sync_status(
+    State(store): State<Store>,
+    Extension(sync): Extension<SyncSettings>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiError> {
+    require_sync_auth(&headers, &sync.api_key)?;
     let server_time = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -434,8 +481,11 @@ struct PushBody {
 
 async fn sync_push(
     State(store): State<Store>,
+    Extension(sync): Extension<SyncSettings>,
+    headers: HeaderMap,
     Json(body): Json<PushBody>,
 ) -> Result<Json<Value>, ApiError> {
+    require_sync_auth(&headers, &sync.api_key)?;
     let mut accepted = 0usize;
     let mut conflicts = vec![];
     for record in &body.records {
@@ -456,8 +506,11 @@ struct PullQuery {
 
 async fn sync_pull(
     State(store): State<Store>,
+    Extension(sync): Extension<SyncSettings>,
+    headers: HeaderMap,
     Query(q): Query<PullQuery>,
 ) -> Result<Json<Value>, ApiError> {
+    require_sync_auth(&headers, &sync.api_key)?;
     let records = store.memories_since(q.since.unwrap_or(0))?;
     let server_time = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -519,12 +572,13 @@ mod tests {
     use tower::ServiceExt;
 
     fn test_router() -> Router {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
-        db::create_schema(&conn).unwrap();
+        db::run_migrations(&mut conn).unwrap();
         router(
             Arc::new(SqliteStore::new(conn)),
             crate::config::SyncSettings::default(),
+            "http://127.0.0.1:3457",
         )
     }
 
