@@ -827,6 +827,23 @@ fn upsert_json_mcp(path: &std::path::Path, name: &str, entry: serde_json::Value)
     Ok(())
 }
 
+/// Create the global config file with defaults on first run if it doesn't exist yet.
+/// Prints a note to stderr so the user knows where it landed.
+pub fn ensure_global_config() {
+    let config_path = crate::config::global_config_path();
+    if config_path.exists() {
+        return;
+    }
+    match write_if_absent(&config_path, GLOBAL_CONFIG) {
+        Ok(_) => {
+            eprintln!("note: created default config at {}", config_path.display());
+        }
+        Err(e) => {
+            eprintln!("warning: could not create global config: {e}");
+        }
+    }
+}
+
 /// Print a one-time hint when `hivemind init` has never been run.
 /// Called from commands that work without init but benefit from it.
 pub fn warn_if_not_initialized() {
