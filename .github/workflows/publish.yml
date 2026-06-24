@@ -35,9 +35,6 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04-arm
             artifact: hivemind-aarch64-unknown-linux-gnu
-          - target: x86_64-apple-darwin
-            os: macos-13
-            artifact: hivemind-x86_64-apple-darwin
           - target: aarch64-apple-darwin
             os: macos-latest
             artifact: hivemind-aarch64-apple-darwin
