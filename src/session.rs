@@ -196,14 +196,10 @@ mod tests {
 
     #[tokio::test]
     async fn records_not_found_recalls() {
-        let (s, _dir) =
-            store_with(&[("id_a", "pref a", "content a", vec![])]).await;
-        let r = execute_session_start(
-            &config(2000, vec!["pref a", "does not exist"]),
-            &s,
-        )
-        .await
-        .unwrap();
+        let (s, _dir) = store_with(&[("id_a", "pref a", "content a", vec![])]).await;
+        let r = execute_session_start(&config(2000, vec!["pref a", "does not exist"]), &s)
+            .await
+            .unwrap();
         assert_eq!(r.loaded.len(), 1);
         assert_eq!(r.skipped.len(), 1);
         assert_eq!(r.skipped[0].reason, SkipReason::NotFound);
@@ -219,12 +215,9 @@ mod tests {
         ])
         .await;
         let small_cost = crate::budget::count_entry_tokens("small", "tiny");
-        let r = execute_session_start(
-            &config(small_cost + 5, vec!["big", "small"]),
-            &s,
-        )
-        .await
-        .unwrap();
+        let r = execute_session_start(&config(small_cost + 5, vec!["big", "small"]), &s)
+            .await
+            .unwrap();
         assert_eq!(r.loaded.len(), 1, "only the small entry fits");
         assert_eq!(r.loaded[0].entry.title, "small");
         assert_eq!(r.skipped.len(), 1);
