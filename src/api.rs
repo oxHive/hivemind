@@ -5,9 +5,9 @@ use crate::{
 use axum::{
     Json, Router,
     extract::{Extension, Path, Query, State},
-    http::{HeaderMap, Method, StatusCode, header},
+    http::{Method, StatusCode, header},
     response::{IntoResponse, Response},
-    routing::{get, patch, post},
+    routing::{get, post},
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -30,26 +30,8 @@ impl From<anyhow::Error> for ApiError {
     }
 }
 
-fn bad_request(msg: impl Into<String>) -> ApiError {
-    ApiError(StatusCode::BAD_REQUEST, msg.into())
-}
-
 fn not_found(msg: impl Into<String>) -> ApiError {
     ApiError(StatusCode::NOT_FOUND, msg.into())
-}
-
-fn require_sync_auth(headers: &HeaderMap, api_key: &str) -> Result<(), ApiError> {
-    if api_key.is_empty() {
-        return Ok(());
-    }
-    let expected = format!("Bearer {api_key}");
-    match headers.get(header::AUTHORIZATION) {
-        Some(v) if v.as_bytes() == expected.as_bytes() => Ok(()),
-        _ => Err(ApiError(
-            StatusCode::UNAUTHORIZED,
-            "sync endpoint requires a valid API key".to_string(),
-        )),
-    }
 }
 
 pub fn router(store: Store, sync: SyncSettings, dashboard_origin: &str) -> Router {

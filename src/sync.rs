@@ -7,10 +7,10 @@ pub async fn run_sync_loop(
     on_startup: bool,
     trigger: Arc<Notify>,
 ) {
-    if on_startup {
-        if let Err(e) = db.sync().await {
-            tracing::warn!("initial sync failed: {e:#}");
-        }
+    if on_startup
+        && let Err(e) = db.sync().await
+    {
+        tracing::warn!("initial sync failed: {e:#}");
     }
     let mut ticker =
         tokio::time::interval(tokio::time::Duration::from_secs(interval_secs));
