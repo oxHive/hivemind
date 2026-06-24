@@ -109,6 +109,16 @@ pub struct SessionStartInput {
     pub project_path: String,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct MemoryStoreEdgeInput {
+    /// Source memory ID (mem_xxx)
+    pub source_id: String,
+    /// Target memory ID (mem_xxx)
+    pub target_id: String,
+    /// Relationship type: "shares_tag" | "applies_to" | "pairs_with" | "used_in" | "related_to" | "custom"
+    pub relationship: String,
+}
+
 #[derive(Clone)]
 pub struct HiveMind {
     store: Arc<SqliteStore>,
@@ -675,6 +685,25 @@ impl HiveMind {
         Parameters(p): Parameters<SessionStartInput>,
     ) -> Result<CallToolResult, ErrorData> {
         self.do_session_start(p).await
+    }
+
+    #[tool(
+        description = "Store a confirmed connection between two memories. Use after the user or Claude explicitly decides two memories are related. Valid relationships: shares_tag, applies_to, pairs_with, used_in, related_to, custom."
+    )]
+    async fn memory_store_edge(
+        &self,
+        Parameters(p): Parameters<MemoryStoreEdgeInput>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.store
+            .create_edge(&p.source_id, &p.target_id, &p.relationship)
+            .await
+            .map(|edge| {
+                CallToolResult::success(vec![rmcp::model::Content::text(format!(
+                    "Edge created: {} --[{}]--> {}",
+                    edge.source_id, edge.relationship, edge.target_id
+                ))])
+            })
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))
     }
 }
 
