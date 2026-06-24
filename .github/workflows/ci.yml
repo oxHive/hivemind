@@ -1,4 +1,4 @@
-name: CI
+name: Pull Request
 
 on:
   pull_request:
@@ -7,4 +7,4 @@ on:
 
 jobs:
   ci:
-    uses: oxHive/pipelines/.github/workflows/rust/build.yml@main
+    uses: oxHive/pipelines/.github/workflows/rust/check.yml@main
