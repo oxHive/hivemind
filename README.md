@@ -1,5 +1,7 @@
 # HiveMind
 
+> 🚧 **Under active development** — APIs and config formats may change between releases.
+
 Persistent memory for AI coding agents. HiveMind runs a local MCP server that gives Claude Code (and other AI agents) access to a SQLite-backed memory store — so context, preferences, and project knowledge survive across sessions.
 
 ## How it works
@@ -317,8 +319,8 @@ port = 3457
 
 [sync]
 enabled = false
-remote_url = ""
-api_key = ""
+remote_url = ""        # sqld server URL or Oxhive hosted endpoint
+api_key = ""           # sqld auth token, or Oxhive account key
 interval_seconds = 300
 sync_on_store = true
 sync_on_startup = true
@@ -330,25 +332,32 @@ sync_on_startup = true
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `HIVEMIND_DB_PATH` | `~/.local/share/hivemind/memory.db` | Path to the SQLite database |
+| `HIVEMIND_DB_PATH` | `~/.hivemind/memories.db` | Path to the SQLite database |
 
 ---
 
 ## Sync (optional)
 
-HiveMind can sync memories to a second instance — useful for sharing across machines or teammates.
+HiveMind can replicate memories to a remote server — useful for sharing across machines or keeping a remote backup. Sync uses [libsql](https://github.com/tursodatabase/libsql) embedded replication: the local database stays fully functional offline, and `hivemind up` periodically replicates writes to the remote primary.
 
 ```toml
 [sync]
 enabled = true
-remote_url = "http://pi.local:3456"
-api_key = "your-api-key"
-interval_seconds = 300
-sync_on_store = true     # push immediately when a memory is stored
-sync_on_startup = true   # pull on server start
+remote_url = "http://pi.local:8080"   # see options below
+api_key = "your-auth-token"           # see options below
+interval_seconds = 300                # background sync every 5 minutes
+sync_on_store = true                  # also sync immediately after each memory is stored
+sync_on_startup = true                # sync once when the server starts
 ```
 
-The `api_key` is used only to authenticate **server-to-server sync requests** between two HiveMind instances. It is not used by Claude or the dashboard. Both machines must have the same key. Leave it empty for single-machine setups — the sync endpoints will accept all requests from localhost.
+Two `remote_url` targets are supported:
+
+| Setup | `remote_url` points to | `api_key` |
+|-------|------------------------|-----------|
+| **Self-hosted** | Your own [sqld](https://github.com/tursodatabase/libsql/tree/main/libsql-server) server | sqld auth token — leave empty if sqld has no auth configured |
+| **Oxhive hosted** *(coming soon)* | `https://sync.oxhive.dev` | Your Oxhive account key |
+
+`api_key` is never sent to Claude or the dashboard — it is only used during replication.
 
 ---
 
@@ -455,7 +464,7 @@ No. Memories stored with `layer = "personal"` follow you, not the repo. Only `la
 
 **Is the MCP connection authenticated?**
 
-The MCP endpoint (`/mcp`) and the REST API (`/api/v1/*`) are unauthenticated — they bind to `127.0.0.1` by default, so only processes on your local machine can reach them. The `api_key` under `[sync]` is only used to authenticate **cross-machine sync requests** between two HiveMind instances; it has nothing to do with Claude's connection.
+The MCP endpoint (`/mcp`) and the REST API (`/api/v1/*`) are unauthenticated — they bind to `127.0.0.1` by default, so only processes on your local machine can reach them. The `api_key` under `[sync]` is your auth token for the remote sync target (sqld token for self-hosted, account key for Oxhive hosted); it is used only during replication and has nothing to do with Claude's connection to HiveMind.
 
 **The server isn't running — will Claude error out?**
 
@@ -467,7 +476,13 @@ Yes, as long as the agent supports MCP over HTTP (streamable HTTP transport). Th
 
 **Where is the database stored?**
 
-`~/.local/share/hivemind/memory.db` by default. Override with the `HIVEMIND_DB_PATH` environment variable. It's a plain SQLite file — you can back it up, copy it between machines, or inspect it directly.
+`~/.hivemind/memories.db` by default. Override with the `HIVEMIND_DB_PATH` environment variable. It's a plain SQLite file — you can back it up, copy it between machines, or inspect it directly.
+
+---
+
+## Integrating with HiveMind
+
+Detailed docs for connecting your own app, script, or AI agent to HiveMind's MCP tools and REST API: [docs/INTEGRATING.md](docs/INTEGRATING.md)
 
 ---
 
