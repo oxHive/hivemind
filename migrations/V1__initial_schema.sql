@@ -1,61 +1,48 @@
 CREATE TABLE IF NOT EXISTS memories (
-    id         TEXT PRIMARY KEY,
-    layer      TEXT NOT NULL,
-    type       TEXT NOT NULL,
-    title      TEXT NOT NULL,
-    content    TEXT NOT NULL,
-    source     TEXT,
-    project    TEXT,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
+    id          TEXT PRIMARY KEY,
+    title       TEXT NOT NULL,
+    content     TEXT NOT NULL,
+    token_count INTEGER,
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS tags (
-    memory_id TEXT REFERENCES memories(id) ON DELETE CASCADE,
-    tag       TEXT NOT NULL
+CREATE TABLE IF NOT EXISTS memory_tags (
+    memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+    tag       TEXT NOT NULL,
+    UNIQUE(memory_id, tag)
 );
 
-CREATE INDEX IF NOT EXISTS idx_tags_memory_id ON tags(memory_id);
+CREATE INDEX IF NOT EXISTS idx_memory_tags_memory_id ON memory_tags(memory_id);
+CREATE INDEX IF NOT EXISTS idx_memory_tags_tag ON memory_tags(tag);
 
 CREATE TABLE IF NOT EXISTS edges (
     id           TEXT PRIMARY KEY,
-    source_id    TEXT NOT NULL REFERENCES memories(id),
-    target_id    TEXT NOT NULL REFERENCES memories(id),
+    source_id    TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+    target_id    TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
     relationship TEXT NOT NULL,
-    weight       REAL DEFAULT 1.0,
-    inferred_by  TEXT NOT NULL,
-    status       TEXT DEFAULT 'accepted',
-    confidence   REAL,
-    reason       TEXT,
+    status       TEXT NOT NULL DEFAULT 'active',
     created_at   INTEGER NOT NULL,
-    updated_at   INTEGER NOT NULL,
     UNIQUE(source_id, target_id, relationship)
 );
 
 CREATE TABLE IF NOT EXISTS feedback (
     id         TEXT PRIMARY KEY,
-    memory_id  TEXT REFERENCES memories(id),
-    edge_id    TEXT REFERENCES edges(id),
-    type       TEXT NOT NULL,
+    memory_id  TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+    signal     TEXT NOT NULL,
     note       TEXT,
-    status     TEXT DEFAULT 'open',
+    status     TEXT NOT NULL DEFAULT 'pending',
     created_at INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS conflicts (
-    id          TEXT PRIMARY KEY,
-    memory_id   TEXT REFERENCES memories(id),
-    winner      TEXT NOT NULL,
-    loser       TEXT NOT NULL,
-    winner_src  TEXT NOT NULL,
-    loser_src   TEXT NOT NULL,
-    detected_at INTEGER NOT NULL,
-    status      TEXT DEFAULT 'open'
-);
-
-CREATE TABLE IF NOT EXISTS kv (
-    key   TEXT PRIMARY KEY,
-    value TEXT NOT NULL
+    id               TEXT PRIMARY KEY,
+    memory_id        TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+    remote_content   TEXT NOT NULL,
+    remote_updated_at INTEGER NOT NULL,
+    local_updated_at  INTEGER NOT NULL,
+    status           TEXT NOT NULL DEFAULT 'pending',
+    created_at       INTEGER NOT NULL
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
