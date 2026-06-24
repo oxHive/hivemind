@@ -6,7 +6,22 @@ on:
       - "v*"
 
 jobs:
+  verify-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify tag matches Cargo.toml version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          CARGO=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "oxhivemind") | .version')
+          if [ "$TAG" != "$CARGO" ]; then
+            echo "Tag v$TAG does not match Cargo.toml version $CARGO"
+            exit 1
+          fi
+          echo "Version check passed: $CARGO"
+
   build:
+    needs: verify-version
     uses: ./.github/workflows/build.yml
 
   build-binaries:
@@ -16,16 +31,16 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            artifact: hivemind-linux-amd64
+            artifact: hivemind-x86_64-unknown-linux-gnu
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04-arm
-            artifact: hivemind-linux-arm64
+            artifact: hivemind-aarch64-unknown-linux-gnu
           - target: x86_64-apple-darwin
             os: macos-13
-            artifact: hivemind-macos-amd64
+            artifact: hivemind-x86_64-apple-darwin
           - target: aarch64-apple-darwin
             os: macos-latest
-            artifact: hivemind-macos-arm64
+            artifact: hivemind-aarch64-apple-darwin
     runs-on: ${{ matrix.os }}
 
     steps:

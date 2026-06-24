@@ -73,7 +73,8 @@ This runs a shell command and injects its stdout into the conversation. It works
 ## Installation
 
 ```sh
-cargo install oxhivemind
+cargo install oxhivemind        # compile from source
+cargo binstall oxhivemind       # download pre-built binary (faster)
 ```
 
 ### Claude Code
