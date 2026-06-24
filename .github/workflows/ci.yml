@@ -4,10 +4,7 @@ on:
   pull_request:
     branches:
       - main
-  # push:
-  #   branches:
-  #     - main
 
 jobs:
   ci:
-    uses: ./.github/workflows/build.yml
+    uses: oxHive/pipelines/.github/workflows/rust-build.yml@main
