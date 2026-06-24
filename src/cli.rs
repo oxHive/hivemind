@@ -295,7 +295,10 @@ suggest_store = true\n\
 \n\
 [sync]\n\
 enabled = false\n\
+# Oxhive hosted sync: https://sync.oxhive.dev\n\
+# Self-hosted sqld:   http://your-server:8080\n\
 remote_url = \"\"\n\
+# Oxhive account key, or sqld auth token (leave empty if sqld has no auth)\n\
 api_key = \"\"\n\
 interval_seconds = 300\n\
 sync_on_store = true\n\
@@ -306,7 +309,7 @@ const GLOBAL_CLAUDE_MARKER: &str = "# HiveMind Memory System";
 const GLOBAL_CLAUDE_BLOCK: &str = "# HiveMind Memory System
 
 You have access to HiveMind via MCP tools: memory_store, memory_recall,
-memory_search, memory_update, memory_delete, hivemind_session_start.
+memory_search, memory_update, memory_delete, memory_store_edge, hivemind_session_start.
 
 At the start of every session, before doing anything else:
 
