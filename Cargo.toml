@@ -7,6 +7,11 @@ license = "AGPL-3.0-only"
 keywords = ["mcp", "memory", "ai", "agent", "cli"]
 categories = ["command-line-utilities", "development-tools"]
 
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/hivemind-{ target }.tar.gz"
+bin-dir = "hivemind"
+pkg-fmt = "tgz"
+
 [[bin]]
 name = "hivemind"
 path = "src/main.rs"
