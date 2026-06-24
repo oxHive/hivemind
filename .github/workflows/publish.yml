@@ -22,7 +22,7 @@ jobs:
 
   build:
     needs: verify-version
-    uses: ./.github/workflows/build.yml
+    uses: oxHive/pipelines/.github/workflows/rust-build.yml@main
 
   build-binaries:
     needs: build
