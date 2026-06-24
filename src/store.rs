@@ -153,7 +153,7 @@ impl SqliteStore {
             .query(
                 "SELECT m.id, m.title, m.content, m.created_at, m.updated_at, m.token_count
                  FROM memories m
-                 JOIN memories_fts f ON m.id = f.rowid
+                 JOIN memories_fts f ON m.rowid = f.rowid
                  WHERE memories_fts MATCH ?1
                  ORDER BY rank
                  LIMIT ?2",

@@ -37,7 +37,18 @@ pub async fn open_database(sync: &SyncSettings, path: &str) -> Result<libsql::Da
     }
 }
 
+/// Set WAL mode and enable foreign-key enforcement on a connection.
+/// Must be called on every connection obtained from `database.connect()`.
+pub async fn init_connection(conn: &libsql::Connection) -> Result<()> {
+    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+        .await?;
+    Ok(())
+}
+
 pub async fn run_migrations(conn: &libsql::Connection) -> Result<()> {
+    // Enable WAL mode and foreign-key enforcement before any DDL runs.
+    init_connection(conn).await?;
+
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL);",
     )
