@@ -7,7 +7,7 @@ on:
 
 jobs:
   release:
-    uses: oxHive/pipelines/.github/workflows/rust-release.yml@main
+    uses: oxHive/pipelines/.github/workflows/rust/release.yml@main
     with:
       package-name: oxhivemind
       binary-name: hivemind
