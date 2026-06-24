@@ -24,7 +24,12 @@ async fn test_app() -> (axum::Router, TempDir) {
     (router, dir)
 }
 
-async fn req(app: axum::Router, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
+async fn req(
+    app: axum::Router,
+    method: &str,
+    uri: &str,
+    body: Option<Value>,
+) -> (StatusCode, Value) {
     let builder = Request::builder().method(method).uri(uri);
     let request = match body {
         Some(v) => builder
@@ -132,7 +137,13 @@ async fn memory_delete_removes_entry() {
     .await;
     let id = created["id"].as_str().unwrap().to_string();
 
-    let (status, _) = req(app.clone(), "DELETE", &format!("/api/v1/memories/{id}"), None).await;
+    let (status, _) = req(
+        app.clone(),
+        "DELETE",
+        &format!("/api/v1/memories/{id}"),
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
 
     let (status, _) = req(app, "GET", &format!("/api/v1/memories/{id}"), None).await;
@@ -149,7 +160,11 @@ async fn search_finds_stored_memory() {
         app.clone(),
         "POST",
         "/api/v1/memories",
-        Some(mem_body("db driver choice", "standardized on pgx v5", &["golang"])),
+        Some(mem_body(
+            "db driver choice",
+            "standardized on pgx v5",
+            &["golang"],
+        )),
     )
     .await;
 

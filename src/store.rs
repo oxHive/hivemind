@@ -1,5 +1,5 @@
-use anyhow::{anyhow, Result};
-use libsql::{params, Connection};
+use anyhow::{Result, anyhow};
+use libsql::{Connection, params};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -216,10 +216,7 @@ impl SqliteStore {
     }
 
     pub async fn count(&self) -> Result<i64> {
-        let mut rows = self
-            .conn
-            .query("SELECT COUNT(*) FROM memories", ())
-            .await?;
+        let mut rows = self.conn.query("SELECT COUNT(*) FROM memories", ()).await?;
         let row = rows.next().await?.ok_or_else(|| anyhow!("no count row"))?;
         Ok(row.get(0)?)
     }
@@ -521,9 +518,15 @@ mod tests {
     #[tokio::test]
     async fn store_persists_row_and_tags() {
         let (s, _dir) = make_store().await;
-        s.store("mem_1", "My Title", "content here", &["rust".into(), "test".into()], None)
-            .await
-            .unwrap();
+        s.store(
+            "mem_1",
+            "My Title",
+            "content here",
+            &["rust".into(), "test".into()],
+            None,
+        )
+        .await
+        .unwrap();
         let entry = s.recall_by_id("mem_1").await.unwrap().unwrap();
         assert_eq!(entry.title, "My Title");
         assert_eq!(entry.content, "content here");
@@ -534,9 +537,15 @@ mod tests {
     #[tokio::test]
     async fn store_deduplicates_tags() {
         let (s, _dir) = make_store().await;
-        s.store("mem_2", "Title", "body", &["rust".into(), "rust".into()], None)
-            .await
-            .unwrap();
+        s.store(
+            "mem_2",
+            "Title",
+            "body",
+            &["rust".into(), "rust".into()],
+            None,
+        )
+        .await
+        .unwrap();
         let entry = s.recall_by_id("mem_2").await.unwrap().unwrap();
         assert_eq!(entry.tags.len(), 1);
     }
@@ -544,8 +553,12 @@ mod tests {
     #[tokio::test]
     async fn store_auto_connects_memories_sharing_a_tag() {
         let (s, _dir) = make_store().await;
-        s.store("mem_a", "A", "body a", &["shared".into()], None).await.unwrap();
-        s.store("mem_b", "B", "body b", &["shared".into()], None).await.unwrap();
+        s.store("mem_a", "A", "body a", &["shared".into()], None)
+            .await
+            .unwrap();
+        s.store("mem_b", "B", "body b", &["shared".into()], None)
+            .await
+            .unwrap();
         let edges = s.list_edges(None).await.unwrap();
         assert!(!edges.is_empty(), "expected auto-edge from shared tag");
     }
@@ -553,9 +566,15 @@ mod tests {
     #[tokio::test]
     async fn delete_removes_memory_tags_and_fts() {
         let (s, _dir) = make_store().await;
-        s.store("mem_del", "Delete Me", "some content", &["tag1".into()], None)
-            .await
-            .unwrap();
+        s.store(
+            "mem_del",
+            "Delete Me",
+            "some content",
+            &["tag1".into()],
+            None,
+        )
+        .await
+        .unwrap();
         s.delete("mem_del").await.unwrap();
         assert!(s.recall_by_id("mem_del").await.unwrap().is_none());
         let results = s.search("some content", 10).await.unwrap();
@@ -565,11 +584,18 @@ mod tests {
     #[tokio::test]
     async fn delete_removes_connected_edges() {
         let (s, _dir) = make_store().await;
-        s.store("mem_e1", "E1", "body", &["tag_e".into()], None).await.unwrap();
-        s.store("mem_e2", "E2", "body", &["tag_e".into()], None).await.unwrap();
+        s.store("mem_e1", "E1", "body", &["tag_e".into()], None)
+            .await
+            .unwrap();
+        s.store("mem_e2", "E2", "body", &["tag_e".into()], None)
+            .await
+            .unwrap();
         s.delete("mem_e1").await.unwrap();
         let edges = s.list_edges(None).await.unwrap();
-        assert!(edges.is_empty(), "edges involving deleted memory should be gone");
+        assert!(
+            edges.is_empty(),
+            "edges involving deleted memory should be gone"
+        );
     }
 
     #[tokio::test]
@@ -586,15 +612,25 @@ mod tests {
     #[tokio::test]
     async fn conflict_round_trip() {
         let (s, _dir) = make_store().await;
-        s.store("mem_c1", "C1", "local content", &[], None).await.unwrap();
+        s.store("mem_c1", "C1", "local content", &[], None)
+            .await
+            .unwrap();
         let entry = s.recall_by_id("mem_c1").await.unwrap().unwrap();
         let conflict = s
-            .write_conflict("mem_c1", "remote content", entry.updated_at + 1, entry.updated_at)
+            .write_conflict(
+                "mem_c1",
+                "remote content",
+                entry.updated_at + 1,
+                entry.updated_at,
+            )
             .await
             .unwrap();
         let fetched = s.get_conflict_by_id(&conflict.id).await.unwrap().unwrap();
         assert_eq!(fetched.remote_content, "remote content");
-        let resolved = s.resolve_conflict(&conflict.id, "keep_local").await.unwrap();
+        let resolved = s
+            .resolve_conflict(&conflict.id, "keep_local")
+            .await
+            .unwrap();
         assert!(resolved);
         let after = s.get_conflict_by_id(&conflict.id).await.unwrap().unwrap();
         assert_eq!(after.status, "keep_local");

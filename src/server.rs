@@ -1,6 +1,4 @@
-use crate::{
-    store::SqliteStore,
-};
+use crate::store::SqliteStore;
 use rmcp::{
     RoleServer,
     handler::server::wrapper::Parameters,
@@ -244,7 +242,7 @@ impl HiveMind {
                 return Ok(CallToolResult::structured(json!({
                     "updated": false,
                     "id": p.id,
-                })))
+                })));
             }
             Some(c) => c,
         };
@@ -466,8 +464,7 @@ impl HiveMind {
                 };
                 let snippet: String = m.content.chars().take(80).collect();
                 let ellipsis = if m.content.len() > 80 { "…" } else { "" };
-                format!("{} | {} | {}{}", m.id, m.title, snippet, ellipsis)
-                    + &tags
+                format!("{} | {} | {}{}", m.id, m.title, snippet, ellipsis) + &tags
             })
             .collect();
 
@@ -516,10 +513,7 @@ impl HiveMind {
             .await
             .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
 
-        let open_items: Vec<_> = items
-            .iter()
-            .filter(|i| i.status == "pending")
-            .collect();
+        let open_items: Vec<_> = items.iter().filter(|i| i.status == "pending").collect();
 
         if open_items.is_empty() {
             return Ok(vec![PromptMessage::new_text(
@@ -549,7 +543,9 @@ impl HiveMind {
 
         lines.push("\n\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}\u{2501}".to_string());
         lines.push("For each item, choose an action:".to_string());
-        lines.push("  \u{2022} Fix the memory \u{2014} call memory_update with the memory ID".to_string());
+        lines.push(
+            "  \u{2022} Fix the memory \u{2014} call memory_update with the memory ID".to_string(),
+        );
         lines.push(
             "  \u{2022} Delete if truly wrong \u{2014} call memory_delete with confirm:true"
                 .to_string(),

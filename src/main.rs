@@ -76,12 +76,7 @@ async fn run_up(headless: bool) -> Result<()> {
         let trigger = Arc::new(Notify::new());
         let interval = settings.sync.interval_seconds;
         let on_startup = settings.sync.sync_on_startup;
-        tokio::spawn(sync::run_sync_loop(
-            db_arc,
-            interval,
-            on_startup,
-            trigger,
-        ));
+        tokio::spawn(sync::run_sync_loop(db_arc, interval, on_startup, trigger));
     }
 
     http::run_up(store, &settings, headless).await

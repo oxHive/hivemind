@@ -1,7 +1,4 @@
-use crate::{
-    config::SyncSettings,
-    store::SqliteStore,
-};
+use crate::{config::SyncSettings, store::SqliteStore};
 use axum::{
     Json, Router,
     extract::{Extension, Path, Query, State},
@@ -127,10 +124,7 @@ async fn create_memory(
     store
         .store(&id, &b.title, &b.content, &b.tags, b.token_count)
         .await?;
-    Ok((
-        StatusCode::CREATED,
-        Json(json!({ "id": id })),
-    ))
+    Ok((StatusCode::CREATED, Json(json!({ "id": id }))))
 }
 
 async fn get_memory(
@@ -263,9 +257,7 @@ async fn create_feedback(
 
 // --- conflicts + status ---
 
-async fn list_conflicts(
-    State(store): State<Store>,
-) -> Result<Json<Value>, ApiError> {
+async fn list_conflicts(State(store): State<Store>) -> Result<Json<Value>, ApiError> {
     let items = store.list_conflicts().await?;
     Ok(Json(json!({ "count": items.len(), "conflicts": items })))
 }
@@ -385,7 +377,11 @@ mod tests {
             app.clone(),
             "POST",
             "/api/v1/memories",
-            Some(memory_body("golang preferences", "uber/zap, sqlc, pgx v5", &["golang"])),
+            Some(memory_body(
+                "golang preferences",
+                "uber/zap, sqlc, pgx v5",
+                &["golang"],
+            )),
         )
         .await;
         assert_eq!(st, StatusCode::CREATED);
@@ -411,7 +407,13 @@ mod tests {
         assert_eq!(st, StatusCode::OK);
         assert_eq!(patched["updated"], true);
 
-        let (st, _) = req(app.clone(), "DELETE", &format!("/api/v1/memories/{id}"), None).await;
+        let (st, _) = req(
+            app.clone(),
+            "DELETE",
+            &format!("/api/v1/memories/{id}"),
+            None,
+        )
+        .await;
         assert_eq!(st, StatusCode::OK);
         let (st, _) = req(app.clone(), "GET", &format!("/api/v1/memories/{id}"), None).await;
         assert_eq!(st, StatusCode::NOT_FOUND);
