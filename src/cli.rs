@@ -872,15 +872,23 @@ pub fn cmd_status() -> Result<()> {
     warn_if_not_initialized();
     let cwd = std::env::current_dir()?;
     let db_path = crate::db::resolve_db_path();
-    let conn = crate::db::open(&db_path)?;
-    let store = crate::store::SqliteStore::new(conn);
-    let out = render_status(&cwd, &crate::config::global_config_path(), &store, &db_path)?;
+    let out = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(async {
+            let sync = crate::config::SyncSettings::default();
+            let database = crate::db::open_database(&sync, &db_path).await?;
+            let conn = database.connect()?;
+            crate::db::run_migrations(&conn).await?;
+            let store = crate::store::SqliteStore::new(conn);
+            render_status(&cwd, &crate::config::global_config_path(), &store, &db_path).await
+        })?;
     println!("{out}");
     Ok(())
 }
 
 /// Build the `hivemind status` report. `global_path` is injectable for testing.
-pub fn render_status(
+pub async fn render_status(
     cwd: &Path,
     global_path: &Path,
     store: &crate::store::SqliteStore,
@@ -889,7 +897,7 @@ pub fn render_status(
     use std::fmt::Write as _;
 
     let version = env!("CARGO_PKG_VERSION");
-    let count = store.count()?;
+    let count = store.count().await?;
     let mut out = String::new();
 
     // Load the config once (if a project root is found) and reuse it for both
@@ -920,7 +928,7 @@ pub fn render_status(
         return Ok(out);
     };
 
-    let result = crate::session::execute_session_start(&config, store)?;
+    let result = crate::session::execute_session_start(&config, store).await?;
 
     writeln!(out, "Project:    {}", config.project_name)?;
     writeln!(
@@ -938,7 +946,6 @@ pub fn render_status(
         writeln!(out, "  (nothing — no recalls configured or none resolved)")?;
     }
     for entry in &result.loaded {
-        let layer = format!("[{}]", entry.entry.layer);
         let local = if matches!(entry.source, crate::config::RecallSource::Local) {
             "  (local)"
         } else {
@@ -946,8 +953,8 @@ pub fn render_status(
         };
         writeln!(
             out,
-            "  {:<11} {:<40} ~{} tokens{}",
-            layer, entry.entry.title, entry.tokens, local
+            "  {:<40} ~{} tokens{}",
+            entry.entry.title, entry.tokens, local
         )?;
     }
     for skip in &result.skipped {
@@ -1164,25 +1171,29 @@ mod tests {
         );
     }
 
-    #[test]
-    fn render_status_previews_injection() {
-        use crate::db;
-        use crate::model::{Layer, MemoryType, NewMemory};
-        use crate::store::SqliteStore;
+    #[tokio::test]
+    async fn render_status_previews_injection() {
+        use crate::{config::SyncSettings, db, store::SqliteStore};
 
-        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
-        db::run_migrations(&mut conn).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let sync = SyncSettings::default();
+        let database = db::open_database(&sync, db_path.to_str().unwrap())
+            .await
+            .unwrap();
+        let conn = database.connect().unwrap();
+        db::run_migrations(&conn).await.unwrap();
         let store = SqliteStore::new(conn);
+        let id = format!("mem_{}", uuid::Uuid::new_v4().simple());
         store
-            .store(NewMemory {
-                title: "golang preferences".to_string(),
-                content: "uber/zap, sqlc, pgx v5".to_string(),
-                layer: Layer::Personal,
-                memory_type: MemoryType::Preference,
-                tags: vec!["golang".to_string()],
-                project: None,
-                source: None,
-            })
+            .store(
+                &id,
+                "golang preferences",
+                "uber/zap, sqlc, pgx v5",
+                &["golang".to_string()],
+                None,
+            )
+            .await
             .unwrap();
 
         let proj = tempfile::tempdir().unwrap();
@@ -1192,7 +1203,9 @@ mod tests {
         ).unwrap();
         let missing_global = proj.path().join("no-global.toml");
 
-        let out = render_status(proj.path(), &missing_global, &store, "/tmp/x.db").unwrap();
+        let out = render_status(proj.path(), &missing_global, &store, "/tmp/x.db")
+            .await
+            .unwrap();
         assert!(out.contains("demo"), "shows project name");
         assert!(
             out.contains("golang preferences"),
@@ -1205,17 +1218,25 @@ mod tests {
         );
     }
 
-    #[test]
-    fn render_status_without_config_reports_missing() {
-        use crate::db;
-        use crate::store::SqliteStore;
-        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
-        db::run_migrations(&mut conn).unwrap();
+    #[tokio::test]
+    async fn render_status_without_config_reports_missing() {
+        use crate::{config::SyncSettings, db, store::SqliteStore};
+
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let sync = SyncSettings::default();
+        let database = db::open_database(&sync, db_path.to_str().unwrap())
+            .await
+            .unwrap();
+        let conn = database.connect().unwrap();
+        db::run_migrations(&conn).await.unwrap();
         let store = SqliteStore::new(conn);
 
         let proj = tempfile::tempdir().unwrap();
         let missing_global = proj.path().join("no-global.toml");
-        let out = render_status(proj.path(), &missing_global, &store, "/tmp/x.db").unwrap();
+        let out = render_status(proj.path(), &missing_global, &store, "/tmp/x.db")
+            .await
+            .unwrap();
         assert!(
             out.contains("hivemind init"),
             "suggests init when no config"

@@ -3,7 +3,6 @@ use crate::{
     config::{ServerSettings, SyncSettings},
     server::HiveMind,
     store::SqliteStore,
-    sync as syncer,
 };
 use anyhow::Result;
 use axum::{
@@ -99,16 +98,6 @@ pub async fn run_up(
         &dashboard_origin,
     );
 
-    if settings.sync.enabled {
-        let client = Arc::new(syncer::SyncClient::new(&settings.sync, store.clone()));
-        let interval = settings.sync.interval_seconds;
-        let on_startup = settings.sync.sync_on_startup;
-        let t = trigger.clone();
-        tokio::spawn(async move {
-            syncer::run_sync_loop(client, interval, on_startup, t).await;
-        });
-    }
-
     let listener = tokio::net::TcpListener::bind((settings.host.as_str(), settings.port)).await?;
     tracing::info!(
         "MCP endpoint:  http://{}:{}/mcp",
@@ -171,24 +160,31 @@ pub async fn run_dashboard(settings: &ServerSettings, open: bool) -> Result<()> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{db, store::SqliteStore};
+    use crate::{config::SyncSettings, db, store::SqliteStore};
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use http_body_util::BodyExt;
     use std::sync::Arc;
+    use tempfile::TempDir;
     use tower::ServiceExt;
 
-    fn test_store() -> Arc<SqliteStore> {
-        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
-        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
-        db::run_migrations(&mut conn).unwrap();
-        Arc::new(SqliteStore::new(conn))
+    async fn test_store() -> (Arc<SqliteStore>, TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.db");
+        let sync = SyncSettings::default();
+        let database = db::open_database(&sync, path.to_str().unwrap())
+            .await
+            .unwrap();
+        let conn = database.connect().unwrap();
+        db::run_migrations(&conn).await.unwrap();
+        (Arc::new(SqliteStore::new(conn)), dir)
     }
 
     #[tokio::test]
     async fn app_router_serves_rest_api() {
+        let (store, _dir) = test_store().await;
         let app = app_router(
-            test_store(),
+            store,
             crate::config::SyncSettings::default(),
             Arc::new(tokio::sync::Notify::new()),
             "http://127.0.0.1:3457",

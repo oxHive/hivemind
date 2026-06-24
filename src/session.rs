@@ -1,7 +1,6 @@
 use crate::budget::count_entry_tokens;
 use crate::config::{HiveMindConfig, RecallSource};
-use crate::model::MemoryEntry;
-use crate::store::SqliteStore;
+use crate::store::{MemoryEntry, SqliteStore};
 use anyhow::Result;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +38,7 @@ pub struct SessionStartResult {
     pub skipped: Vec<SkippedEntry>,
     pub used_tokens: usize,
     pub max_tokens: usize,
+    pub memories_recalled: usize,
 }
 
 impl SessionStartResult {
@@ -52,8 +52,8 @@ impl SessionStartResult {
 
 /// Run the configured session-start recalls under the token budget.
 /// On over-budget, the entry is skipped and the loop CONTINUES — a later,
-/// smaller entry may still fit. Recalls are resolved id -> title -> FTS.
-pub fn execute_session_start(
+/// smaller entry may still fit. Recalls are resolved title -> FTS.
+pub async fn execute_session_start(
     config: &HiveMindConfig,
     store: &SqliteStore,
 ) -> Result<SessionStartResult> {
@@ -63,36 +63,40 @@ pub fn execute_session_start(
     let mut skipped = Vec::new();
 
     for recall in &config.recalls {
-        match store.resolve_recall(&recall.query)? {
-            None => skipped.push(SkippedEntry {
+        let entries = store.resolve_recall(&recall.query).await?;
+        if entries.is_empty() {
+            skipped.push(SkippedEntry {
                 query: recall.query.clone(),
                 reason: SkipReason::NotFound,
-            }),
-            Some(entry) => {
-                let tokens = count_entry_tokens(&entry.title, &entry.content);
-                if used_tokens + tokens > max_tokens {
-                    skipped.push(SkippedEntry {
-                        query: recall.query.clone(),
-                        reason: SkipReason::BudgetExceeded,
-                    });
-                    continue;
-                }
-                used_tokens += tokens;
-                loaded.push(LoadedEntry {
-                    entry,
-                    tokens,
-                    source: recall.source,
+            });
+        } else {
+            // Use the first matching entry
+            let entry = entries.into_iter().next().unwrap();
+            let tokens = count_entry_tokens(&entry.title, &entry.content);
+            if used_tokens + tokens > max_tokens {
+                skipped.push(SkippedEntry {
+                    query: recall.query.clone(),
+                    reason: SkipReason::BudgetExceeded,
                 });
+                continue;
             }
+            used_tokens += tokens;
+            loaded.push(LoadedEntry {
+                entry,
+                tokens,
+                source: recall.source,
+            });
         }
     }
 
+    let memories_recalled = loaded.len();
     Ok(SessionStartResult {
         project: config.project_name.clone(),
         loaded,
         skipped,
         used_tokens,
         max_tokens,
+        memories_recalled,
     })
 }
 
@@ -100,27 +104,23 @@ pub fn execute_session_start(
 mod tests {
     use super::*;
     use crate::config::{HiveMindConfig, Recall, RecallSource};
-    use crate::db;
-    use crate::model::{Layer, MemoryType, NewMemory};
-    use crate::store::SqliteStore;
+    use crate::{db, store::SqliteStore};
+    use tempfile::TempDir;
 
-    fn store_with(entries: &[(&str, &str)]) -> SqliteStore {
-        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
-        db::run_migrations(&mut conn).unwrap();
-        let s = SqliteStore::new(conn);
-        for (title, content) in entries {
-            s.store(NewMemory {
-                title: title.to_string(),
-                content: content.to_string(),
-                layer: Layer::Personal,
-                memory_type: MemoryType::Preference,
-                tags: vec![],
-                project: None,
-                source: None,
-            })
+    async fn store_with(memories: &[(&str, &str, &str, Vec<String>)]) -> (SqliteStore, TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.db");
+        let sync = crate::config::SyncSettings::default();
+        let database = db::open_database(&sync, path.to_str().unwrap())
+            .await
             .unwrap();
+        let conn = database.connect().unwrap();
+        db::run_migrations(&conn).await.unwrap();
+        let store = SqliteStore::new(conn);
+        for (id, title, content, tags) in memories {
+            store.store(id, title, content, tags, None).await.unwrap();
         }
-        s
+        (store, dir)
     }
 
     fn config(max: usize, recalls: Vec<&str>) -> HiveMindConfig {
@@ -153,6 +153,7 @@ mod tests {
             skipped: vec![],
             used_tokens: 300,
             max_tokens: 2000,
+            memories_recalled: 0,
         };
         assert_eq!(result.remaining(), 1700);
         assert!(!result.truncated());
@@ -166,6 +167,7 @@ mod tests {
             }],
             used_tokens: 2001,
             max_tokens: 2000,
+            memories_recalled: 0,
         };
         assert_eq!(
             result_with_skip.remaining(),
@@ -175,10 +177,16 @@ mod tests {
         assert!(result_with_skip.truncated());
     }
 
-    #[test]
-    fn loads_all_recalls_within_budget() {
-        let s = store_with(&[("pref a", "short content a"), ("pref b", "short content b")]);
-        let r = execute_session_start(&config(2000, vec!["pref a", "pref b"]), &s).unwrap();
+    #[tokio::test]
+    async fn loads_all_recalls_within_budget() {
+        let (s, _dir) = store_with(&[
+            ("id_a", "pref a", "short content a", vec![]),
+            ("id_b", "pref b", "short content b", vec![]),
+        ])
+        .await;
+        let r = execute_session_start(&config(2000, vec!["pref a", "pref b"]), &s)
+            .await
+            .unwrap();
         assert_eq!(r.loaded.len(), 2);
         assert!(r.skipped.is_empty());
         assert!(!r.truncated());
@@ -186,22 +194,37 @@ mod tests {
         assert!(r.used_tokens > 0);
     }
 
-    #[test]
-    fn records_not_found_recalls() {
-        let s = store_with(&[("pref a", "content a")]);
-        let r = execute_session_start(&config(2000, vec!["pref a", "does not exist"]), &s).unwrap();
+    #[tokio::test]
+    async fn records_not_found_recalls() {
+        let (s, _dir) =
+            store_with(&[("id_a", "pref a", "content a", vec![])]).await;
+        let r = execute_session_start(
+            &config(2000, vec!["pref a", "does not exist"]),
+            &s,
+        )
+        .await
+        .unwrap();
         assert_eq!(r.loaded.len(), 1);
         assert_eq!(r.skipped.len(), 1);
         assert_eq!(r.skipped[0].reason, SkipReason::NotFound);
         assert!(r.truncated());
     }
 
-    #[test]
-    fn skips_over_budget_but_continues_to_smaller_entries() {
+    #[tokio::test]
+    async fn skips_over_budget_but_continues_to_smaller_entries() {
         let big = "word ".repeat(400);
-        let s = store_with(&[("big", &big), ("small", "tiny")]);
+        let (s, _dir) = store_with(&[
+            ("id_big", "big", &big, vec![]),
+            ("id_small", "small", "tiny", vec![]),
+        ])
+        .await;
         let small_cost = crate::budget::count_entry_tokens("small", "tiny");
-        let r = execute_session_start(&config(small_cost + 5, vec!["big", "small"]), &s).unwrap();
+        let r = execute_session_start(
+            &config(small_cost + 5, vec!["big", "small"]),
+            &s,
+        )
+        .await
+        .unwrap();
         assert_eq!(r.loaded.len(), 1, "only the small entry fits");
         assert_eq!(r.loaded[0].entry.title, "small");
         assert_eq!(r.skipped.len(), 1);

@@ -1,11 +1,12 @@
 use anyhow::Result;
 use clap::Parser;
 use oxhivemind::cli::{self, Cli, Command, McpAction, ServiceAction};
-use oxhivemind::{config, db, http, server, store};
+use oxhivemind::{config, db, http, server, store, sync};
 use rmcp::ServiceExt;
 use server::HiveMind;
 use std::sync::Arc;
 use store::SqliteStore;
+use tokio::sync::Notify;
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -36,17 +37,23 @@ fn init_tracing() {
         .init();
 }
 
-fn open_store() -> Result<Arc<SqliteStore>> {
+async fn open_store(
+    sync_settings: &config::SyncSettings,
+) -> Result<(Arc<SqliteStore>, libsql::Database)> {
     let db_path = db::resolve_db_path();
     tracing::info!("opening database at {db_path}");
-    let conn = db::open(&db_path)?;
-    Ok(Arc::new(SqliteStore::new(conn)))
+    let database = db::open_database(sync_settings, &db_path).await?;
+    let conn = database.connect()?;
+    db::run_migrations(&conn).await?;
+    let store = Arc::new(SqliteStore::new(conn));
+    Ok((store, database))
 }
 
 #[tokio::main]
 async fn run_server() -> Result<()> {
     init_tracing();
-    let store = open_store()?;
+    let sync_settings = config::SyncSettings::default();
+    let (store, _db) = open_store(&sync_settings).await?;
     let service = HiveMind::with_store(store);
 
     tracing::info!("HiveMind MCP server starting on stdio");
@@ -62,7 +69,21 @@ async fn run_up(headless: bool) -> Result<()> {
     cli::warn_if_not_initialized();
     init_tracing();
     let settings = config::load_server_settings(&config::global_config_path())?;
-    let store = open_store()?;
+    let (store, database) = open_store(&settings.sync).await?;
+
+    if settings.sync.enabled {
+        let db_arc = Arc::new(database);
+        let trigger = Arc::new(Notify::new());
+        let interval = settings.sync.interval_seconds;
+        let on_startup = settings.sync.sync_on_startup;
+        tokio::spawn(sync::run_sync_loop(
+            db_arc,
+            interval,
+            on_startup,
+            trigger,
+        ));
+    }
+
     http::run_up(store, &settings, headless).await
 }
 
