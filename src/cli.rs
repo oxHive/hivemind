@@ -1,6 +1,11 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+use std::io::Write as _;
 
 #[derive(Parser)]
 #[command(
@@ -64,6 +69,29 @@ pub enum McpAction {
     },
 }
 
+fn with_spinner<T>(msg: &str, f: impl FnOnce() -> T) -> T {
+    let done = Arc::new(AtomicBool::new(false));
+    let done2 = done.clone();
+    let label = msg.to_string();
+    let width = msg.len() + 4;
+    let handle = std::thread::spawn(move || {
+        let frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+        let mut i = 0usize;
+        while !done2.load(Ordering::Relaxed) {
+            print!("\r  {} {label}", frames[i % frames.len()]);
+            let _ = std::io::stdout().flush();
+            std::thread::sleep(std::time::Duration::from_millis(80));
+            i += 1;
+        }
+        print!("\r{}\r", " ".repeat(width));
+        let _ = std::io::stdout().flush();
+    });
+    let result = f();
+    done.store(true, Ordering::Relaxed);
+    let _ = handle.join();
+    result
+}
+
 pub fn cmd_init() -> Result<()> {
     let cwd = std::env::current_dir()?;
     let home = home_dir();
@@ -73,7 +101,9 @@ pub fn cmd_init() -> Result<()> {
     }
     println!();
 
-    match detect_registered_clients(&home) {
+    let registered_clients =
+        with_spinner("checking registered MCP clients...", || detect_registered_clients(&home));
+    match registered_clients {
         registered if registered.is_empty() => {
             println!("HiveMind initialized.");
             println!();
@@ -86,7 +116,7 @@ pub fn cmd_init() -> Result<()> {
             println!("       hivemind mcp install kimi        # Kimi Code CLI");
             println!("       hivemind mcp install codex       # OpenAI Codex CLI");
             println!("  2. Start the server:  hivemind service install  (or: hivemind up)");
-            println!("  3. Open a new session in your AI client — memory hooks are now active.");
+            println!("  3. Open a new session in your AI client. Memory hooks are now active.");
         }
         registered => {
             let list = registered.join(", ");
@@ -95,7 +125,7 @@ pub fn cmd_init() -> Result<()> {
             println!();
             println!("Next steps:");
             println!("  1. Start the server:  hivemind service install  (or: hivemind up)");
-            println!("  2. Open a new session — memory hooks are now active.");
+            println!("  2. Open a new session. Memory hooks are now active.");
         }
     }
 
