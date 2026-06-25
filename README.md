@@ -1,15 +1,15 @@
 # HiveMind
 
-> 🚧 **Under active development** — APIs and config formats may change between releases.
+> 🚧 **Under active development.** APIs and config formats may change between releases.
 
-Persistent memory for AI coding agents. HiveMind runs a local MCP server that gives Claude Code (and other AI agents) access to a SQLite-backed memory store — so context, preferences, and project knowledge survive across sessions.
+Persistent memory for AI coding agents. HiveMind runs a local MCP server that gives Claude Code (and other AI agents) access to a SQLite-backed memory store, keeping context, preferences, and project knowledge alive across sessions.
 
 ## How it works
 
 1. You run `hivemind up` once to start the local server.
 2. Claude Code connects to it via MCP.
 3. At the start of every session, Claude automatically recalls the memories configured for your project.
-4. You ask Claude to store anything worth keeping — it never auto-stores.
+4. You ask Claude to store anything worth keeping. It never auto-stores.
 
 ### The session start flow in detail
 
@@ -17,7 +17,7 @@ When you open a new Claude Code session in a project that has `.hivemind.toml`:
 
 1. Claude reads CLAUDE.md, which instructs it to call `hivemind_session_start` once.
 2. Claude calls the MCP tool with the current project path.
-3. HiveMind reads `.hivemind.toml` (and `.hivemind.local.toml` if present), resolves each `recalls` entry against the SQLite database (by exact title, then FTS), and returns the results as structured JSON — staying within `max_tokens`.
+3. HiveMind reads `.hivemind.toml` (and `.hivemind.local.toml` if present), resolves each `recalls` entry against the SQLite database (by exact title, then FTS), and returns the results as structured JSON, staying within `max_tokens`.
 4. Claude incorporates the returned memories silently and proceeds with your request.
 
 That's it. One tool call, one round-trip to the database, zero per-prompt overhead after that.
@@ -32,11 +32,11 @@ The `max_tokens` cap prevents session start from consuming too much of Claude's 
 
 The `recalls` list in `.hivemind.toml` is only for **automatic injection at session start**. You can always fetch any memory on demand during a session:
 
-- **By title or ID** — ask Claude: *"recall the memory titled 'golang preferences'"* → Claude calls `memory_recall`
-- **By keyword** — ask Claude: *"search my memories for postgres"* → Claude calls `memory_search` (FTS, returns snippets)
-- **Browse all** — use the `/memory-list` prompt
+- **By title or ID**: ask Claude: *"recall the memory titled 'golang preferences'"* → Claude calls `memory_recall`
+- **By keyword**: ask Claude: *"search my memories for postgres"* → Claude calls `memory_search` (FTS, returns snippets)
+- **Browse all**: use the `/memory-list` prompt
 
-Memories not listed in `recalls` are not gone — they're just not auto-loaded. They live in the database and are available any time you ask.
+Memories not listed in `recalls` are still available; they're just not auto-loaded. They live in the database and are available any time you ask.
 
 ---
 
@@ -60,13 +60,13 @@ This runs a shell command and injects its stdout into the conversation. It works
 |---|---|---|
 | **When it runs** | On **every message** you send | **Once** per session |
 | **Context overhead** | Added to every prompt, every time | Injected once; zero cost after that |
-| **Token budget** | None — dumps all output unconditionally | `max_tokens` cap with per-entry skipping |
+| **Token budget** | None; dumps all output unconditionally | `max_tokens` cap with per-entry skipping |
 | **Data source** | Anything a shell command outputs | SQLite FTS store, queryable by title/ID/keyword |
 | **Selectivity** | Whatever the command returns | You specify exactly which memories per project |
-| **Persistence** | Stateless — reruns the command fresh each call | Stateful — memories survive machines and reinstalls |
+| **Persistence** | Stateless; reruns the command fresh each call | Stateful; memories survive across machines and reinstalls |
 | **On-demand access** | Only what the hook returns | Full MCP tools (`memory_recall`, `memory_search`, etc.) |
 
-**The short version:** the hook approach re-injects context on every single message, which burns tokens proportionally to how often you prompt. HiveMind injects once at session start and then stays out of the way — the rest of the session is just Claude using what it loaded, with on-demand tools if it needs more.
+**The short version:** the hook approach re-injects context on every single message, which burns tokens proportionally to how often you prompt. HiveMind injects once at session start and then stays out of the way. After that, Claude uses what it loaded and can call on-demand tools if it needs more.
 
 ---
 
@@ -207,7 +207,7 @@ hivemind up
 cd ~/projects/myapp
 hivemind init
 
-# 3. Open a new Claude Code session — memory hooks are now active
+# 3. Open a new Claude Code session (memory hooks are now active)
 ```
 
 ### Run as a background service (recommended)
@@ -218,7 +218,7 @@ Instead of keeping a terminal open, install HiveMind as a user-level service so 
 hivemind service install
 ```
 
-This writes a unit file (Linux) or launchd plist (macOS) and enables it immediately — no `sudo` required.
+This writes a unit file (Linux) or launchd plist (macOS) and enables it immediately, with no `sudo` required.
 
 | Platform | Mechanism | Unit file location |
 |----------|-----------|-------------------|
@@ -273,7 +273,7 @@ hivemind dashboard --open        Open the dashboard (requires server running)
 
 ## Configuration
 
-### Project config — `.hivemind.toml`
+### Project config: `.hivemind.toml`
 
 Committed to the repo. Shared across the team.
 
@@ -293,7 +293,7 @@ recalls = [
 
 `recalls` is a list of memory titles to auto-inject at session start. Each entry is looked up by exact title, then falls back to FTS. The combined size is capped at `max_tokens`.
 
-### Personal config — `.hivemind.local.toml`
+### Personal config: `.hivemind.local.toml`
 
 Gitignored. Your own additions on top of the team config.
 
@@ -303,7 +303,7 @@ recalls = ["my personal style notes"]
 max_tokens = 500   # added to the team budget
 ```
 
-### Global config — `~/.config/hivemind/config.toml`
+### Global config: `~/.config/hivemind/config.toml`
 
 Created by `hivemind init`. Applies to all projects.
 
@@ -339,7 +339,7 @@ sync_on_startup = true
 
 ## Sync (optional)
 
-HiveMind can replicate memories to a remote server — useful for sharing across machines or keeping a remote backup. Sync uses [libsql](https://github.com/tursodatabase/libsql) embedded replication: the local database stays fully functional offline, and `hivemind up` periodically replicates writes to the remote primary.
+HiveMind can replicate memories to a remote server, which is useful for sharing across machines or keeping a remote backup. Sync uses [libsql](https://github.com/tursodatabase/libsql) embedded replication: the local database stays fully functional offline, and `hivemind up` periodically replicates writes to the remote primary.
 
 ```toml
 [sync]
@@ -355,10 +355,10 @@ Two `remote_url` targets are supported:
 
 | Setup | `remote_url` points to | `api_key` |
 |-------|------------------------|-----------|
-| **Self-hosted** | Your own [sqld](https://github.com/tursodatabase/libsql/tree/main/libsql-server) server | sqld auth token — leave empty if sqld has no auth configured |
+| **Self-hosted** | Your own [sqld](https://github.com/tursodatabase/libsql/tree/main/libsql-server) server | sqld auth token; leave empty if sqld has no auth configured |
 | **Oxhive hosted** *(coming soon)* | `https://sync.oxhive.dev` | Your Oxhive account key |
 
-`api_key` is never sent to Claude or the dashboard — it is only used during replication.
+`api_key` is never sent to Claude or the dashboard. It is only used during replication.
 
 ---
 
@@ -368,7 +368,7 @@ Two `remote_url` targets are supported:
 hivemind status
 ```
 
-Shows the active config, memory count, database path, and a preview of exactly what will be injected at the next session start — including token usage vs budget.
+Shows the active config, memory count, database path, and a preview of exactly what will be injected at the next session start, including token usage vs budget.
 
 ---
 
@@ -411,7 +411,7 @@ This only needs to be done once per machine, not per project.
 | OpenCode | Reads `~/.config/opencode/opencode.json` (or `$XDG_CONFIG_HOME`), checks for "hivemind" |
 | Codex CLI | Reads `~/.codex/config.toml`, checks for `[mcp_servers.hivemind]` |
 
-Detection failures are silent — a missing config file or unavailable CLI simply means "not registered." If you've registered a client manually and still see the hint, verify that "hivemind" appears in the config file at the path listed above.
+Detection failures are silent: a missing config file or unavailable CLI simply means "not registered." If you've registered a client manually and still see the hint, verify that "hivemind" appears in the config file at the path listed above.
 
 ### Claude connects but session start fails
 
@@ -437,23 +437,23 @@ hivemind status    # previews exactly what would be injected
 
 **Does HiveMind inject memories into every prompt I send?**
 
-No. Memories are injected once — when Claude calls `hivemind_session_start` at the start of the session. After that, the loaded memories are part of the conversation context, but nothing extra is added per prompt. Tools like `UserPromptSubmit` hooks in `.claude/settings.json` run on every message; HiveMind does not.
+No. Memories are injected once, when Claude calls `hivemind_session_start` at the start of the session. After that, the loaded memories are part of the conversation context, but nothing extra is added per prompt. Tools like `UserPromptSubmit` hooks in `.claude/settings.json` run on every message; HiveMind does not.
 
 **What's the difference between HiveMind's session start and a Claude Code `UserPromptSubmit` hook?**
 
-A `UserPromptSubmit` hook runs a shell command and appends its output to every message you send — unconditionally, on every prompt, with no token budget. HiveMind runs once per session, respects a `max_tokens` cap, and gives you per-project control over exactly which memories to load. See the [comparison table](#how-hivemind-differs-from-claude-codes-built-in-hooks) for the full breakdown.
+A `UserPromptSubmit` hook runs a shell command and appends its output to every message you send, unconditionally on every prompt, with no token budget. HiveMind runs once per session, respects a `max_tokens` cap, and gives you per-project control over exactly which memories to load. See the [comparison table](#how-hivemind-differs-from-claude-codes-built-in-hooks) for the full breakdown.
 
 **Can I fetch memories that aren't listed in `recalls`?**
 
-Yes. `recalls` is only the auto-inject list for session start. Every memory in the database is available on demand at any time — ask Claude to recall it by title or ID (`memory_recall`), or search by keyword (`memory_search`). Nothing is hidden or inaccessible.
+Yes. `recalls` is only the auto-inject list for session start. Every memory in the database is available on demand at any time. Ask Claude to recall it by title or ID (`memory_recall`), or search by keyword (`memory_search`). Nothing is hidden or inaccessible.
 
 **Does Claude store memories automatically as we chat?**
 
-No. HiveMind never auto-stores. Claude only writes a memory when you explicitly ask it to — *"remember this"*, *"store that preference"*. This keeps the store intentional and free of noise.
+No. HiveMind never auto-stores. Claude only writes a memory when you explicitly ask it to, such as *"remember this"* or *"store that preference"*. This keeps the store intentional and free of noise.
 
 **What happens if a memory doesn't fit within `max_tokens`?**
 
-It gets skipped. HiveMind loads recalls in order; if an entry would push past the budget, it skips that entry and continues with the next one — a later, smaller entry can still fit. Skipped entries are reported in the result. Use `hivemind status` to preview what would be loaded and how many tokens it costs before opening a session.
+It gets skipped. HiveMind loads recalls in order; if an entry would push past the budget, it skips that entry and continues with the next one; a later, smaller entry can still fit. Skipped entries are reported in the result. Use `hivemind status` to preview what would be loaded and how many tokens it costs before opening a session.
 
 **Can I have different recalls per project?**
 
@@ -465,11 +465,11 @@ No. Memories stored with `layer = "personal"` follow you, not the repo. Only `la
 
 **Is the MCP connection authenticated?**
 
-The MCP endpoint (`/mcp`) and the REST API (`/api/v1/*`) are unauthenticated — they bind to `127.0.0.1` by default, so only processes on your local machine can reach them. The `api_key` under `[sync]` is your auth token for the remote sync target (sqld token for self-hosted, account key for Oxhive hosted); it is used only during replication and has nothing to do with Claude's connection to HiveMind.
+The MCP endpoint (`/mcp`) and the REST API (`/api/v1/*`) are unauthenticated and bind to `127.0.0.1` by default, so only processes on your local machine can reach them. The `api_key` under `[sync]` is your auth token for the remote sync target (sqld token for self-hosted, account key for Oxhive hosted); it is used only during replication and has nothing to do with Claude's connection to HiveMind.
 
-**The server isn't running — will Claude error out?**
+**What happens if the server isn't running?**
 
-If `hivemind up` isn't running when Claude calls `hivemind_session_start`, the MCP call will fail. Claude will typically note this and continue the session without memory context. Your work isn't blocked — you just won't have the injected memories for that session.
+If `hivemind up` isn't running when Claude calls `hivemind_session_start`, the MCP call will fail. Claude will typically note this and continue the session without memory context. Your work isn't blocked, but you won't have the injected memories for that session.
 
 **Can I use HiveMind with agents other than Claude Code?**
 
@@ -477,7 +477,7 @@ Yes, as long as the agent supports MCP over HTTP (streamable HTTP transport). Th
 
 **Where is the database stored?**
 
-`~/.hivemind/memories.db` by default. Override with the `HIVEMIND_DB_PATH` environment variable. It's a plain SQLite file — you can back it up, copy it between machines, or inspect it directly.
+`~/.hivemind/memories.db` by default. Override with the `HIVEMIND_DB_PATH` environment variable. It's a plain SQLite file; you can back it up, copy it between machines, or inspect it directly.
 
 ---
 
