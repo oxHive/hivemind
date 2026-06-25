@@ -297,11 +297,8 @@ suggest_store = true\n\
 \n\
 [sync]\n\
 enabled = false\n\
-# Oxhive hosted sync: https://sync.oxhive.dev\n\
-# Self-hosted sqld:   http://your-server:8080\n\
-remote_url = \"\"\n\
-# Oxhive account key, or sqld auth token (leave empty if sqld has no auth)\n\
-api_key = \"\"\n\
+remote_url = \"\" # Oxhive hosted: https://sync.oxhive.dev  or  self-hosted sqld: http://your-server:8080\n\
+api_key = \"\"    # Oxhive account key, or sqld auth token (leave empty if sqld has no auth)\n\
 interval_seconds = 300\n\
 sync_on_store = true\n\
 sync_on_startup = true\n";
