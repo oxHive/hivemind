@@ -921,12 +921,12 @@ pub async fn render_status(
         Some(r) => Some(crate::config::load_config_with_global(r, global_path)?),
         None => None,
     };
-    let project_label = config
-        .as_ref()
-        .map(|c| c.project_name.as_str())
-        .unwrap_or("—");
+    let project_label = config.as_ref().map(|c| c.project_name.as_str());
 
-    writeln!(out, "HiveMind v{version} — {project_label}")?;
+    match project_label {
+        Some(label) => writeln!(out, "HiveMind v{version} — {label}")?,
+        None => writeln!(out, "HiveMind v{version}")?,
+    }
     writeln!(out, "─────────────────────────────────────────────────────")?;
     writeln!(out, "Server:     stdio (spawned by Claude Code)")?;
     writeln!(out, "Storage:    {db_path} ({count} memories)")?;
