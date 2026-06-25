@@ -14,6 +14,15 @@ build:
 install:
   cargo install --path . --force
 
+release-major:
+  just _release major
+
+release-minor:
+  just _release minor
+
+release-patch:
+  just _release patch
+
 # Release a new version: just release patch|minor|major
-release bump:
+_release bump:
   cargo release --execute {{bump}}
