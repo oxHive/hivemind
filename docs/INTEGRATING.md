@@ -407,6 +407,67 @@ Timestamps are Unix seconds (integer). `token_count` may be `null` if not comput
 
 ---
 
+## Bulk import and migration
+
+There is no batch endpoint. Import memories one at a time using `POST /api/v1/memories` in a loop.
+
+**Title uniqueness:** titles are not enforced unique. Posting the same title twice creates two separate memories with different IDs. If you run a migration script more than once, you will get duplicates. To avoid this, either:
+
+- Run the script once against an empty database, or
+- Search by title before inserting and skip if a match exists:
+
+```sh
+exists=$(curl -s "http://127.0.0.1:3456/api/v1/search?q=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$TITLE'))")&limit=1" | jq '.count')
+if [ "$exists" = "0" ]; then
+  curl -s -X POST http://127.0.0.1:3456/api/v1/memories \
+    -H "Content-Type: application/json" \
+    -d "{\"title\": \"$TITLE\", \"content\": \"$CONTENT\", \"tags\": $TAGS}"
+fi
+```
+
+**Field mapping:** HiveMind memories have three writable fields. Map your existing schema to these:
+
+| HiveMind field | Type | Notes |
+|----------------|------|-------|
+| `title` | string | Unique label used for recall. Use a short, descriptive key. |
+| `content` | string | Full memory text. Concatenate multiple fields if needed. |
+| `tags` | string array | Use for grouping. Memories that share a tag get edges created automatically. |
+
+**Migration script (Python):**
+
+```python
+import sqlite3, requests, json
+
+OLD_DB = "/path/to/your/old.db"
+HIVEMIND = "http://127.0.0.1:3456/api/v1"
+
+conn = sqlite3.connect(OLD_DB)
+rows = conn.execute("SELECT title, content, tags FROM your_table").fetchall()
+
+skipped, imported = 0, 0
+for title, content, tags_raw in rows:
+    tags = json.loads(tags_raw) if tags_raw else []
+
+    # Skip if already exists
+    existing = requests.get(f"{HIVEMIND}/search", params={"q": title, "limit": 1}).json()
+    if existing["count"] > 0:
+        skipped += 1
+        continue
+
+    requests.post(f"{HIVEMIND}/memories", json={
+        "title": title,
+        "content": content,
+        "tags": tags,
+    }).raise_for_status()
+    imported += 1
+
+print(f"Done: {imported} imported, {skipped} skipped")
+```
+
+Adjust the `SELECT` query and field names to match your schema. The search-before-insert check uses FTS, so it can return false positives on partial matches — add an exact-title check if your titles need strict deduplication.
+
+---
+
 ## Example: shell script integration
 
 ```sh
