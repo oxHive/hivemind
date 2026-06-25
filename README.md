@@ -248,6 +248,8 @@ It also appends a HiveMind block to `~/.claude/CLAUDE.md` (preserving any existi
 > At the start of every session, call `hivemind_session_start` if .hivemind.toml exists in the project root.
 > ```
 
+The `CLAUDE.md` created by `hivemind init` only covers how to **use** HiveMind. It tells Claude when to call `hivemind_session_start` and nothing else. It does not document your project's own codebase. If you want Claude Code to understand your codebase architecture, run `/init` in Claude Code after `hivemind init`. The `/init` command reads your source code and generates a comprehensive `CLAUDE.md` with build commands, architecture overview, and key design decisions.
+
 ---
 
 ## Commands
