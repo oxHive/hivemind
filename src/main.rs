@@ -24,7 +24,6 @@ fn main() -> Result<()> {
             ServiceAction::Uninstall => cli::cmd_service_uninstall(),
             ServiceAction::Status => cli::cmd_service_status(),
         },
-        Some(Command::Version) => cli::cmd_version(),
     }
 }
 

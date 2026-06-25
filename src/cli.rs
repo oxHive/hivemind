@@ -46,8 +46,6 @@ pub enum Command {
         #[command(subcommand)]
         action: ServiceAction,
     },
-    /// Print version information
-    Version,
 }
 
 #[derive(Subcommand)]
@@ -899,18 +897,6 @@ pub fn warn_if_not_initialized() {
         eprintln!("      (or cursor, windsurf, opencode, kimi, codex)");
         eprintln!();
     }
-}
-
-pub fn cmd_version() -> Result<()> {
-    let version = env!("CARGO_PKG_VERSION");
-    let sha = env!("HIVEMIND_GIT_SHA");
-    let is_tagged = env!("HIVEMIND_IS_TAGGED") == "true";
-    if is_tagged {
-        println!("hivemind {version}");
-    } else {
-        println!("hivemind {sha}-dev");
-    }
-    Ok(())
 }
 
 pub fn cmd_status() -> Result<()> {
