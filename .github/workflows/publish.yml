@@ -11,5 +11,4 @@ jobs:
     with:
       package-name: oxhivemind
       binary-name: hivemind
-    secrets:
-      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+    secrets: inherit
