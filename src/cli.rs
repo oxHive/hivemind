@@ -1,11 +1,11 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
-use std::io::Write as _;
 
 #[derive(Parser)]
 #[command(
@@ -101,8 +101,9 @@ pub fn cmd_init() -> Result<()> {
     }
     println!();
 
-    let registered_clients =
-        with_spinner("checking registered MCP clients...", || detect_registered_clients(&home));
+    let registered_clients = with_spinner("checking registered MCP clients...", || {
+        detect_registered_clients(&home)
+    });
     match registered_clients {
         registered if registered.is_empty() => {
             println!("HiveMind initialized.");
