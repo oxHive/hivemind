@@ -265,7 +265,7 @@ fn project_toml(name: &str) -> String {
         "[project]\n\
          name = \"{name}\"\n\
          layer = \"workspace\"\n\
-         description = \"TODO: short project description\"\n\
+         description = \"\"  # fill in: one-line description of this project\n\
          \n\
          [hooks.on_session_start]\n\
          max_tokens = 2000\n\
