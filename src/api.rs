@@ -56,9 +56,9 @@ fn localhost_origins(origin: &str) -> AllowOrigin {
     }
 
     if origins.is_empty() {
-        AllowOrigin::exact(
-            axum::http::HeaderValue::from_static("http://127.0.0.1:3457"),
-        )
+        AllowOrigin::exact(axum::http::HeaderValue::from_static(
+            "http://127.0.0.1:3457",
+        ))
     } else {
         AllowOrigin::list(origins)
     }

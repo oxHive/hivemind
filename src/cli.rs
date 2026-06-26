@@ -1281,7 +1281,10 @@ mod tests {
             out.contains("1 memories") || out.contains("1 memorie"),
             "shows memory count"
         );
-        assert!(out.contains("AI clients: none"), "shows no registered clients");
+        assert!(
+            out.contains("AI clients: none"),
+            "shows no registered clients"
+        );
     }
 
     #[tokio::test]
@@ -1300,10 +1303,19 @@ mod tests {
 
         let proj = tempfile::tempdir().unwrap();
         let missing_global = proj.path().join("no-global.toml");
-        let out = render_status(proj.path(), &missing_global, &store, "/tmp/x.db", &["claude", "cursor"])
-            .await
-            .unwrap();
-        assert!(out.contains("AI clients: claude, cursor"), "lists registered clients");
+        let out = render_status(
+            proj.path(),
+            &missing_global,
+            &store,
+            "/tmp/x.db",
+            &["claude", "cursor"],
+        )
+        .await
+        .unwrap();
+        assert!(
+            out.contains("AI clients: claude, cursor"),
+            "lists registered clients"
+        );
     }
 
     #[tokio::test]
