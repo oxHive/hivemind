@@ -90,12 +90,11 @@ pub async fn run_up(
     headless: bool,
 ) -> Result<()> {
     let trigger = Arc::new(tokio::sync::Notify::new());
-    let dashboard_origin = format!("http://{}:{}", settings.host, settings.dashboard_port);
     let app = app_router(
         store.clone(),
         settings.sync.clone(),
         trigger.clone(),
-        &dashboard_origin,
+        &settings.cors_origin,
     );
 
     let listener = tokio::net::TcpListener::bind((settings.host.as_str(), settings.port)).await?;
