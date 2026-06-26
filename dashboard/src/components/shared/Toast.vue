@@ -4,13 +4,15 @@ const ui = useUiStore()
 </script>
 
 <template>
-  <Transition name="toast">
-    <div v-if="ui.toast.visible"
-      class="fixed bottom-3 left-1/2 -translate-x-1/2 z-50 whitespace-nowrap rounded-md px-3.5 py-1.5 font-mono text-xs"
-      style="background:var(--hm-bg-overlay); border:0.5px solid var(--hm-border-default); color:var(--hm-text-secondary)">
-      {{ ui.toast.message }}
-    </div>
-  </Transition>
+  <div role="status" aria-live="polite" class="fixed bottom-3 left-1/2 -translate-x-1/2 z-50">
+    <Transition name="toast">
+      <div v-if="ui.toast.visible"
+        class="whitespace-nowrap rounded-md px-3.5 py-1.5 font-mono text-xs"
+        style="background:var(--hm-bg-overlay); border:0.5px solid var(--hm-border-default); color:var(--hm-text-secondary)">
+        {{ ui.toast.message }}
+      </div>
+    </Transition>
+  </div>
 </template>
 
 <style scoped>

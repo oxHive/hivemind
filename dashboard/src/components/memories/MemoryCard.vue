@@ -14,14 +14,14 @@ function fmtDate(iso) {
 <template>
   <div
     @click="$emit('select', mem)"
-    class="px-3.5 py-3 cursor-pointer"
-    :style="`border-left:2px solid ${selected
-      ? (mem.layer === 'personal' ? 'var(--hm-personal)' : 'var(--hm-workspace)')
-      : 'transparent'};
-      background:${selected ? 'var(--hm-bg-elevated)' : 'transparent'};
-      border-bottom:0.5px solid var(--hm-border-subtle)`"
-    @mouseover="!selected && ($event.currentTarget.style.background='var(--hm-bg-elevated)')"
-    @mouseleave="!selected && ($event.currentTarget.style.background='transparent')"
+    tabindex="0"
+    role="button"
+    class="memory-card"
+    :class="{
+      'memory-card--selected-personal': selected && mem.layer === 'personal',
+      'memory-card--selected-workspace': selected && mem.layer !== 'personal',
+    }"
+    @keydown.enter.space.prevent="$emit('select', mem)"
   >
     <!-- Row 1: title + layer badge -->
     <div class="flex items-start justify-between gap-2 mb-1">
@@ -47,3 +47,42 @@ function fmtDate(iso) {
     </div>
   </div>
 </template>
+
+<style scoped>
+.memory-card {
+  padding: 12px 14px;
+  cursor: pointer;
+  border-bottom: 0.5px solid var(--hm-border-subtle);
+  background: transparent;
+  transition: background 0.1s;
+}
+
+.memory-card:hover,
+.memory-card:focus-visible {
+  background: var(--hm-bg-elevated);
+  outline: none;
+}
+
+.memory-card:focus-visible {
+  outline: 2px solid var(--hm-personal);
+  outline-offset: -2px;
+}
+
+.memory-card--selected-personal {
+  background: var(--hm-personal-bg);
+}
+
+.memory-card--selected-workspace {
+  background: var(--hm-workspace-bg);
+}
+
+.memory-card--selected-personal:hover,
+.memory-card--selected-personal:focus-visible {
+  background: var(--hm-personal-bg);
+}
+
+.memory-card--selected-workspace:hover,
+.memory-card--selected-workspace:focus-visible {
+  background: var(--hm-workspace-bg);
+}
+</style>
