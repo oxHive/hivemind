@@ -9,7 +9,7 @@ use axum::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::Arc;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 
 type Store = Arc<SqliteStore>;
 
@@ -29,6 +29,39 @@ impl From<anyhow::Error> for ApiError {
 
 fn not_found(msg: impl Into<String>) -> ApiError {
     ApiError(StatusCode::NOT_FOUND, msg.into())
+}
+
+/// Returns an `AllowOrigin` that accepts both the configured dashboard origin and
+/// its `localhost` / `127.0.0.1` counterpart, so the browser CORS check passes
+/// regardless of which loopback hostname the user typed.
+fn localhost_origins(origin: &str) -> AllowOrigin {
+    let mut origins: Vec<axum::http::HeaderValue> = Vec::new();
+
+    if let Ok(v) = origin.parse::<axum::http::HeaderValue>() {
+        origins.push(v);
+    }
+
+    // Add the `localhost` ↔ `127.0.0.1` sibling so both hostnames are accepted.
+    let sibling = if origin.contains("127.0.0.1") {
+        origin.replace("127.0.0.1", "localhost")
+    } else if origin.contains("localhost") {
+        origin.replace("localhost", "127.0.0.1")
+    } else {
+        String::new()
+    };
+    if !sibling.is_empty() {
+        if let Ok(v) = sibling.parse::<axum::http::HeaderValue>() {
+            origins.push(v);
+        }
+    }
+
+    if origins.is_empty() {
+        AllowOrigin::exact(
+            axum::http::HeaderValue::from_static("http://127.0.0.1:3457"),
+        )
+    } else {
+        AllowOrigin::list(origins)
+    }
 }
 
 pub fn router(store: Store, sync: SyncSettings, dashboard_origin: &str) -> Router {
@@ -55,13 +88,7 @@ pub fn router(store: Store, sync: SyncSettings, dashboard_origin: &str) -> Route
         .layer(Extension(sync))
         .layer(
             CorsLayer::new()
-                .allow_origin(
-                    dashboard_origin
-                        .parse::<axum::http::HeaderValue>()
-                        .unwrap_or_else(|_| {
-                            axum::http::HeaderValue::from_static("http://127.0.0.1:3457")
-                        }),
-                )
+                .allow_origin(localhost_origins(dashboard_origin))
                 .allow_methods([
                     Method::GET,
                     Method::POST,
