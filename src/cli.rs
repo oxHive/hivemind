@@ -135,13 +135,25 @@ pub fn cmd_init() -> Result<()> {
 fn detect_registered_clients(home: &Path) -> Vec<&'static str> {
     let mut found = Vec::new();
 
-    // Claude Code: ask the CLI
-    let claude_ok = std::process::Command::new("claude")
-        .args(["mcp", "list"])
-        .output()
-        .ok()
-        .map(|o| String::from_utf8_lossy(&o.stdout).contains("hivemind"))
-        .unwrap_or(false);
+    // Claude Code: check config files directly.
+    // `claude mcp list` subprocess only shows file-registered servers, not OAuth
+    // sessions, so it produces false negatives when the server isn't running yet.
+    let claude_dot = home.join(".claude");
+    let claude_ok = [
+        // stdio/HTTP servers added via `claude mcp add`
+        claude_dot.join("mcp.json"),
+        // user-scoped settings (mcpServers key)
+        claude_dot.join("settings.json"),
+        // OAuth-connected MCP servers (claude.ai web registration)
+        claude_dot.join(".credentials.json"),
+    ]
+    .iter()
+    .any(|p| {
+        p.exists()
+            && std::fs::read_to_string(p)
+                .map(|s| s.contains("hivemind"))
+                .unwrap_or(false)
+    });
     if claude_ok {
         found.push("claude");
     }
