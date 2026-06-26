@@ -49,10 +49,10 @@ fn localhost_origins(origin: &str) -> AllowOrigin {
     } else {
         String::new()
     };
-    if !sibling.is_empty() {
-        if let Ok(v) = sibling.parse::<axum::http::HeaderValue>() {
-            origins.push(v);
-        }
+    if !sibling.is_empty()
+        && let Ok(v) = sibling.parse::<axum::http::HeaderValue>()
+    {
+        origins.push(v);
     }
 
     if origins.is_empty() {
