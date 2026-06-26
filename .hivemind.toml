@@ -1,0 +1,12 @@
+[project]
+name = "hivemind"
+layer = "workspace"
+description = "Persistent memory MCP server for AI coding agents, backed by libsql"
+
+[hooks.on_session_start]
+max_tokens = 2000
+recalls = [
+  # Exact memory titles to auto-load at session start, e.g.:
+  # "golang preferences",
+  # "project/hivemind",
+]
