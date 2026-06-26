@@ -97,6 +97,10 @@ struct RawServer {
 struct RawDashboard {
     port: Option<u16>,
     api_url: Option<String>,
+    /// The origin the browser sends when loading the dashboard.
+    /// Set this when the dashboard is accessed via a hostname other than
+    /// 127.0.0.1 / localhost (e.g. `http://pi.local:3457`).
+    cors_origin: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -258,6 +262,12 @@ pub struct ServerSettings {
     pub dashboard_port: u16,
     /// API base URL the dashboard frontend should call.
     pub api_url: String,
+    /// Origin allowed in CORS — what the browser sends as the `Origin` header
+    /// when the dashboard page makes requests to the API. Defaults to
+    /// `http://127.0.0.1:<dashboard_port>` so both `127.0.0.1` and `localhost`
+    /// variants work out of the box. Override when the dashboard is accessed
+    /// via a custom hostname (e.g. `http://pi.local:3457`).
+    pub cors_origin: String,
     pub sync: SyncSettings,
 }
 
@@ -275,6 +285,16 @@ pub fn load_server_settings(global_path: &std::path::Path) -> anyhow::Result<Ser
         .dashboard
         .api_url
         .unwrap_or_else(|| format!("http://{host}:{port}"));
+    // For the CORS origin default, wildcard bind addresses (0.0.0.0 / ::) are
+    // not valid browser origins, so fall back to the loopback address.
+    let cors_host = match host.as_str() {
+        "0.0.0.0" | "::" => "127.0.0.1",
+        h => h,
+    };
+    let cors_origin = raw
+        .dashboard
+        .cors_origin
+        .unwrap_or_else(|| format!("http://{cors_host}:{dashboard_port}"));
     let sync = SyncSettings {
         enabled: raw.sync.enabled.unwrap_or(false),
         remote_url: raw.sync.remote_url.unwrap_or_default(),
@@ -288,6 +308,7 @@ pub fn load_server_settings(global_path: &std::path::Path) -> anyhow::Result<Ser
         port,
         dashboard_port,
         api_url,
+        cors_origin,
         sync,
     })
 }
@@ -390,6 +411,7 @@ mod tests {
         assert_eq!(s.port, 3456);
         assert_eq!(s.dashboard_port, 3457);
         assert_eq!(s.api_url, "http://127.0.0.1:3456");
+        assert_eq!(s.cors_origin, "http://127.0.0.1:3457");
     }
 
     #[test]
@@ -405,6 +427,20 @@ mod tests {
         assert_eq!(s.port, 4000);
         assert_eq!(s.dashboard_port, 4001);
         assert_eq!(s.api_url, "http://pi.local:4000");
+        // wildcard bind → CORS default falls back to loopback
+        assert_eq!(s.cors_origin, "http://127.0.0.1:4001");
+    }
+
+    #[test]
+    fn server_settings_cors_origin_explicit_override() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "config.toml",
+            "[server]\nhost=\"0.0.0.0\"\nport=4000\n[dashboard]\nport=4001\napi_url=\"http://pi.local:4000\"\ncors_origin=\"http://pi.local:4001\"\n",
+        );
+        let s = load_server_settings(&tmp.path().join("config.toml")).unwrap();
+        assert_eq!(s.cors_origin, "http://pi.local:4001");
     }
 
     #[test]
