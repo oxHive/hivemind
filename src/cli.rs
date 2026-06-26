@@ -912,21 +912,37 @@ pub fn warn_if_not_initialized() {
 }
 
 pub fn cmd_status() -> Result<()> {
-    warn_if_not_initialized();
+    let home = home_dir();
     let cwd = std::env::current_dir()?;
     let db_path = crate::db::resolve_db_path();
-    let out = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?
-        .block_on(async {
-            let sync = crate::config::SyncSettings::default();
-            let database = crate::db::open_database(&sync, &db_path).await?;
-            let conn = database.connect()?;
-            crate::db::run_migrations(&conn).await?;
-            let store = crate::store::SqliteStore::new(conn);
-            render_status(&cwd, &crate::config::global_config_path(), &store, &db_path).await
-        })?;
+    let (out, clients) = with_spinner("checking status...", || {
+        let clients = detect_registered_clients(&home);
+        let result = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?
+            .block_on(async {
+                let sync = crate::config::SyncSettings::default();
+                let database = crate::db::open_database(&sync, &db_path).await?;
+                let conn = database.connect()?;
+                crate::db::run_migrations(&conn).await?;
+                let store = crate::store::SqliteStore::new(conn);
+                render_status(
+                    &cwd,
+                    &crate::config::global_config_path(),
+                    &store,
+                    &db_path,
+                    &clients,
+                )
+                .await
+            })?;
+        Ok::<_, anyhow::Error>((result, clients))
+    })?;
     println!("{out}");
+    if clients.is_empty() {
+        eprintln!("hint: no AI client is registered with HiveMind yet.");
+        eprintln!("      Register once with:  hivemind mcp install claude");
+        eprintln!("      (or cursor, windsurf, opencode, kimi, codex)");
+    }
     Ok(())
 }
 
@@ -936,6 +952,7 @@ pub async fn render_status(
     global_path: &Path,
     store: &crate::store::SqliteStore,
     db_path: &str,
+    registered_clients: &[&str],
 ) -> Result<String> {
     use std::fmt::Write as _;
 
@@ -960,6 +977,11 @@ pub async fn render_status(
     writeln!(out, "Server:     stdio (spawned by Claude Code)")?;
     writeln!(out, "Storage:    {db_path} ({count} memories)")?;
     writeln!(out, "Sync:       disabled (local only)")?;
+    if registered_clients.is_empty() {
+        writeln!(out, "AI clients: none registered")?;
+    } else {
+        writeln!(out, "AI clients: {}", registered_clients.join(", "))?;
+    }
     writeln!(out)?;
 
     let (Some(root), Some(config)) = (root, config) else {
@@ -1246,7 +1268,7 @@ mod tests {
         ).unwrap();
         let missing_global = proj.path().join("no-global.toml");
 
-        let out = render_status(proj.path(), &missing_global, &store, "/tmp/x.db")
+        let out = render_status(proj.path(), &missing_global, &store, "/tmp/x.db", &[])
             .await
             .unwrap();
         assert!(out.contains("demo"), "shows project name");
@@ -1259,6 +1281,29 @@ mod tests {
             out.contains("1 memories") || out.contains("1 memorie"),
             "shows memory count"
         );
+        assert!(out.contains("AI clients: none"), "shows no registered clients");
+    }
+
+    #[tokio::test]
+    async fn render_status_shows_registered_clients() {
+        use crate::{config::SyncSettings, db, store::SqliteStore};
+
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let sync = SyncSettings::default();
+        let database = db::open_database(&sync, db_path.to_str().unwrap())
+            .await
+            .unwrap();
+        let conn = database.connect().unwrap();
+        db::run_migrations(&conn).await.unwrap();
+        let store = SqliteStore::new(conn);
+
+        let proj = tempfile::tempdir().unwrap();
+        let missing_global = proj.path().join("no-global.toml");
+        let out = render_status(proj.path(), &missing_global, &store, "/tmp/x.db", &["claude", "cursor"])
+            .await
+            .unwrap();
+        assert!(out.contains("AI clients: claude, cursor"), "lists registered clients");
     }
 
     #[tokio::test]
@@ -1277,7 +1322,7 @@ mod tests {
 
         let proj = tempfile::tempdir().unwrap();
         let missing_global = proj.path().join("no-global.toml");
-        let out = render_status(proj.path(), &missing_global, &store, "/tmp/x.db")
+        let out = render_status(proj.path(), &missing_global, &store, "/tmp/x.db", &[])
             .await
             .unwrap();
         assert!(
