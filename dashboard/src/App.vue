@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, watch } from 'vue'
+import { onMounted, onBeforeUnmount, watch } from 'vue'
 import { useUiStore } from './stores/ui.js'
 import { useMemoriesStore } from './stores/memories.js'
 import { useGraphStore } from './stores/graph.js'
@@ -17,6 +17,7 @@ const graph = useGraphStore()
 const fb = useFeedbackStore()
 
 const VIEWS = ['memories', 'graph', 'feedback', 'settings']
+let pollInterval
 
 function applyHash() {
   const h = location.hash.replace('#/', '')
@@ -40,7 +41,12 @@ onMounted(async () => {
     ])
   }
 
-  setInterval(() => ui.pollServerStatus(), 30_000)
+  pollInterval = setInterval(() => ui.pollServerStatus(), 30_000)
+})
+
+onBeforeUnmount(() => {
+  clearInterval(pollInterval)
+  window.removeEventListener('hashchange', applyHash)
 })
 </script>
 

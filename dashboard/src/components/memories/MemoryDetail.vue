@@ -71,16 +71,18 @@ async function handleDelete() {
       <!-- Body -->
       <div class="flex-1 overflow-y-auto px-4 py-3">
         <!-- Title -->
-        <label class="hm-label">TITLE</label>
+        <label class="hm-label" for="mem-title">TITLE</label>
         <input
+          id="mem-title"
           class="hm-input mb-4"
           :value="memories.draft?.title"
           @input="memories.draft.title = $event.target.value"
         />
 
         <!-- Content -->
-        <label class="hm-label">CONTENT</label>
+        <label class="hm-label" for="mem-content">CONTENT</label>
         <textarea
+          id="mem-content"
           class="hm-input mb-4 resize-none"
           style="height:140px; padding-top:8px; padding-bottom:8px"
           :value="memories.draft?.content"
@@ -88,8 +90,9 @@ async function handleDelete() {
         ></textarea>
 
         <!-- Tags -->
-        <label class="hm-label">TAGS</label>
+        <label class="hm-label" id="mem-tags-label">TAGS</label>
         <div class="flex flex-wrap gap-1.5 p-2 mb-4 rounded-md"
+          aria-labelledby="mem-tags-label"
           style="border:0.5px solid var(--hm-border-subtle); min-height:36px">
           <TagChip
             v-for="tag in memories.draft?.tags" :key="tag"

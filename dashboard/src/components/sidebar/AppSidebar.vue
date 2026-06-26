@@ -72,13 +72,9 @@ const syncDot = computed(() => {
       <li v-for="item in navItems" :key="item.id">
         <button
           @click="ui.activeView = item.id"
-          class="w-full flex items-center justify-between px-4 py-2 text-sm text-left"
-          :style="ui.activeView === item.id
-            ? 'background:var(--hm-bg-elevated); color:var(--hm-text-primary); font-weight:500; border-right:2px solid var(--hm-personal)'
-            : 'color:var(--hm-text-secondary); border-right:2px solid transparent'"
-          style="transition:background 0.1s"
-          @mouseover="$event.currentTarget.style.background = ui.activeView !== item.id ? 'var(--hm-bg-elevated)' : ''"
-          @mouseleave="$event.currentTarget.style.background = ui.activeView !== item.id ? '' : ''"
+          class="nav-item"
+          :class="{ 'nav-item--active': ui.activeView === item.id }"
+          :aria-current="ui.activeView === item.id ? 'page' : undefined"
         >
           <span>{{ item.label }}</span>
           <span v-if="item.id === 'feedback' && feedbackCount > 0"
@@ -104,3 +100,38 @@ const syncDot = computed(() => {
     </div>
   </nav>
 </template>
+
+<style scoped>
+.nav-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  font-size: 13px;
+  text-align: left;
+  color: var(--hm-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.nav-item:hover,
+.nav-item:focus-visible {
+  background: var(--hm-bg-elevated);
+  color: var(--hm-text-primary);
+  outline: none;
+}
+
+.nav-item:focus-visible {
+  outline: 2px solid var(--hm-personal);
+  outline-offset: -2px;
+}
+
+.nav-item--active {
+  background: var(--hm-bg-elevated);
+  color: var(--hm-text-primary);
+  font-weight: 500;
+}
+</style>

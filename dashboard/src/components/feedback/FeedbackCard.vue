@@ -38,7 +38,7 @@ function navToMemory() {
           {{ item.title || item.memory_id }}
         </button>
       </div>
-      <button class="hm-btn hm-btn-ghost hm-btn-sm" @click="fb.dismissFeedback(item.id)">✕</button>
+      <button class="hm-btn hm-btn-ghost hm-btn-sm" aria-label="Dismiss feedback" @click="fb.dismissFeedback(item.id)">✕</button>
     </div>
 
     <p v-if="item.note" style="font-size:12px; color:var(--hm-text-secondary)" class="mb-3">{{ item.note }}</p>
