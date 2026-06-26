@@ -1,7 +1,7 @@
 [project]
 name = "hivemind"
 layer = "workspace"
-description = "Persistent memory MCP server for AI coding agents, backed by libsql"
+description = "Persistent memory MCP server for AI coding agents"
 
 [hooks.on_session_start]
 max_tokens = 2000
