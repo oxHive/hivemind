@@ -2,7 +2,7 @@
 
 > 🚧 **Under active development.** APIs and config formats may change between releases.
 
-Persistent memory for AI coding agents. HiveMind runs a local MCP server that gives Claude Code (and other AI agents) access to a SQLite-backed memory store, keeping context, preferences, and project knowledge alive across sessions.
+Persistent memory for AI coding agents. HiveMind runs a local MCP server that gives Claude Code (and other AI agents) access to a [libsql](https://github.com/tursodatabase/libsql)-backed memory store, keeping context, preferences, and project knowledge alive across sessions.
 
 ## How it works
 
