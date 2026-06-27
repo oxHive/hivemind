@@ -1,15 +1,4 @@
 fn main() {
-    // include_dir! panics at compile time if the directory doesn't exist.
-    // Create an empty placeholder so CI builds succeed without the dashboard build step.
-    let dist = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("dashboard/dist");
-    if !dist.exists() {
-        std::fs::create_dir_all(&dist).expect("failed to create dashboard/dist placeholder");
-    }
-    let index = dist.join("index.html");
-    if !index.exists() {
-        std::fs::write(&index, "<html><body>hivemind dashboard</body></html>")
-            .expect("failed to create dashboard/dist/index.html placeholder");
-    }
     println!("cargo:rerun-if-changed=dashboard/dist");
 
     let sha = std::process::Command::new("git")
