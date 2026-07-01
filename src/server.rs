@@ -1,13 +1,8 @@
 use crate::store::SqliteStore;
 use rmcp::{
-    RoleServer,
     handler::server::wrapper::Parameters,
-    model::{
-        CallToolResult, ErrorData, GetPromptRequestParams, GetPromptResult, ListPromptsResult,
-        PaginatedRequestParams, PromptMessage, PromptMessageRole,
-    },
+    model::{CallToolResult, ContentBlock, ErrorData, PromptMessage, Role},
     prompt, prompt_handler, prompt_router, schemars,
-    service::RequestContext,
     tool, tool_handler, tool_router,
 };
 use serde::Deserialize;
@@ -306,7 +301,7 @@ impl HiveMind {
                 lines.join("\n")
             )
         };
-        Ok(vec![PromptMessage::new_text(PromptMessageRole::User, body)])
+        Ok(vec![PromptMessage::new_text(Role::User, body)])
     }
 
     async fn do_memory_status_prompt(&self) -> Result<Vec<PromptMessage>, ErrorData> {
@@ -338,7 +333,7 @@ impl HiveMind {
         parts.push("\nTip: Use /memory-list to browse all memories, or /memory-search <query> to find specific ones.".to_string());
 
         Ok(vec![PromptMessage::new_text(
-            PromptMessageRole::User,
+            Role::User,
             parts.join("\n"),
         )])
     }
@@ -376,7 +371,7 @@ impl HiveMind {
                 lines.join("\n\n")
             )
         };
-        Ok(vec![PromptMessage::new_text(PromptMessageRole::User, body)])
+        Ok(vec![PromptMessage::new_text(Role::User, body)])
     }
 
     async fn do_memory_edit_prompt(
@@ -402,7 +397,7 @@ impl HiveMind {
              You can update content and/or tags. Omit fields you are not changing.",
             mem.id, mem.title, tags, mem.content, mem.id
         );
-        Ok(vec![PromptMessage::new_text(PromptMessageRole::User, body)])
+        Ok(vec![PromptMessage::new_text(Role::User, body)])
     }
 
     async fn do_memory_flag_prompt(
@@ -432,7 +427,7 @@ impl HiveMind {
                 .map(|n| format!("Note: {n}"))
                 .unwrap_or_default()
         );
-        Ok(vec![PromptMessage::new_text(PromptMessageRole::User, body)])
+        Ok(vec![PromptMessage::new_text(Role::User, body)])
     }
 
     async fn do_suggest_connections_prompt(&self) -> Result<Vec<PromptMessage>, ErrorData> {
@@ -449,7 +444,7 @@ impl HiveMind {
 
         if memories.is_empty() {
             return Ok(vec![PromptMessage::new_text(
-                PromptMessageRole::User,
+                Role::User,
                 "No memories stored yet. Add some memories first with memory_store.".to_string(),
             )]);
         }
@@ -503,7 +498,7 @@ impl HiveMind {
             mem_lines.join("\n"),
             edge_section,
         );
-        Ok(vec![PromptMessage::new_text(PromptMessageRole::User, body)])
+        Ok(vec![PromptMessage::new_text(Role::User, body)])
     }
 
     async fn do_review_feedback_prompt(&self) -> Result<Vec<PromptMessage>, ErrorData> {
@@ -517,7 +512,7 @@ impl HiveMind {
 
         if open_items.is_empty() {
             return Ok(vec![PromptMessage::new_text(
-                PromptMessageRole::User,
+                Role::User,
                 "No open feedback items. All flagged memories have been reviewed.\n\
                  Tip: Use /memory-flag <id> to flag a memory that needs attention."
                     .to_string(),
@@ -553,7 +548,7 @@ impl HiveMind {
         lines.push("\nAsk the user how to handle each item before taking action.".to_string());
 
         Ok(vec![PromptMessage::new_text(
-            PromptMessageRole::User,
+            Role::User,
             lines.join("\n"),
         )])
     }
@@ -694,7 +689,7 @@ impl HiveMind {
             .create_edge(&p.source_id, &p.target_id, &p.relationship)
             .await
             .map(|edge| {
-                CallToolResult::success(vec![rmcp::model::Content::text(format!(
+                CallToolResult::success(vec![ContentBlock::text(format!(
                     "Edge created: {} --[{}]--> {}",
                     edge.source_id, edge.relationship, edge.target_id
                 ))])
@@ -1100,7 +1095,7 @@ mod tests {
 
     fn prompt_text(msg: &PromptMessage) -> &str {
         match &msg.content {
-            rmcp::model::PromptMessageContent::Text { text } => text.as_str(),
+            ContentBlock::Text(t) => t.text.as_str(),
             _ => panic!("expected text content"),
         }
     }
