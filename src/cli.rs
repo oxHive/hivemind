@@ -617,6 +617,13 @@ fn service_status_macos() -> Result<()> {
 
 // ── mcp install ───────────────────────────────────────────────────────────────
 
+fn exe_path() -> String {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.to_str().map(String::from))
+        .unwrap_or_else(|| "hivemind".to_string())
+}
+
 pub fn cmd_mcp_install(client: &str) -> Result<()> {
     match client {
         "claude" => install_claude(),
@@ -655,13 +662,15 @@ fn install_claude() -> Result<()> {
         return Ok(());
     }
 
-    // Register as stdio — Claude Code spawns the process on demand.
+    // Register as stdio using the full binary path so Claude Code can find it
+    // regardless of whether ~/.cargo/bin is in its subprocess PATH.
+    let exe = exe_path();
     let status = std::process::Command::new("claude")
-        .args(["mcp", "add", "hivemind", "--", "hivemind"])
+        .args(["mcp", "add", "hivemind", "--", &exe])
         .status()?;
 
     if !status.success() {
-        anyhow::bail!("claude mcp add failed — run `claude mcp list` to inspect existing servers");
+        anyhow::bail!("claude mcp add failed. Run `claude mcp list` to inspect existing servers");
     }
 
     println!("HiveMind registered with Claude Code.");
@@ -679,6 +688,7 @@ fn install_opencode() -> Result<()> {
         .output()
         .is_ok();
 
+    let exe = exe_path();
     if cli_available {
         let list_out = std::process::Command::new("opencode")
             .args(["mcp", "list"])
@@ -689,10 +699,10 @@ fn install_opencode() -> Result<()> {
             return Ok(());
         }
         let status = std::process::Command::new("opencode")
-            .args(["mcp", "add", "hivemind", "hivemind"])
+            .args(["mcp", "add", "hivemind", &exe])
             .status()?;
         if !status.success() {
-            anyhow::bail!("opencode mcp add failed — check `opencode mcp list`");
+            anyhow::bail!("opencode mcp add failed. Check `opencode mcp list`");
         }
     } else {
         // Write to the global opencode config.
@@ -705,7 +715,7 @@ fn install_opencode() -> Result<()> {
             "hivemind",
             serde_json::json!({
                 "type": "local",
-                "command": "hivemind",
+                "command": exe,
                 "args": []
             }),
         )?;
@@ -725,6 +735,7 @@ fn install_kimi() -> Result<()> {
         .output()
         .is_ok();
 
+    let exe = exe_path();
     if cli_available {
         let list_out = std::process::Command::new("kimi")
             .args(["mcp", "list"])
@@ -735,17 +746,17 @@ fn install_kimi() -> Result<()> {
             return Ok(());
         }
         let status = std::process::Command::new("kimi")
-            .args(["mcp", "add", "hivemind", "hivemind"])
+            .args(["mcp", "add", "hivemind", &exe])
             .status()?;
         if !status.success() {
-            anyhow::bail!("kimi mcp add failed — check `kimi mcp list`");
+            anyhow::bail!("kimi mcp add failed. Check `kimi mcp list`");
         }
     } else {
         let config_path = home_dir().join(".kimi").join("mcp.json");
         upsert_json_mcp(
             &config_path,
             "hivemind",
-            serde_json::json!({ "command": "hivemind", "args": [] }),
+            serde_json::json!({ "command": exe, "args": [] }),
         )?;
         println!("Written to {}", config_path.display());
     }
@@ -768,7 +779,8 @@ fn install_codex() -> Result<()> {
         return Ok(());
     }
 
-    let block = "\n[mcp_servers.hivemind]\ncommand = \"hivemind\"\nargs = []\n";
+    let block = format!("\n[mcp_servers.hivemind]\ncommand = \"{}\"\nargs = []\n", exe_path());
+    let block = block.as_str();
     let new_content = format!("{}{}", existing.trim_end(), block);
     std::fs::write(&config_path, new_content)?;
     println!("Written to {}", config_path.display());
@@ -785,7 +797,7 @@ fn install_cursor() -> Result<()> {
     upsert_json_mcp(
         &config_path,
         "hivemind",
-        serde_json::json!({ "command": "hivemind", "args": [] }),
+        serde_json::json!({ "command": exe_path(), "args": [] }),
     )?;
     println!("Written to {}", config_path.display());
     println!("HiveMind registered with Cursor.");
@@ -803,7 +815,7 @@ fn install_windsurf() -> Result<()> {
     upsert_json_mcp(
         &config_path,
         "hivemind",
-        serde_json::json!({ "command": "hivemind", "args": [] }),
+        serde_json::json!({ "command": exe_path(), "args": [] }),
     )?;
     println!("Written to {}", config_path.display());
     println!("HiveMind registered with Windsurf.");
