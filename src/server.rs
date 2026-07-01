@@ -1282,6 +1282,153 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn with_store_constructor() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.db");
+        let sync = SyncSettings::default();
+        let database = db::open_database(&sync, path.to_str().unwrap())
+            .await
+            .unwrap();
+        let conn = database.connect().unwrap();
+        db::run_migrations(&conn).await.unwrap();
+        let store = Arc::new(SqliteStore::new(conn));
+        let hm = HiveMind::with_store(Arc::clone(&store));
+        assert!(hm.sync_trigger.is_none());
+    }
+
+    #[tokio::test]
+    async fn with_sync_constructor_stores_trigger() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.db");
+        let sync = SyncSettings::default();
+        let database = db::open_database(&sync, path.to_str().unwrap())
+            .await
+            .unwrap();
+        let conn = database.connect().unwrap();
+        db::run_migrations(&conn).await.unwrap();
+        let store = Arc::new(SqliteStore::new(conn));
+        let trigger = Arc::new(tokio::sync::Notify::new());
+        let hm = HiveMind::with_sync(store, trigger);
+        assert!(hm.sync_trigger.is_some());
+    }
+
+    #[tokio::test]
+    async fn memory_store_notifies_sync_trigger() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.db");
+        let sync = SyncSettings::default();
+        let database = db::open_database(&sync, path.to_str().unwrap())
+            .await
+            .unwrap();
+        let conn = database.connect().unwrap();
+        db::run_migrations(&conn).await.unwrap();
+        let store = Arc::new(SqliteStore::new(conn));
+        let trigger = Arc::new(tokio::sync::Notify::new());
+        let hm = HiveMind::with_sync(store, Arc::clone(&trigger));
+
+        let notified = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let notified2 = Arc::clone(&notified);
+        let trigger2 = Arc::clone(&trigger);
+        tokio::spawn(async move {
+            trigger2.notified().await;
+            notified2.store(true, std::sync::atomic::Ordering::Relaxed);
+        });
+
+        hm.do_memory_store(MemoryStoreInput {
+            title: "t".to_string(),
+            content: "c".to_string(),
+            tags: vec![],
+            token_count: None,
+        })
+        .await
+        .unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        assert!(notified.load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    #[tokio::test]
+    async fn suggest_connections_empty_store_returns_message() {
+        let (hm, _dir) = test_hivemind().await;
+        let result = hm.do_suggest_connections_prompt().await.unwrap();
+        assert_eq!(result.len(), 1);
+        let text = prompt_text(&result[0]);
+        assert!(
+            text.contains("No memories"),
+            "empty store should say no memories"
+        );
+    }
+
+    #[tokio::test]
+    async fn session_start_rejects_file_path() {
+        let (hm, _dir) = test_hivemind().await;
+        let tmp = tempfile::tempdir().unwrap();
+        let file_path = tmp.path().join("somefile.txt");
+        std::fs::write(&file_path, "hello").unwrap();
+        let err = hm
+            .do_session_start(SessionStartInput {
+                project_path: file_path.to_string_lossy().into_owned(),
+            })
+            .await;
+        assert!(err.is_err());
+    }
+
+    #[tokio::test]
+    async fn memory_list_prompt_with_memories_shows_titles() {
+        let (hm, _dir) = test_hivemind().await;
+        hm.do_memory_store(MemoryStoreInput {
+            title: "my preference".to_string(),
+            content: "use tabs".to_string(),
+            tags: vec!["style".to_string()],
+            token_count: None,
+        })
+        .await
+        .unwrap();
+        let result = hm.do_memory_list_prompt().await.unwrap();
+        let text = prompt_text(&result[0]);
+        assert!(text.contains("my preference"));
+        assert!(text.contains("style"));
+    }
+
+    #[tokio::test]
+    async fn memory_update_preserves_tags_when_not_specified() {
+        let (hm, _dir) = test_hivemind().await;
+        let stored = hm
+            .do_memory_store(MemoryStoreInput {
+                title: "tagged".to_string(),
+                content: "original".to_string(),
+                tags: vec!["keep".to_string()],
+                token_count: None,
+            })
+            .await
+            .unwrap();
+        let id = stored.structured_content.unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        hm.do_memory_update(MemoryUpdateInput {
+            id: id.clone(),
+            content: Some("updated".to_string()),
+            tags: None,
+        })
+        .await
+        .unwrap();
+
+        let recalled = hm
+            .do_memory_recall(MemoryRecallInput {
+                id: Some(id),
+                title: None,
+            })
+            .await
+            .unwrap();
+        let val = recalled.structured_content.unwrap();
+        assert_eq!(val["content"], "updated");
+        let tags: Vec<_> = val["tags"].as_array().unwrap().iter().collect();
+        assert!(tags.iter().any(|t| t.as_str() == Some("keep")));
+    }
+
     #[test]
     fn all_seven_prompts_are_registered() {
         let prompts = HiveMind::prompt_router().list_all();

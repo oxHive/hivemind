@@ -519,4 +519,19 @@ mod tests {
         let dir_name = tmp.path().file_name().unwrap().to_string_lossy();
         assert_eq!(cfg.project_name, dir_name.as_ref());
     }
+
+    #[test]
+    fn load_config_with_global_reads_max_inject_tokens_from_global_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            ".hivemind.toml",
+            "[project]\nname=\"test\"\n[hooks.on_session_start]\nrecalls=[]\n",
+        );
+        let global_dir = tempfile::tempdir().unwrap();
+        let global_path = global_dir.path().join("config.toml");
+        fs::write(&global_path, "[defaults]\nmax_inject_tokens=4000\n").unwrap();
+        let cfg = load_config_with_global(tmp.path(), &global_path).unwrap();
+        assert_eq!(cfg.max_tokens, 4000);
+    }
 }

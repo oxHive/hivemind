@@ -948,9 +948,16 @@ pub(crate) fn do_migrate_copy(legacy: &Path, new_path: &Path) -> Result<()> {
 
 pub fn cmd_migrate() -> Result<()> {
     let legacy = crate::db::legacy_db_path();
-    let new_dir = crate::db::xdg_data_dir();
-    let new_path = new_dir.join("memories.db");
+    let new_path = crate::db::xdg_data_dir().join("memories.db");
+    let stdin = std::io::stdin();
+    cmd_migrate_inner(&legacy, &new_path, &mut stdin.lock())
+}
 
+pub(crate) fn cmd_migrate_inner(
+    legacy: &Path,
+    new_path: &Path,
+    stdin: &mut dyn std::io::BufRead,
+) -> Result<()> {
     if !legacy.exists() {
         println!(
             "Nothing to migrate: legacy database not found at {}",
@@ -973,13 +980,13 @@ pub fn cmd_migrate() -> Result<()> {
     std::io::stdout().flush()?;
 
     let mut input = String::new();
-    std::io::stdin().read_line(&mut input)?;
+    stdin.read_line(&mut input)?;
     if !input.trim().eq_ignore_ascii_case("y") {
         println!("Cancelled.");
         return Ok(());
     }
 
-    do_migrate_copy(&legacy, &new_path)?;
+    do_migrate_copy(legacy, new_path)?;
     println!(
         "Done. You can now delete the old directory: rm -rf {}",
         legacy.parent().unwrap().display()
@@ -1384,6 +1391,330 @@ mod tests {
         );
     }
 
+    // ── detect_registered_clients ────────────────────────────────────────────
+
+    #[test]
+    fn detect_registered_clients_empty_when_no_configs() {
+        let home = tempfile::tempdir().unwrap();
+        let result = detect_registered_clients(home.path());
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn detect_registered_clients_claude_via_mcp_json() {
+        let home = tempfile::tempdir().unwrap();
+        let claude_dir = home.path().join(".claude");
+        fs::create_dir_all(&claude_dir).unwrap();
+        fs::write(
+            claude_dir.join("mcp.json"),
+            r#"{"mcpServers":{"hivemind":{"command":"hivemind"}}}"#,
+        )
+        .unwrap();
+        let result = detect_registered_clients(home.path());
+        assert!(result.contains(&"claude"));
+    }
+
+    #[test]
+    fn detect_registered_clients_claude_via_settings_json() {
+        let home = tempfile::tempdir().unwrap();
+        let claude_dir = home.path().join(".claude");
+        fs::create_dir_all(&claude_dir).unwrap();
+        fs::write(
+            claude_dir.join("settings.json"),
+            r#"{"mcpServers":{"hivemind":{"command":"hivemind"}}}"#,
+        )
+        .unwrap();
+        let result = detect_registered_clients(home.path());
+        assert!(result.contains(&"claude"));
+    }
+
+    #[test]
+    fn detect_registered_clients_ignores_claude_files_without_hivemind() {
+        let home = tempfile::tempdir().unwrap();
+        let claude_dir = home.path().join(".claude");
+        fs::create_dir_all(&claude_dir).unwrap();
+        fs::write(claude_dir.join("mcp.json"), r#"{"mcpServers":{}}"#).unwrap();
+        let result = detect_registered_clients(home.path());
+        assert!(!result.contains(&"claude"));
+    }
+
+    #[test]
+    fn detect_registered_clients_cursor() {
+        let home = tempfile::tempdir().unwrap();
+        let dir = home.path().join(".cursor");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("mcp.json"),
+            r#"{"mcpServers":{"hivemind":{"command":"hivemind"}}}"#,
+        )
+        .unwrap();
+        let result = detect_registered_clients(home.path());
+        assert!(result.contains(&"cursor"));
+    }
+
+    #[test]
+    fn detect_registered_clients_kimi() {
+        let home = tempfile::tempdir().unwrap();
+        let dir = home.path().join(".kimi");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("mcp.json"),
+            r#"{"mcpServers":{"hivemind":{"command":"hivemind"}}}"#,
+        )
+        .unwrap();
+        let result = detect_registered_clients(home.path());
+        assert!(result.contains(&"kimi"));
+    }
+
+    #[test]
+    fn detect_registered_clients_windsurf() {
+        let home = tempfile::tempdir().unwrap();
+        let dir = home.path().join(".codeium").join("windsurf");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("mcp_config.json"),
+            r#"{"mcpServers":{"hivemind":{"command":"hivemind"}}}"#,
+        )
+        .unwrap();
+        let result = detect_registered_clients(home.path());
+        assert!(result.contains(&"windsurf"));
+    }
+
+    #[test]
+    fn detect_registered_clients_codex() {
+        let home = tempfile::tempdir().unwrap();
+        let dir = home.path().join(".codex");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("config.toml"),
+            "\n[mcp_servers.hivemind]\ncommand = \"hivemind\"\nargs = []\n",
+        )
+        .unwrap();
+        let result = detect_registered_clients(home.path());
+        assert!(result.contains(&"codex"));
+    }
+
+    #[test]
+    fn detect_registered_clients_opencode_via_config_home() {
+        let home = tempfile::tempdir().unwrap();
+        let dir = home.path().join(".config").join("opencode");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("opencode.json"),
+            r#"{"mcp":{"hivemind":{"type":"local","command":"hivemind"}}}"#,
+        )
+        .unwrap();
+        let result = detect_registered_clients(home.path());
+        assert!(result.contains(&"opencode"));
+    }
+
+    #[test]
+    fn detect_registered_clients_multiple() {
+        let home = tempfile::tempdir().unwrap();
+
+        let claude_dir = home.path().join(".claude");
+        fs::create_dir_all(&claude_dir).unwrap();
+        fs::write(
+            claude_dir.join("mcp.json"),
+            r#"{"mcpServers":{"hivemind":{}}}"#,
+        )
+        .unwrap();
+
+        let cursor_dir = home.path().join(".cursor");
+        fs::create_dir_all(&cursor_dir).unwrap();
+        fs::write(
+            cursor_dir.join("mcp.json"),
+            r#"{"mcpServers":{"hivemind":{}}}"#,
+        )
+        .unwrap();
+
+        let result = detect_registered_clients(home.path());
+        assert!(result.contains(&"claude"));
+        assert!(result.contains(&"cursor"));
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn append_block_if_absent_no_trailing_newline_in_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("CLAUDE.md");
+        fs::write(&path, "# Existing content").unwrap();
+        let (_, status) =
+            append_block_if_absent(&path, "# HiveMind", "# HiveMind\nblock\n").unwrap();
+        assert_eq!(status, "created");
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(content.contains("Existing content"));
+        assert!(content.contains("# HiveMind"));
+    }
+
+    // ── upsert_json_mcp ─────────────────────────────────────────────────────
+
+    #[test]
+    fn upsert_json_mcp_creates_new_file_with_mcp_servers_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("mcp.json");
+        upsert_json_mcp(
+            &path,
+            "hivemind",
+            serde_json::json!({"command": "hivemind"}),
+        )
+        .unwrap();
+        let raw = fs::read_to_string(&path).unwrap();
+        let val: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert!(val["mcpServers"]["hivemind"]["command"] == "hivemind");
+    }
+
+    #[test]
+    fn upsert_json_mcp_uses_mcp_key_when_entry_has_type_field() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("opencode.json");
+        upsert_json_mcp(
+            &path,
+            "hivemind",
+            serde_json::json!({"type": "local", "command": "hivemind", "args": []}),
+        )
+        .unwrap();
+        let raw = fs::read_to_string(&path).unwrap();
+        let val: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert!(val["mcp"]["hivemind"]["type"] == "local");
+        assert!(
+            val.get("mcpServers").is_none(),
+            "should use 'mcp' not 'mcpServers'"
+        );
+    }
+
+    #[test]
+    fn upsert_json_mcp_updates_existing_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("mcp.json");
+        fs::write(&path, r#"{"mcpServers":{"other":{"command":"other"}}}"#).unwrap();
+        upsert_json_mcp(
+            &path,
+            "hivemind",
+            serde_json::json!({"command": "hivemind"}),
+        )
+        .unwrap();
+        let raw = fs::read_to_string(&path).unwrap();
+        let val: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert!(
+            val["mcpServers"]["other"]["command"] == "other",
+            "must preserve existing"
+        );
+        assert!(val["mcpServers"]["hivemind"]["command"] == "hivemind");
+    }
+
+    #[test]
+    fn upsert_json_mcp_creates_parent_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nested").join("deep").join("mcp.json");
+        upsert_json_mcp(
+            &path,
+            "hivemind",
+            serde_json::json!({"command": "hivemind"}),
+        )
+        .unwrap();
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn upsert_json_mcp_detects_mcp_key_from_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("opencode.json");
+        fs::write(&path, r#"{"mcp":{"existing":{"type":"local"}}}"#).unwrap();
+        upsert_json_mcp(
+            &path,
+            "hivemind",
+            serde_json::json!({"command": "hivemind"}),
+        )
+        .unwrap();
+        let raw = fs::read_to_string(&path).unwrap();
+        let val: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert!(val["mcp"]["hivemind"]["command"] == "hivemind");
+        assert!(val.get("mcpServers").is_none());
+    }
+
+    #[test]
+    fn home_dir_returns_a_path() {
+        let h = home_dir();
+        assert!(!h.as_os_str().is_empty());
+    }
+
+    #[test]
+    fn exe_path_returns_non_empty_string() {
+        let p = exe_path();
+        assert!(!p.is_empty());
+    }
+
+    // ── render_status extra paths ────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn render_status_shows_nothing_when_no_recalls_resolve() {
+        use crate::{config::SyncSettings, db, store::SqliteStore};
+
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let sync = SyncSettings::default();
+        let database = db::open_database(&sync, db_path.to_str().unwrap())
+            .await
+            .unwrap();
+        let conn = database.connect().unwrap();
+        db::run_migrations(&conn).await.unwrap();
+        let store = SqliteStore::new(conn);
+
+        let proj = tempfile::tempdir().unwrap();
+        std::fs::write(
+            proj.path().join(".hivemind.toml"),
+            "[project]\nname=\"empty\"\n[hooks.on_session_start]\nmax_tokens=2000\nrecalls=[\"nonexistent memory\"]\n",
+        ).unwrap();
+        let missing_global = proj.path().join("no-global.toml");
+
+        let out = render_status(proj.path(), &missing_global, &store, "/tmp/x.db", &[])
+            .await
+            .unwrap();
+        assert!(
+            out.contains("nothing"),
+            "should show nothing when no recalls resolve"
+        );
+        assert!(
+            out.contains("skipped") || out.contains("[skipped]"),
+            "should show skipped entry"
+        );
+    }
+
+    #[tokio::test]
+    async fn render_status_shows_local_toml_indicator() {
+        use crate::{config::SyncSettings, db, store::SqliteStore};
+
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let sync = SyncSettings::default();
+        let database = db::open_database(&sync, db_path.to_str().unwrap())
+            .await
+            .unwrap();
+        let conn = database.connect().unwrap();
+        db::run_migrations(&conn).await.unwrap();
+        let store = SqliteStore::new(conn);
+
+        let proj = tempfile::tempdir().unwrap();
+        std::fs::write(
+            proj.path().join(".hivemind.toml"),
+            "[project]\nname=\"local-test\"\n",
+        )
+        .unwrap();
+        std::fs::write(proj.path().join(".hivemind.local.toml"), "").unwrap();
+        let missing_global = proj.path().join("no-global.toml");
+
+        let out = render_status(proj.path(), &missing_global, &store, "/tmp/x.db", &[])
+            .await
+            .unwrap();
+        assert!(
+            out.contains(".hivemind.local.toml"),
+            "should mention local toml"
+        );
+    }
+
+    // ── do_migrate_copy ──────────────────────────────────────────────────────
+
     #[test]
     fn do_migrate_copy_copies_file_and_creates_dirs() {
         let src_dir = tempfile::tempdir().unwrap();
@@ -1405,5 +1736,110 @@ mod tests {
         let legacy = dst_dir.path().join("nonexistent.db");
         let new_path = dst_dir.path().join("new.db");
         assert!(do_migrate_copy(&legacy, &new_path).is_err());
+    }
+
+    // ── cmd_migrate_inner ────────────────────────────────────────────────────
+
+    #[test]
+    fn cmd_migrate_inner_nothing_to_migrate_when_legacy_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = dir.path().join("memories.db"); // does not exist
+        let new_path = dir.path().join("new").join("memories.db");
+        let result = cmd_migrate_inner(&legacy, &new_path, &mut std::io::Cursor::new(b""));
+        assert!(result.is_ok());
+        assert!(!new_path.exists(), "new path should not be created");
+    }
+
+    #[test]
+    fn cmd_migrate_inner_new_already_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = dir.path().join("legacy.db");
+        fs::write(&legacy, b"data").unwrap();
+        let new_path = dir.path().join("new.db");
+        fs::write(&new_path, b"existing").unwrap();
+        let result = cmd_migrate_inner(&legacy, &new_path, &mut std::io::Cursor::new(b""));
+        assert!(result.is_ok());
+        assert_eq!(fs::read(&new_path).unwrap(), b"existing", "should not overwrite");
+    }
+
+    #[test]
+    fn cmd_migrate_inner_cancelled_on_n_input() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = dir.path().join("legacy.db");
+        fs::write(&legacy, b"data").unwrap();
+        let new_path = dir.path().join("new.db");
+        let result = cmd_migrate_inner(&legacy, &new_path, &mut std::io::Cursor::new(b"N\n"));
+        assert!(result.is_ok());
+        assert!(!new_path.exists(), "should not copy when cancelled");
+    }
+
+    #[test]
+    fn cmd_migrate_inner_proceeds_on_y_input() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = dir.path().join("legacy.db");
+        fs::write(&legacy, b"sqlite data").unwrap();
+        let new_path = dir.path().join("subdir").join("memories.db");
+        let result = cmd_migrate_inner(&legacy, &new_path, &mut std::io::Cursor::new(b"y\n"));
+        assert!(result.is_ok());
+        assert_eq!(fs::read(&new_path).unwrap(), b"sqlite data");
+    }
+
+    // ── env-mutation guard ───────────────────────────────────────────────────
+    // Tests that mutate XDG_CONFIG_HOME / HOME must hold this lock so they
+    // don't race with each other inside the same test binary.
+    static XDG_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    // ── ensure_global_config ─────────────────────────────────────────────────
+
+    #[test]
+    fn ensure_global_config_creates_file_when_missing() {
+        let _lock = XDG_MUTEX.lock().unwrap();
+        let cfg_dir = tempfile::tempdir().unwrap();
+        // SAFETY: test-only env mutation; serialised by XDG_MUTEX.
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", cfg_dir.path()) };
+        ensure_global_config();
+        unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
+        assert!(cfg_dir.path().join("hivemind").join("config.toml").exists());
+    }
+
+    #[test]
+    fn ensure_global_config_is_idempotent() {
+        let _lock = XDG_MUTEX.lock().unwrap();
+        let cfg_dir = tempfile::tempdir().unwrap();
+        let config_file = cfg_dir.path().join("hivemind").join("config.toml");
+        fs::create_dir_all(config_file.parent().unwrap()).unwrap();
+        fs::write(&config_file, "original").unwrap();
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", cfg_dir.path()) };
+        ensure_global_config();
+        unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
+        assert_eq!(fs::read_to_string(&config_file).unwrap(), "original");
+    }
+
+    // ── warn_if_not_initialized ──────────────────────────────────────────────
+
+    #[test]
+    fn warn_if_not_initialized_no_config_prints_hint() {
+        let _lock = XDG_MUTEX.lock().unwrap();
+        let cfg_dir = tempfile::tempdir().unwrap();
+        // SAFETY: test-only env mutation; serialised by XDG_MUTEX.
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", cfg_dir.path()) };
+        warn_if_not_initialized(); // exercises the "no config" branch
+        unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
+    }
+
+    #[test]
+    fn warn_if_not_initialized_config_but_no_clients_prints_hint() {
+        let _lock = XDG_MUTEX.lock().unwrap();
+        let cfg_dir = tempfile::tempdir().unwrap();
+        let home_dir_tmp = tempfile::tempdir().unwrap();
+        let config_file = cfg_dir.path().join("hivemind").join("config.toml");
+        fs::create_dir_all(config_file.parent().unwrap()).unwrap();
+        fs::write(&config_file, "[server]\n").unwrap();
+        // SAFETY: test-only env mutation; serialised by XDG_MUTEX.
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", cfg_dir.path()) };
+        unsafe { std::env::set_var("HOME", home_dir_tmp.path()) };
+        warn_if_not_initialized(); // exercises the "config found, no clients" branch
+        unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
+        unsafe { std::env::remove_var("HOME") };
     }
 }
