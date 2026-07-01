@@ -91,7 +91,7 @@ Verify the registration with:
 claude mcp list
 ```
 
-You should see `hivemind` in the output.
+You should see `hivemind` in the output. The entry is stored in `~/.claude/mcp.json` if you want to inspect or edit it directly.
 
 ### OpenCode
 
