@@ -1496,6 +1496,10 @@ mod tests {
 
     #[test]
     fn detect_registered_clients_opencode_via_config_home() {
+        // detect_registered_clients reads XDG_CONFIG_HOME; hold the mutex so
+        // other tests that set that env var don't interfere.
+        let _lock = XDG_MUTEX.lock().unwrap();
+        unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
         let home = tempfile::tempdir().unwrap();
         let dir = home.path().join(".config").join("opencode");
         fs::create_dir_all(&dir).unwrap();
