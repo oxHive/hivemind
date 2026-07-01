@@ -781,7 +781,10 @@ fn install_codex() -> Result<()> {
         return Ok(());
     }
 
-    let block = format!("\n[mcp_servers.hivemind]\ncommand = \"{}\"\nargs = []\n", exe_path());
+    let block = format!(
+        "\n[mcp_servers.hivemind]\ncommand = \"{}\"\nargs = []\n",
+        exe_path()
+    );
     let block = block.as_str();
     let new_content = format!("{}{}", existing.trim_end(), block);
     std::fs::write(&config_path, new_content)?;
@@ -935,13 +938,24 @@ pub fn cmd_status() -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn do_migrate_copy(legacy: &Path, new_path: &Path) -> Result<()> {
+    if let Some(dir) = new_path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::copy(legacy, new_path)?;
+    Ok(())
+}
+
 pub fn cmd_migrate() -> Result<()> {
     let legacy = crate::db::legacy_db_path();
     let new_dir = crate::db::xdg_data_dir();
     let new_path = new_dir.join("memories.db");
 
     if !legacy.exists() {
-        println!("Nothing to migrate: legacy database not found at {}", legacy.display());
+        println!(
+            "Nothing to migrate: legacy database not found at {}",
+            legacy.display()
+        );
         println!("New location: {}", new_path.display());
         return Ok(());
     }
@@ -965,9 +979,11 @@ pub fn cmd_migrate() -> Result<()> {
         return Ok(());
     }
 
-    std::fs::create_dir_all(&new_dir)?;
-    std::fs::copy(&legacy, &new_path)?;
-    println!("Done. You can now delete the old directory: rm -rf {}", legacy.parent().unwrap().display());
+    do_migrate_copy(&legacy, &new_path)?;
+    println!(
+        "Done. You can now delete the old directory: rm -rf {}",
+        legacy.parent().unwrap().display()
+    );
     Ok(())
 }
 
@@ -1366,5 +1382,28 @@ mod tests {
             out.contains("hivemind init"),
             "suggests init when no config"
         );
+    }
+
+    #[test]
+    fn do_migrate_copy_copies_file_and_creates_dirs() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+
+        let legacy = src_dir.path().join("memories.db");
+        fs::write(&legacy, b"sqlite data").unwrap();
+
+        let new_path = dst_dir.path().join("sub").join("memories.db");
+        do_migrate_copy(&legacy, &new_path).unwrap();
+
+        assert!(new_path.exists());
+        assert_eq!(fs::read(&new_path).unwrap(), b"sqlite data");
+    }
+
+    #[test]
+    fn do_migrate_copy_fails_when_source_missing() {
+        let dst_dir = tempfile::tempdir().unwrap();
+        let legacy = dst_dir.path().join("nonexistent.db");
+        let new_path = dst_dir.path().join("new.db");
+        assert!(do_migrate_copy(&legacy, &new_path).is_err());
     }
 }
