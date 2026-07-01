@@ -46,6 +46,8 @@ pub enum Command {
         #[command(subcommand)]
         action: ServiceAction,
     },
+    /// Migrate the database from the legacy ~/.hivemind/ path to XDG data dir
+    Migrate,
 }
 
 #[derive(Subcommand)]
@@ -930,6 +932,42 @@ pub fn cmd_status() -> Result<()> {
         eprintln!("      Register once with:  hivemind mcp install claude");
         eprintln!("      (or cursor, windsurf, opencode, kimi, codex)");
     }
+    Ok(())
+}
+
+pub fn cmd_migrate() -> Result<()> {
+    let legacy = crate::db::legacy_db_path();
+    let new_dir = crate::db::xdg_data_dir();
+    let new_path = new_dir.join("memories.db");
+
+    if !legacy.exists() {
+        println!("Nothing to migrate: legacy database not found at {}", legacy.display());
+        println!("New location: {}", new_path.display());
+        return Ok(());
+    }
+
+    if new_path.exists() {
+        println!("New database already exists at {}.", new_path.display());
+        println!("Remove it first if you want to replace it with the legacy database.");
+        return Ok(());
+    }
+
+    println!("Migrating database:");
+    println!("  from: {}", legacy.display());
+    println!("    to: {}", new_path.display());
+    print!("Proceed? [y/N] ");
+    std::io::stdout().flush()?;
+
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+    if !input.trim().eq_ignore_ascii_case("y") {
+        println!("Cancelled.");
+        return Ok(());
+    }
+
+    std::fs::create_dir_all(&new_dir)?;
+    std::fs::copy(&legacy, &new_path)?;
+    println!("Done. You can now delete the old directory: rm -rf {}", legacy.parent().unwrap().display());
     Ok(())
 }
 

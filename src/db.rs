@@ -3,12 +3,26 @@ use libsql::Builder;
 
 use crate::config::SyncSettings;
 
+/// XDG data dir: $XDG_DATA_HOME/hivemind or ~/.local/share/hivemind
+pub fn xdg_data_dir() -> std::path::PathBuf {
+    if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
+        return std::path::PathBuf::from(xdg).join("hivemind");
+    }
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    std::path::PathBuf::from(home).join(".local").join("share").join("hivemind")
+}
+
+/// Legacy path used before XDG migration: ~/.hivemind/memories.db
+pub fn legacy_db_path() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    std::path::PathBuf::from(home).join(".hivemind").join("memories.db")
+}
+
 pub fn resolve_db_path() -> String {
     if let Ok(p) = std::env::var("HIVEMIND_DB_PATH") {
         return p;
     }
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    format!("{home}/.hivemind/memories.db")
+    xdg_data_dir().join("memories.db").to_string_lossy().into_owned()
 }
 
 pub async fn open_database(sync: &SyncSettings, path: &str) -> Result<libsql::Database> {
