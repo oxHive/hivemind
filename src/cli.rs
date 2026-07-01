@@ -651,20 +651,13 @@ fn install_claude() -> Result<()> {
     let list_str = String::from_utf8_lossy(&list_out.stdout);
     if list_str.contains("hivemind") {
         println!("HiveMind is already registered with Claude Code.");
-        println!("Run `hivemind up` to start the server, then open a new Claude Code session.");
+        println!("Open a new Claude Code session to use it.");
         return Ok(());
     }
 
-    // Register.
+    // Register as stdio — Claude Code spawns the process on demand.
     let status = std::process::Command::new("claude")
-        .args([
-            "mcp",
-            "add",
-            "hivemind",
-            "--transport",
-            "http",
-            "http://127.0.0.1:3456/mcp",
-        ])
+        .args(["mcp", "add", "hivemind", "--", "hivemind"])
         .status()?;
 
     if !status.success() {
@@ -674,9 +667,8 @@ fn install_claude() -> Result<()> {
     println!("HiveMind registered with Claude Code.");
     println!();
     println!("Next steps:");
-    println!("  1. Run `hivemind up` to start the server");
-    println!("  2. Open a new Claude Code session");
-    println!("  3. Type /memory-status to verify");
+    println!("  1. Open a new Claude Code session");
+    println!("  2. Type /memory-status to verify");
     Ok(())
 }
 
@@ -693,17 +685,11 @@ fn install_opencode() -> Result<()> {
             .output()?;
         if String::from_utf8_lossy(&list_out.stdout).contains("hivemind") {
             println!("HiveMind is already registered with OpenCode.");
-            println!("Run `hivemind up` to start the server, then open a new OpenCode session.");
+            println!("Open a new OpenCode session to use it.");
             return Ok(());
         }
         let status = std::process::Command::new("opencode")
-            .args([
-                "mcp",
-                "add",
-                "--remote",
-                "hivemind",
-                "http://127.0.0.1:3456/mcp",
-            ])
+            .args(["mcp", "add", "hivemind", "hivemind"])
             .status()?;
         if !status.success() {
             anyhow::bail!("opencode mcp add failed — check `opencode mcp list`");
@@ -718,9 +704,9 @@ fn install_opencode() -> Result<()> {
             &config_path,
             "hivemind",
             serde_json::json!({
-                "type": "remote",
-                "url": "http://127.0.0.1:3456/mcp",
-                "enabled": true
+                "type": "local",
+                "command": "hivemind",
+                "args": []
             }),
         )?;
         println!("Written to {}", config_path.display());
@@ -729,8 +715,7 @@ fn install_opencode() -> Result<()> {
     println!("HiveMind registered with OpenCode.");
     println!();
     println!("Next steps:");
-    println!("  1. Run `hivemind up` to start the server");
-    println!("  2. Open a new OpenCode session");
+    println!("  1. Open a new OpenCode session");
     Ok(())
 }
 
@@ -746,17 +731,11 @@ fn install_kimi() -> Result<()> {
             .output()?;
         if String::from_utf8_lossy(&list_out.stdout).contains("hivemind") {
             println!("HiveMind is already registered with Kimi.");
+            println!("Open a new Kimi session to use it.");
             return Ok(());
         }
         let status = std::process::Command::new("kimi")
-            .args([
-                "mcp",
-                "add",
-                "--transport",
-                "http",
-                "hivemind",
-                "http://127.0.0.1:3456/mcp",
-            ])
+            .args(["mcp", "add", "hivemind", "hivemind"])
             .status()?;
         if !status.success() {
             anyhow::bail!("kimi mcp add failed — check `kimi mcp list`");
@@ -766,7 +745,7 @@ fn install_kimi() -> Result<()> {
         upsert_json_mcp(
             &config_path,
             "hivemind",
-            serde_json::json!({ "url": "http://127.0.0.1:3456/mcp" }),
+            serde_json::json!({ "command": "hivemind", "args": [] }),
         )?;
         println!("Written to {}", config_path.display());
     }
@@ -774,8 +753,7 @@ fn install_kimi() -> Result<()> {
     println!("HiveMind registered with Kimi Code CLI.");
     println!();
     println!("Next steps:");
-    println!("  1. Run `hivemind up` to start the server");
-    println!("  2. Open a new Kimi session");
+    println!("  1. Open a new Kimi session");
     Ok(())
 }
 
@@ -786,11 +764,11 @@ fn install_codex() -> Result<()> {
     let existing = std::fs::read_to_string(&config_path).unwrap_or_default();
     if existing.contains("[mcp_servers.hivemind]") {
         println!("HiveMind is already registered with Codex CLI.");
-        println!("Run `hivemind up` to start the server, then open a new Codex session.");
+        println!("Open a new Codex session to use it.");
         return Ok(());
     }
 
-    let block = "\n[mcp_servers.hivemind]\nurl = \"http://127.0.0.1:3456/mcp\"\n";
+    let block = "\n[mcp_servers.hivemind]\ncommand = \"hivemind\"\nargs = []\n";
     let new_content = format!("{}{}", existing.trim_end(), block);
     std::fs::write(&config_path, new_content)?;
     println!("Written to {}", config_path.display());
@@ -798,8 +776,7 @@ fn install_codex() -> Result<()> {
     println!("HiveMind registered with OpenAI Codex CLI.");
     println!();
     println!("Next steps:");
-    println!("  1. Run `hivemind up` to start the server");
-    println!("  2. Open a new Codex session");
+    println!("  1. Open a new Codex session");
     Ok(())
 }
 
@@ -808,14 +785,13 @@ fn install_cursor() -> Result<()> {
     upsert_json_mcp(
         &config_path,
         "hivemind",
-        serde_json::json!({ "url": "http://127.0.0.1:3456/mcp" }),
+        serde_json::json!({ "command": "hivemind", "args": [] }),
     )?;
     println!("Written to {}", config_path.display());
     println!("HiveMind registered with Cursor.");
     println!();
     println!("Next steps:");
-    println!("  1. Run `hivemind up` to start the server");
-    println!("  2. Restart Cursor completely for the change to take effect");
+    println!("  1. Restart Cursor completely for the change to take effect");
     Ok(())
 }
 
@@ -827,14 +803,13 @@ fn install_windsurf() -> Result<()> {
     upsert_json_mcp(
         &config_path,
         "hivemind",
-        serde_json::json!({ "serverUrl": "http://127.0.0.1:3456/mcp" }),
+        serde_json::json!({ "command": "hivemind", "args": [] }),
     )?;
     println!("Written to {}", config_path.display());
     println!("HiveMind registered with Windsurf.");
     println!();
     println!("Next steps:");
-    println!("  1. Run `hivemind up` to start the server");
-    println!("  2. Restart Windsurf for the change to take effect");
+    println!("  1. Restart Windsurf for the change to take effect");
     Ok(())
 }
 
