@@ -1,10 +1,10 @@
 {
   "$schema": "https://cdn.jsdelivr.net/gh/anthropics/claude-code@main/plugins/marketplace-schema.json",
   "name": "hivemind",
-  "description": "Persistent memory for AI coding agents — keeps context, preferences, and project knowledge alive across sessions",
+  "description": "Persistent memory for AI coding agents. Keeps context, preferences, and project knowledge alive across sessions.",
   "owner": {
     "name": "oxHive",
-    "email": "dev@graditya.com"
+    "email": "gatra@oxhive.com"
   },
   "plugins": [
     {

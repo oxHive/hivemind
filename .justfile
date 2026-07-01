@@ -18,6 +18,11 @@ install:
 mcp-install client='claude': install
   hivemind mcp install {{client}}
 
+# Force re-register by removing the existing entry first, then reinstalling
+mcp-reinstall client='claude': install
+  -claude mcp remove {{client}} 2>/dev/null
+  hivemind mcp install {{client}}
+
 release-major:
   just _release major
 
