@@ -83,7 +83,7 @@ cargo binstall oxhivemind       # download pre-built binary (faster)
 hivemind mcp install claude
 ```
 
-This runs `claude mcp add hivemind -- hivemind` for you, registering HiveMind as a stdio process. Claude Code spawns it on demand with no server required.
+This runs `claude mcp add hivemind -- /path/to/hivemind` for you (using the full binary path so Claude Code can find it regardless of PATH). Claude Code spawns it on demand with no server required.
 
 Verify the registration with:
 
