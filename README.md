@@ -79,19 +79,29 @@ cargo binstall oxhivemind       # download pre-built binary (faster)
 
 ### Claude Code
 
+Install the HiveMind plugin (recommended):
+
+```sh
+claude plugin install https://github.com/oxHive/hivemind
+```
+
+This registers the MCP server and installs `/memory-store`, `/memory-search`, `/memory-list`, `/memory-edit`, and `/memory-status` as slash commands in one step.
+
+If you have a local clone, you can install from the path instead:
+
+```sh
+claude plugin install /path/to/hivemind
+```
+
+Verify with `claude mcp list` — you should see `hivemind`. The slash commands appear in the `/` menu in any Claude Code session.
+
+**Manual alternative (MCP only, no slash commands):**
+
 ```sh
 hivemind mcp install claude
 ```
 
-This runs `claude mcp add hivemind -- /path/to/hivemind` for you (using the full binary path so Claude Code can find it regardless of PATH). Claude Code spawns it on demand with no server required.
-
-Verify the registration with:
-
-```sh
-claude mcp list
-```
-
-You should see `hivemind` in the output. The entry is stored in `~/.claude/mcp.json` if you want to inspect or edit it directly.
+This registers the MCP server without the plugin skills. Useful if you only want the tools and session start, not the slash commands.
 
 ### OpenCode
 
@@ -206,8 +216,8 @@ If your client only supports HTTP transport, start HiveMind's HTTP server with `
 ## Quick start
 
 ```sh
-# 1. Register with your AI client (once per machine)
-hivemind mcp install claude
+# 1. Install the plugin (once per machine — registers MCP + slash commands)
+claude plugin install https://github.com/oxHive/hivemind
 
 # 2. Go to your project and initialise it
 cd ~/projects/myapp
