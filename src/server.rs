@@ -2,8 +2,7 @@ use crate::store::SqliteStore;
 use rmcp::{
     handler::server::wrapper::Parameters,
     model::{CallToolResult, ContentBlock, ErrorData, PromptMessage, Role},
-    prompt, prompt_handler, prompt_router, schemars,
-    tool, tool_handler, tool_router,
+    prompt, prompt_handler, prompt_router, schemars, tool, tool_handler, tool_router,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -332,10 +331,7 @@ impl HiveMind {
         }
         parts.push("\nTip: Use /memory-list to browse all memories, or /memory-search <query> to find specific ones.".to_string());
 
-        Ok(vec![PromptMessage::new_text(
-            Role::User,
-            parts.join("\n"),
-        )])
+        Ok(vec![PromptMessage::new_text(Role::User, parts.join("\n"))])
     }
 
     async fn do_memory_search_prompt(
@@ -547,10 +543,7 @@ impl HiveMind {
         );
         lines.push("\nAsk the user how to handle each item before taking action.".to_string());
 
-        Ok(vec![PromptMessage::new_text(
-            Role::User,
-            lines.join("\n"),
-        )])
+        Ok(vec![PromptMessage::new_text(Role::User, lines.join("\n"))])
     }
 
     pub async fn do_session_start(
