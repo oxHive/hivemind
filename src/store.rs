@@ -635,4 +635,134 @@ mod tests {
         let after = s.get_conflict_by_id(&conflict.id).await.unwrap().unwrap();
         assert_eq!(after.status, "keep_local");
     }
+
+    #[tokio::test]
+    async fn update_returns_false_for_missing_id() {
+        let (s, _dir) = make_store().await;
+        let updated = s
+            .update("mem_nonexistent", "new content", &[])
+            .await
+            .unwrap();
+        assert!(!updated);
+    }
+
+    #[tokio::test]
+    async fn list_memories_returns_all_stored() {
+        let (s, _dir) = make_store().await;
+        s.store("mem_a", "Alpha", "first", &["a".into()], None)
+            .await
+            .unwrap();
+        s.store("mem_b", "Beta", "second", &["b".into()], None)
+            .await
+            .unwrap();
+        let list = s.list_memories(10, 0).await.unwrap();
+        assert_eq!(list.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn list_edges_filtered_by_memory_id() {
+        let (s, _dir) = make_store().await;
+        s.store("mem_x", "X", "body", &["shared_tag".into()], None)
+            .await
+            .unwrap();
+        s.store("mem_y", "Y", "body", &["shared_tag".into()], None)
+            .await
+            .unwrap();
+        s.store("mem_z", "Z", "body", &["other_tag".into()], None)
+            .await
+            .unwrap();
+        s.create_edge("mem_x", "mem_z", "related_to").await.unwrap();
+
+        let all = s.list_edges(None).await.unwrap();
+        let filtered = s.list_edges(Some("mem_x")).await.unwrap();
+
+        assert!(all.len() >= filtered.len());
+        assert!(
+            filtered
+                .iter()
+                .all(|e| e.source_id == "mem_x" || e.target_id == "mem_x")
+        );
+    }
+
+    #[tokio::test]
+    async fn set_edge_status_updates() {
+        let (s, _dir) = make_store().await;
+        s.store("mem_p", "P", "body", &[], None).await.unwrap();
+        s.store("mem_q", "Q", "body", &[], None).await.unwrap();
+        let edge = s.create_edge("mem_p", "mem_q", "pairs_with").await.unwrap();
+        let ok = s.set_edge_status(&edge.id, "inactive").await.unwrap();
+        assert!(ok);
+        let edges = s.list_edges(None).await.unwrap();
+        let updated = edges.iter().find(|e| e.id == edge.id).unwrap();
+        assert_eq!(updated.status, "inactive");
+    }
+
+    #[tokio::test]
+    async fn set_edge_status_returns_false_for_missing() {
+        let (s, _dir) = make_store().await;
+        let ok = s
+            .set_edge_status("edge_nonexistent", "inactive")
+            .await
+            .unwrap();
+        assert!(!ok);
+    }
+
+    #[tokio::test]
+    async fn list_feedback_filtered_by_memory_id() {
+        let (s, _dir) = make_store().await;
+        s.store("mem_f1", "F1", "body", &[], None).await.unwrap();
+        s.store("mem_f2", "F2", "body", &[], None).await.unwrap();
+        s.create_feedback("mem_f1", "positive", None).await.unwrap();
+        s.create_feedback("mem_f2", "negative", Some("outdated"))
+            .await
+            .unwrap();
+
+        let all = s.list_feedback(None).await.unwrap();
+        let filtered = s.list_feedback(Some("mem_f1")).await.unwrap();
+
+        assert_eq!(all.len(), 2);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].memory_id, "mem_f1");
+    }
+
+    #[tokio::test]
+    async fn set_feedback_status_updates() {
+        let (s, _dir) = make_store().await;
+        s.store("mem_g", "G", "body", &[], None).await.unwrap();
+        let fb = s.create_feedback("mem_g", "negative", None).await.unwrap();
+        let ok = s.set_feedback_status(&fb.id, "resolved").await.unwrap();
+        assert!(ok);
+        let items = s.list_feedback(Some("mem_g")).await.unwrap();
+        assert_eq!(items[0].status, "resolved");
+    }
+
+    #[tokio::test]
+    async fn set_feedback_status_returns_false_for_missing() {
+        let (s, _dir) = make_store().await;
+        let ok = s
+            .set_feedback_status("fb_nonexistent", "resolved")
+            .await
+            .unwrap();
+        assert!(!ok);
+    }
+
+    #[tokio::test]
+    async fn list_conflicts_returns_entries() {
+        let (s, _dir) = make_store().await;
+        s.store("mem_h", "H", "local", &[], None).await.unwrap();
+        let entry = s.recall_by_id("mem_h").await.unwrap().unwrap();
+        s.write_conflict("mem_h", "remote", entry.updated_at + 1, entry.updated_at)
+            .await
+            .unwrap();
+        let conflicts = s.list_conflicts().await.unwrap();
+        assert_eq!(conflicts.len(), 1);
+        assert_eq!(conflicts[0].memory_id, "mem_h");
+    }
+
+    #[tokio::test]
+    async fn get_conflict_by_id_returns_none_for_missing() {
+        let (s, _dir) = make_store().await;
+        let result = s.get_conflict_by_id("conflict_nonexistent").await.unwrap();
+        assert!(result.is_none());
+    }
 }

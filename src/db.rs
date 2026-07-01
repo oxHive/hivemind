@@ -166,4 +166,21 @@ mod tests {
         assert!(result.ends_with("memories.db"), "got: {result}");
         assert!(result.contains("hivemind"), "got: {result}");
     }
+
+    #[tokio::test]
+    async fn open_database_fails_when_sync_enabled_without_url() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.db");
+        let sync = crate::config::SyncSettings {
+            enabled: true,
+            remote_url: String::new(),
+            api_key: String::new(),
+            interval_seconds: 300,
+            sync_on_store: false,
+            sync_on_startup: false,
+        };
+        let result = open_database(&sync, path.to_str().unwrap()).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("remote_url"));
+    }
 }

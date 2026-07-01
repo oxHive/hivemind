@@ -199,6 +199,13 @@ mod tests {
     }
 
     #[test]
+    fn memory_type_display() {
+        assert_eq!(MemoryType::Preference.to_string(), "preference");
+        assert_eq!(MemoryType::Project.to_string(), "project");
+        assert_eq!(MemoryType::History.to_string(), "history");
+    }
+
+    #[test]
     fn edge_create_variants_are_distinct() {
         let created = EdgeCreate::Created("edge_abc".to_string());
         assert_ne!(created, EdgeCreate::Duplicate);
