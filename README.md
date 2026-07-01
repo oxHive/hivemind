@@ -85,6 +85,14 @@ hivemind mcp install claude
 
 This runs `claude mcp add hivemind -- hivemind` for you, registering HiveMind as a stdio process. Claude Code spawns it on demand — no server needs to be running.
 
+Verify the registration with:
+
+```sh
+claude mcp list
+```
+
+You should see `hivemind` in the output.
+
 ### OpenCode
 
 ```sh
