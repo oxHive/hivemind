@@ -2,12 +2,12 @@
 
 > 🚧 **Under active development.** APIs and config formats may change between releases.
 
-Persistent memory for AI coding agents. HiveMind runs a local MCP server that gives Claude Code (and other AI agents) access to a [libsql](https://github.com/tursodatabase/libsql)-backed memory store, keeping context, preferences, and project knowledge alive across sessions.
+Persistent memory for AI coding agents. HiveMind is a local MCP server that gives Claude Code (and other AI agents) access to a [libsql](https://github.com/tursodatabase/libsql)-backed memory store, keeping context, preferences, and project knowledge alive across sessions.
 
 ## How it works
 
-1. You run `hivemind up` once to start the local server.
-2. Claude Code connects to it via MCP.
+1. You register HiveMind with your AI client once: `hivemind mcp install claude`.
+2. Your AI client spawns HiveMind as a subprocess — no server to start or keep running.
 3. At the start of every session, Claude automatically recalls the memories configured for your project.
 4. You ask Claude to store anything worth keeping. It never auto-stores.
 
@@ -83,7 +83,7 @@ cargo binstall oxhivemind       # download pre-built binary (faster)
 hivemind mcp install claude
 ```
 
-This runs `claude mcp add hivemind --transport http http://127.0.0.1:3456/mcp` for you.
+This runs `claude mcp add hivemind -- hivemind` for you, registering HiveMind as a stdio process. Claude Code spawns it on demand — no server needs to be running.
 
 ### OpenCode
 
@@ -98,9 +98,9 @@ Writes to `~/.config/opencode/opencode.json` (uses the `opencode` CLI if availab
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
     "hivemind": {
-      "type": "remote",
-      "url": "http://127.0.0.1:3456/mcp",
-      "enabled": true
+      "type": "local",
+      "command": "hivemind",
+      "args": []
     }
   }
 }
@@ -120,7 +120,8 @@ Uses the `kimi` CLI if available, otherwise writes to `~/.kimi/mcp.json` directl
 {
   "mcpServers": {
     "hivemind": {
-      "url": "http://127.0.0.1:3456/mcp"
+      "command": "hivemind",
+      "args": []
     }
   }
 }
@@ -138,7 +139,8 @@ Appends to `~/.codex/config.toml`. Manual config:
 
 ```toml
 [mcp_servers.hivemind]
-url = "http://127.0.0.1:3456/mcp"
+command = "hivemind"
+args = []
 ```
 
 Docs: [developers.openai.com/codex/mcp](https://developers.openai.com/codex/mcp)
@@ -155,7 +157,8 @@ Writes to `~/.cursor/mcp.json`. Restart Cursor after running. Manual config:
 {
   "mcpServers": {
     "hivemind": {
-      "url": "http://127.0.0.1:3456/mcp"
+      "command": "hivemind",
+      "args": []
     }
   }
 }
@@ -175,44 +178,48 @@ Writes to `~/.codeium/windsurf/mcp_config.json`. Restart Windsurf after running.
 {
   "mcpServers": {
     "hivemind": {
-      "serverUrl": "http://127.0.0.1:3456/mcp"
+      "command": "hivemind",
+      "args": []
     }
   }
 }
 ```
 
-Note: Windsurf uses `serverUrl` where other clients use `url`.
-
 Docs: [docs.windsurf.com/windsurf/cascade/mcp](https://docs.windsurf.com/windsurf/cascade/mcp)
 
 ### Other MCP-compatible clients
 
-Any client that supports the MCP streamable HTTP transport can connect to:
+Any client that supports the MCP stdio transport can run `hivemind` as a subprocess. Refer to your client's documentation for how to register a local stdio MCP server.
 
-```
-http://127.0.0.1:3456/mcp
-```
-
-No authentication is required for local connections.
+If your client only supports HTTP transport, start HiveMind's HTTP server with `hivemind up` and point it at `http://127.0.0.1:3456/mcp`. No authentication is required for local connections.
 
 ---
 
 ## Quick start
 
 ```sh
-# 1. Start the server (keep this running in a terminal)
-hivemind up
+# 1. Register with your AI client (once per machine)
+hivemind mcp install claude
 
-# 2. In a new terminal, go to your project and initialise it
+# 2. Go to your project and initialise it
 cd ~/projects/myapp
 hivemind init
 
-# 3. Open a new Claude Code session (memory hooks are now active)
+# 3. Open a new Claude Code session — memory hooks are now active
 ```
 
-### Run as a background service (recommended)
+No server to start. Claude Code spawns HiveMind as a subprocess automatically.
 
-Instead of keeping a terminal open, install HiveMind as a user-level service so it starts automatically on login:
+### Dashboard and REST API (optional)
+
+The `hivemind up` command starts an HTTP server with a web dashboard for browsing and managing memories, plus a REST API for custom integrations. This is not required for the MCP connection to work.
+
+```sh
+hivemind up          # MCP (HTTP) + REST API + dashboard
+hivemind up --headless  # MCP (HTTP) + REST API, no dashboard
+```
+
+To keep the dashboard available persistently, install HiveMind as a user-level service:
 
 ```sh
 hivemind service install
@@ -417,13 +424,11 @@ Detection failures are silent: a missing config file or unavailable CLI simply m
 
 ### Claude connects but session start fails
 
-If `hivemind_session_start` errors during a session, the most likely cause is that the server isn't running. Check:
+If `hivemind_session_start` errors during a session, the most likely causes are:
 
-```sh
-hivemind service status    # if installed as a service
-# or
-hivemind up                # to start manually
-```
+- **`hivemind` not found in PATH** — verify with `which hivemind`. If you installed via `cargo install`, make sure `~/.cargo/bin` is in your PATH.
+- **Database error** — check `HIVEMIND_DB_PATH` and ensure the directory is writable.
+- **Corrupt config** — run `hivemind status` in the project directory to validate `.hivemind.toml`.
 
 ### Session start succeeds but no memories are injected
 
@@ -469,13 +474,9 @@ No. Memories stored with `layer = "personal"` follow you, not the repo. Only `la
 
 The MCP endpoint (`/mcp`) and the REST API (`/api/v1/*`) are unauthenticated and bind to `127.0.0.1` by default, so only processes on your local machine can reach them. The `api_key` under `[sync]` is your auth token for the remote sync target (sqld token for self-hosted, account key for Oxhive hosted); it is used only during replication and has nothing to do with Claude's connection to HiveMind.
 
-**What happens if the server isn't running?**
-
-If `hivemind up` isn't running when Claude calls `hivemind_session_start`, the MCP call will fail. Claude will typically note this and continue the session without memory context. Your work isn't blocked, but you won't have the injected memories for that session.
-
 **Can I use HiveMind with agents other than Claude Code?**
 
-Yes, as long as the agent supports MCP over HTTP (streamable HTTP transport). The REST API is also fully accessible for custom integrations.
+Yes, as long as the agent supports MCP over stdio. Register it the same way you would any local stdio MCP server — point it at the `hivemind` binary. If your client only supports HTTP transport, run `hivemind up` to start the HTTP server and connect to `http://127.0.0.1:3456/mcp`. The REST API is also fully accessible for custom integrations.
 
 **Where is the database stored?**
 

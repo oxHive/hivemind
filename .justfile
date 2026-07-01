@@ -14,6 +14,10 @@ build:
 install:
   cargo install --path . --force
 
+# Build, install, and register with an AI client for local testing (default: claude)
+mcp-install client='claude': install
+  hivemind mcp install {{client}}
+
 release-major:
   just _release major
 
