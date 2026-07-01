@@ -7,7 +7,7 @@ Persistent memory for AI coding agents. HiveMind is a local MCP server that give
 ## How it works
 
 1. You register HiveMind with your AI client once: `hivemind mcp install claude`.
-2. Your AI client spawns HiveMind as a subprocess — no server to start or keep running.
+2. Your AI client spawns HiveMind as a subprocess. No server to start or keep running.
 3. At the start of every session, Claude automatically recalls the memories configured for your project.
 4. You ask Claude to store anything worth keeping. It never auto-stores.
 
@@ -83,7 +83,7 @@ cargo binstall oxhivemind       # download pre-built binary (faster)
 hivemind mcp install claude
 ```
 
-This runs `claude mcp add hivemind -- hivemind` for you, registering HiveMind as a stdio process. Claude Code spawns it on demand — no server needs to be running.
+This runs `claude mcp add hivemind -- hivemind` for you, registering HiveMind as a stdio process. Claude Code spawns it on demand with no server required.
 
 Verify the registration with:
 
@@ -213,7 +213,7 @@ hivemind mcp install claude
 cd ~/projects/myapp
 hivemind init
 
-# 3. Open a new Claude Code session — memory hooks are now active
+# 3. Open a new Claude Code session (memory hooks are now active)
 ```
 
 No server to start. Claude Code spawns HiveMind as a subprocess automatically.
@@ -434,9 +434,9 @@ Detection failures are silent: a missing config file or unavailable CLI simply m
 
 If `hivemind_session_start` errors during a session, the most likely causes are:
 
-- **`hivemind` not found in PATH** — verify with `which hivemind`. If you installed via `cargo install`, make sure `~/.cargo/bin` is in your PATH.
-- **Database error** — check `HIVEMIND_DB_PATH` and ensure the directory is writable.
-- **Corrupt config** — run `hivemind status` in the project directory to validate `.hivemind.toml`.
+- **`hivemind` not found in PATH**: verify with `which hivemind`. If you installed via `cargo install`, make sure `~/.cargo/bin` is in your PATH.
+- **Database error**: check `HIVEMIND_DB_PATH` and ensure the directory is writable.
+- **Corrupt config**: run `hivemind status` in the project directory to validate `.hivemind.toml`.
 
 ### Session start succeeds but no memories are injected
 
@@ -484,7 +484,7 @@ The MCP endpoint (`/mcp`) and the REST API (`/api/v1/*`) are unauthenticated and
 
 **Can I use HiveMind with agents other than Claude Code?**
 
-Yes, as long as the agent supports MCP over stdio. Register it the same way you would any local stdio MCP server — point it at the `hivemind` binary. If your client only supports HTTP transport, run `hivemind up` to start the HTTP server and connect to `http://127.0.0.1:3456/mcp`. The REST API is also fully accessible for custom integrations.
+Yes, as long as the agent supports MCP over stdio. Register it the same way you would any local stdio MCP server, pointing it at the `hivemind` binary. If your client only supports HTTP transport, run `hivemind up` to start the HTTP server and connect to `http://127.0.0.1:3456/mcp`. The REST API is also fully accessible for custom integrations.
 
 **Where is the database stored?**
 
