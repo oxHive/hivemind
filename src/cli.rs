@@ -1759,7 +1759,11 @@ mod tests {
         fs::write(&new_path, b"existing").unwrap();
         let result = cmd_migrate_inner(&legacy, &new_path, &mut std::io::Cursor::new(b""));
         assert!(result.is_ok());
-        assert_eq!(fs::read(&new_path).unwrap(), b"existing", "should not overwrite");
+        assert_eq!(
+            fs::read(&new_path).unwrap(),
+            b"existing",
+            "should not overwrite"
+        );
     }
 
     #[test]
