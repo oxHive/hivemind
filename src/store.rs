@@ -48,6 +48,17 @@ pub struct SqliteStore {
     conn: Connection,
 }
 
+/// Quote a raw user query for FTS5 MATCH: every whitespace-separated term is
+/// wrapped in double quotes (FTS5 string syntax) with embedded quotes doubled,
+/// so characters like / + ' - can never be parsed as FTS5 operators.
+pub(crate) fn fts_quote(query: &str) -> String {
+    query
+        .split_whitespace()
+        .map(|term| format!("\"{}\"", term.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 impl SqliteStore {
     pub fn new(conn: Connection) -> Self {
         Self { conn }
@@ -148,6 +159,10 @@ impl SqliteStore {
     }
 
     pub async fn search(&self, query: &str, limit: i64) -> Result<Vec<MemoryEntry>> {
+        let quoted = fts_quote(query);
+        if quoted.is_empty() {
+            return Ok(Vec::new());
+        }
         let mut rows = self
             .conn
             .query(
@@ -157,7 +172,7 @@ impl SqliteStore {
                  WHERE memories_fts MATCH ?1
                  ORDER BY rank
                  LIMIT ?2",
-                params![query, limit],
+                params![quoted, limit],
             )
             .await?;
         let mut results = Vec::new();
@@ -764,5 +779,33 @@ mod tests {
         let (s, _dir) = make_store().await;
         let result = s.get_conflict_by_id("conflict_nonexistent").await.unwrap();
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn fts_quote_wraps_terms_and_escapes_quotes() {
+        assert_eq!(fts_quote("project/myapp"), "\"project/myapp\"");
+        assert_eq!(fts_quote("c++ tips"), "\"c++\" \"tips\"");
+        assert_eq!(fts_quote("say \"hi\""), "\"say\" \"\"\"hi\"\"\"");
+        assert_eq!(fts_quote("   "), "");
+    }
+
+    #[tokio::test]
+    async fn search_tolerates_fts_special_characters() {
+        let (s, _dir) = make_store().await;
+        s.store("mem_sp", "project/myapp", "slash content", &[], None)
+            .await
+            .unwrap();
+        // must not error, and exact-ish term still matches via quoted FTS
+        let results = s.search("project/myapp", 10).await.unwrap();
+        assert_eq!(results.len(), 1);
+        // pure syntax garbage must not error either
+        assert!(s.search("c++ ((", 10).await.unwrap().len() <= 1);
+    }
+
+    #[tokio::test]
+    async fn resolve_recall_returns_empty_for_unmatched_special_title() {
+        let (s, _dir) = make_store().await;
+        let r = s.resolve_recall("does/not/exist").await.unwrap();
+        assert!(r.is_empty());
     }
 }

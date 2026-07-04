@@ -63,7 +63,20 @@ pub async fn execute_session_start(
     let mut skipped = Vec::new();
 
     for recall in &config.recalls {
-        let entries = store.resolve_recall(&recall.query).await?;
+        let entries = match store.resolve_recall(&recall.query).await {
+            Ok(entries) => entries,
+            Err(e) => {
+                tracing::warn!(
+                    "recall \"{}\" failed: {e:#}; treating as not found",
+                    recall.query
+                );
+                skipped.push(SkippedEntry {
+                    query: recall.query.clone(),
+                    reason: SkipReason::NotFound,
+                });
+                continue;
+            }
+        };
         if entries.is_empty() {
             skipped.push(SkippedEntry {
                 query: recall.query.clone(),
