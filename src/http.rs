@@ -23,14 +23,19 @@ static DASHBOARD: Dir = include_dir!("$CARGO_MANIFEST_DIR/dashboard/dist");
 pub fn app_router(
     store: Arc<SqliteStore>,
     sync: SyncSettings,
-    trigger: Arc<tokio::sync::Notify>,
+    notify_on_store: Option<Arc<tokio::sync::Notify>>,
     dashboard_origin: &str,
 ) -> Router {
     let mcp = StreamableHttpService::new(
         {
             let store = store.clone();
-            let trigger = trigger.clone();
-            move || Ok(HiveMind::with_sync(store.clone(), trigger.clone()))
+            let trigger = notify_on_store.clone();
+            move || {
+                Ok(match &trigger {
+                    Some(t) => HiveMind::with_sync(store.clone(), t.clone()),
+                    None => HiveMind::with_store(store.clone()),
+                })
+            }
         },
         Arc::new(LocalSessionManager::default()),
         Default::default(),
@@ -88,12 +93,12 @@ pub async fn run_up(
     store: Arc<SqliteStore>,
     settings: &ServerSettings,
     headless: bool,
+    notify_on_store: Option<Arc<tokio::sync::Notify>>,
 ) -> Result<()> {
-    let trigger = Arc::new(tokio::sync::Notify::new());
     let app = app_router(
         store.clone(),
         settings.sync.clone(),
-        trigger.clone(),
+        notify_on_store,
         &settings.cors_origin,
     );
 
@@ -185,7 +190,7 @@ mod tests {
         let app = app_router(
             store,
             crate::config::SyncSettings::default(),
-            Arc::new(tokio::sync::Notify::new()),
+            None,
             "http://127.0.0.1:3457",
         );
         let resp = app

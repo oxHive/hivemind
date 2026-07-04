@@ -53,9 +53,38 @@ async fn open_store(
 #[tokio::main]
 async fn run_server() -> Result<()> {
     init_tracing();
-    let sync_settings = config::SyncSettings::default();
-    let (store, _db) = open_store(&sync_settings).await?;
-    let service = HiveMind::with_store(store);
+    let settings =
+        config::load_server_settings(&config::global_config_path()).unwrap_or_else(|e| {
+            tracing::warn!("could not load global config ({e:#}); using defaults");
+            config::ServerSettings {
+                host: "127.0.0.1".into(),
+                port: 3456,
+                dashboard_port: 3457,
+                api_url: "http://127.0.0.1:3456".into(),
+                cors_origin: "http://127.0.0.1:3457".into(),
+                sync: config::SyncSettings::default(),
+            }
+        });
+    let (store, database) = open_store(&settings.sync).await?;
+    let service = if settings.sync.enabled {
+        let trigger = Arc::new(Notify::new());
+        tokio::spawn(sync::run_sync_loop(
+            Arc::new(database),
+            store.clone(),
+            settings.sync.interval_seconds,
+            settings.sync.sync_on_startup,
+            trigger.clone(),
+        ));
+        if settings.sync.sync_on_store {
+            HiveMind::with_sync(store, trigger)
+        } else {
+            HiveMind::with_store(store)
+        }
+    } else {
+        // keep the DB handle alive for the lifetime of the server
+        let _database = database;
+        HiveMind::with_store(store)
+    };
 
     tracing::info!("HiveMind MCP server starting on stdio");
     let server = service
@@ -72,15 +101,24 @@ async fn run_up(headless: bool) -> Result<()> {
     let settings = config::load_server_settings(&config::global_config_path())?;
     let (store, database) = open_store(&settings.sync).await?;
 
+    let mut notify_on_store = None;
     if settings.sync.enabled {
-        let db_arc = Arc::new(database);
         let trigger = Arc::new(Notify::new());
-        let interval = settings.sync.interval_seconds;
-        let on_startup = settings.sync.sync_on_startup;
-        tokio::spawn(sync::run_sync_loop(db_arc, interval, on_startup, trigger));
+        tokio::spawn(sync::run_sync_loop(
+            Arc::new(database),
+            store.clone(),
+            settings.sync.interval_seconds,
+            settings.sync.sync_on_startup,
+            trigger.clone(),
+        ));
+        if settings.sync.sync_on_store {
+            notify_on_store = Some(trigger);
+        }
+    } else {
+        let _database = database;
     }
 
-    http::run_up(store, &settings, headless).await
+    http::run_up(store, &settings, headless, notify_on_store).await
 }
 
 #[tokio::main]
