@@ -20,6 +20,12 @@ pub struct MemoryStoreInput {
     /// Optional token count hint
     #[serde(default)]
     pub token_count: Option<i64>,
+    /// Memory layer: "personal" (follows the user) or "workspace" (project-scoped). Default: workspace.
+    #[serde(default)]
+    pub layer: Option<String>,
+    /// Memory type: "preference" | "project" | "history". Default: project.
+    #[serde(default)]
+    pub memory_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -146,6 +152,17 @@ impl HiveMind {
     pub async fn do_memory_store(&self, p: MemoryStoreInput) -> Result<CallToolResult, ErrorData> {
         let id = format!("mem_{}", uuid::Uuid::new_v4().simple());
         let title = p.title.clone();
+
+        let layer = p.layer.as_deref().unwrap_or("workspace");
+        layer
+            .parse::<crate::model::Layer>()
+            .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
+
+        let memory_type = p.memory_type.as_deref().unwrap_or("project");
+        memory_type
+            .parse::<crate::model::MemoryType>()
+            .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
+
         self.store
             .store(&crate::store::NewMemoryRow {
                 id: &id,
@@ -153,8 +170,8 @@ impl HiveMind {
                 content: &p.content,
                 tags: &p.tags,
                 token_count: p.token_count,
-                layer: "workspace",
-                memory_type: "project",
+                layer,
+                memory_type,
             })
             .await
             .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
@@ -193,6 +210,8 @@ impl HiveMind {
                 "tags": e.tags,
                 "created_at": e.created_at,
                 "updated_at": e.updated_at,
+                "layer": e.layer,
+                "memory_type": e.memory_type,
             }))),
         }
     }
@@ -223,6 +242,7 @@ impl HiveMind {
                     "title": h.title,
                     "snippet": snippet,
                     "tags": h.tags,
+                    "layer": h.layer,
                 })
             })
             .collect();
@@ -497,8 +517,8 @@ impl HiveMind {
              {}\n\n\
              ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\
              Analyze the memories above and identify meaningful connections not yet captured.\n\
-             For each suggested connection, call POST /api/v1/edges with a JSON body:\n\
-               {{ \"source_id\": \"<id>\", \"target_id\": \"<id>\", \"relationship\": \"<type>\" }}\n\
+             For each suggested connection, call the memory_store_edge tool with:\n\
+               source_id, target_id, and relationship.\n\
              Relationship types: shares_tag | applies_to | pairs_with | used_in | related_to | custom\n\
              Suggest 3–7 connections. Focus on cross-domain insights.",
             memories.len(),
@@ -591,6 +611,7 @@ impl HiveMind {
                     "title": l.entry.title,
                     "content": l.entry.content,
                     "tags": l.entry.tags,
+                    "layer": l.entry.layer,
                 })
             })
             .collect();
@@ -872,6 +893,8 @@ mod tests {
                 content: "prefer tabs over spaces".to_string(),
                 tags: vec!["style".to_string()],
                 token_count: None,
+                layer: None,
+                memory_type: None,
             })
             .await
             .unwrap();
@@ -888,6 +911,8 @@ mod tests {
                 content: "use clippy, rustfmt, and deny warnings".to_string(),
                 tags: vec!["rust".to_string()],
                 token_count: None,
+                layer: None,
+                memory_type: None,
             })
             .await
             .unwrap();
@@ -917,6 +942,8 @@ mod tests {
             content: "domain at center, infra at edge".to_string(),
             tags: vec!["architecture".to_string()],
             token_count: None,
+            layer: None,
+            memory_type: None,
         })
         .await
         .unwrap();
@@ -966,6 +993,8 @@ mod tests {
             content: "we standardized on pgx v5 for postgres".to_string(),
             tags: vec!["golang".to_string(), "database".to_string()],
             token_count: None,
+            layer: None,
+            memory_type: None,
         })
         .await
         .unwrap();
@@ -1015,6 +1044,8 @@ mod tests {
                 content: "uses docker swarm".to_string(),
                 tags: vec!["devops".to_string()],
                 token_count: None,
+                layer: None,
+                memory_type: None,
             })
             .await
             .unwrap();
@@ -1070,6 +1101,8 @@ mod tests {
             content: "use uber/zap, sqlc, pgx v5".to_string(),
             tags: vec!["golang".to_string()],
             token_count: None,
+            layer: None,
+            memory_type: None,
         })
         .await
         .unwrap();
@@ -1140,6 +1173,8 @@ mod tests {
             content: "c".to_string(),
             tags: vec![],
             token_count: None,
+            layer: None,
+            memory_type: None,
         })
         .await
         .unwrap();
@@ -1156,6 +1191,8 @@ mod tests {
             content: "use uber/zap and chi router".to_string(),
             tags: vec!["golang".to_string()],
             token_count: None,
+            layer: None,
+            memory_type: None,
         })
         .await
         .unwrap();
@@ -1178,6 +1215,8 @@ mod tests {
                 content: "use clippy and rustfmt".to_string(),
                 tags: vec!["rust".to_string()],
                 token_count: None,
+                layer: None,
+                memory_type: None,
             })
             .await
             .unwrap();
@@ -1216,6 +1255,8 @@ mod tests {
                 content: "c".to_string(),
                 tags: vec![],
                 token_count: None,
+                layer: None,
+                memory_type: None,
             })
             .await
             .unwrap();
@@ -1250,6 +1291,8 @@ mod tests {
             content: "use uber/zap and chi router".to_string(),
             tags: vec!["golang".to_string()],
             token_count: None,
+            layer: None,
+            memory_type: None,
         })
         .await
         .unwrap();
@@ -1258,6 +1301,8 @@ mod tests {
             content: "prometheus, grafana, loki".to_string(),
             tags: vec!["observability".to_string()],
             token_count: None,
+            layer: None,
+            memory_type: None,
         })
         .await
         .unwrap();
@@ -1268,9 +1313,51 @@ mod tests {
             "should include memory titles"
         );
         assert!(
-            text.contains("/api/v1/edges"),
-            "should instruct Claude to use the REST API to create edges"
+            text.contains("memory_store_edge"),
+            "should instruct Claude to use the memory_store_edge tool to create edges"
         );
+    }
+
+    #[tokio::test]
+    async fn memory_store_accepts_layer_and_rejects_invalid() {
+        let (hm, _dir) = test_hivemind().await;
+        let ok = hm
+            .do_memory_store(MemoryStoreInput {
+                title: "t".into(),
+                content: "c".into(),
+                tags: vec![],
+                token_count: None,
+                layer: Some("personal".into()),
+                memory_type: Some("preference".into()),
+            })
+            .await
+            .unwrap();
+        let id = ok.structured_content.unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let recalled = hm
+            .do_memory_recall(MemoryRecallInput {
+                id: Some(id),
+                title: None,
+            })
+            .await
+            .unwrap();
+        let val = recalled.structured_content.unwrap();
+        assert_eq!(val["layer"], "personal");
+        assert_eq!(val["memory_type"], "preference");
+
+        let bad = hm
+            .do_memory_store(MemoryStoreInput {
+                title: "t".into(),
+                content: "c".into(),
+                tags: vec![],
+                token_count: None,
+                layer: Some("cosmic".into()),
+                memory_type: None,
+            })
+            .await;
+        assert!(bad.is_err());
     }
 
     #[tokio::test]
@@ -1282,6 +1369,8 @@ mod tests {
                 content: "stale content".to_string(),
                 tags: vec![],
                 token_count: None,
+                layer: None,
+                memory_type: None,
             })
             .await
             .unwrap();
@@ -1371,6 +1460,8 @@ mod tests {
             content: "c".to_string(),
             tags: vec![],
             token_count: None,
+            layer: None,
+            memory_type: None,
         })
         .await
         .unwrap();
@@ -1413,6 +1504,8 @@ mod tests {
             content: "use tabs".to_string(),
             tags: vec!["style".to_string()],
             token_count: None,
+            layer: None,
+            memory_type: None,
         })
         .await
         .unwrap();
@@ -1431,6 +1524,8 @@ mod tests {
                 content: "original".to_string(),
                 tags: vec!["keep".to_string()],
                 token_count: None,
+                layer: None,
+                memory_type: None,
             })
             .await
             .unwrap();
@@ -1492,6 +1587,8 @@ mod tests {
                 content: "delete me".to_string(),
                 tags: vec!["tmp".to_string()],
                 token_count: None,
+                layer: None,
+                memory_type: None,
             })
             .await
             .unwrap();
