@@ -1,7 +1,7 @@
 use crate::store::SqliteStore;
 use rmcp::{
     handler::server::wrapper::Parameters,
-    model::{CallToolResult, ContentBlock, ErrorData, PromptMessage, Role},
+    model::{CallToolResult, ErrorData, PromptMessage, Role},
     prompt, prompt_handler, prompt_router, schemars, tool, tool_handler, tool_router,
 };
 use serde::Deserialize;
@@ -690,16 +690,32 @@ impl HiveMind {
         &self,
         Parameters(p): Parameters<MemoryStoreEdgeInput>,
     ) -> Result<CallToolResult, ErrorData> {
-        self.store
+        use crate::model::EdgeCreate;
+        match self
+            .store
             .create_edge(&p.source_id, &p.target_id, &p.relationship)
             .await
-            .map(|edge| {
-                CallToolResult::success(vec![ContentBlock::text(format!(
-                    "Edge created: {} --[{}]--> {}",
-                    edge.source_id, edge.relationship, edge.target_id
-                ))])
-            })
-            .map_err(|e| ErrorData::internal_error(e.to_string(), None))
+        {
+            Ok(EdgeCreate::Created(id)) => Ok(CallToolResult::structured(json!({
+                "created": true, "id": id,
+                "source_id": p.source_id, "target_id": p.target_id, "relationship": p.relationship,
+            }))),
+            Ok(EdgeCreate::Duplicate) => Ok(CallToolResult::structured(json!({
+                "created": false, "reason": "an edge between these memories with this relationship already exists",
+            }))),
+            Ok(EdgeCreate::MissingEndpoint) => Err(ErrorData::invalid_params(
+                "source_id and target_id must both be existing, distinct memory IDs",
+                None,
+            )),
+            Ok(EdgeCreate::InvalidRelationship) => Err(ErrorData::invalid_params(
+                format!(
+                    "relationship must be one of: {}",
+                    crate::store::VALID_RELATIONSHIPS.join(", ")
+                ),
+                None,
+            )),
+            Err(e) => Err(ErrorData::internal_error(e.to_string(), None)),
+        }
     }
 }
 
@@ -799,6 +815,7 @@ impl rmcp::ServerHandler for HiveMind {
 mod tests {
     use super::*;
     use crate::{config::SyncSettings, db, store::SqliteStore};
+    use rmcp::model::ContentBlock;
     use tempfile::TempDir;
 
     async fn test_hivemind() -> (HiveMind, TempDir) {
