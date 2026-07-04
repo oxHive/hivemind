@@ -498,12 +498,19 @@ async fn server_status(
     Extension(sync): Extension<SyncSettings>,
 ) -> Result<Json<Value>, ApiError> {
     let count = store.count().await?;
+    let last_synced_at = store
+        .get_meta("last_synced_at")
+        .await?
+        .and_then(|v| v.parse::<i64>().ok());
+    let conflict_count = store.pending_conflict_count().await?;
     Ok(Json(json!({
         "version": env!("CARGO_PKG_VERSION"),
         "memory_count": count,
         "db_path": crate::db::resolve_db_path(),
         "sync": {
             "enabled": sync.enabled,
+            "last_synced_at": last_synced_at,
+            "conflict_count": conflict_count,
         },
     })))
 }
@@ -989,5 +996,18 @@ mod tests {
         .await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(body["status"], "dismissed");
+    }
+
+    #[tokio::test]
+    async fn status_includes_sync_details() {
+        let (app, store, _dir) = test_router_with_store().await;
+        store
+            .set_meta("last_synced_at", "1751600000")
+            .await
+            .unwrap();
+        let (st, body) = req(app, "GET", "/api/v1/status", None).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(body["sync"]["last_synced_at"], 1751600000_i64);
+        assert_eq!(body["sync"]["conflict_count"], 0);
     }
 }
