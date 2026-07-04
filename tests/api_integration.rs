@@ -249,3 +249,144 @@ async fn feedback_create_and_list() {
     let (_, items) = req(app, "GET", "/api/v1/feedback", None).await;
     assert_eq!(items["count"], 1);
 }
+
+// ── Delete-all / export / import ─────────────────────────────────────────────
+
+#[tokio::test]
+async fn delete_all_clears_memories() {
+    let (app, _dir) = test_app().await;
+    req(
+        app.clone(),
+        "POST",
+        "/api/v1/memories",
+        Some(mem_body("a", "x", &[])),
+    )
+    .await;
+    let (status, body) = req(app.clone(), "DELETE", "/api/v1/memories/all", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["deleted"], 1);
+    let (_, list) = req(app, "GET", "/api/v1/memories", None).await;
+    assert_eq!(list["count"], 0);
+}
+
+#[tokio::test]
+async fn export_returns_memories_and_edges() {
+    let (app, _dir) = test_app().await;
+    req(
+        app.clone(),
+        "POST",
+        "/api/v1/memories",
+        Some(mem_body("m", "c", &["t"])),
+    )
+    .await;
+    let (status, body) = req(app, "GET", "/api/v1/export", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["memories"].as_array().unwrap().len(), 1);
+    assert!(body["edges"].is_array());
+    assert!(body["version"].is_string());
+}
+
+#[tokio::test]
+async fn import_creates_memories() {
+    let (app, _dir) = test_app().await;
+    let dump = json!({
+        "memories": [
+            { "id": "mem_imported", "title": "imported", "content": "c", "tags": [] }
+        ],
+        "edges": []
+    });
+    let (status, body) = req(app.clone(), "POST", "/api/v1/import", Some(dump)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["imported_memories"], 1);
+    let (_, one) = req(app, "GET", "/api/v1/memories/mem_imported", None).await;
+    assert_eq!(one["title"], "imported");
+}
+
+// ── Edge / feedback status patch, filters ────────────────────────────────────
+
+#[tokio::test]
+async fn patch_edge_status_validates_and_updates() {
+    let (app, _dir) = test_app().await;
+    let (_, a) = req(
+        app.clone(),
+        "POST",
+        "/api/v1/memories",
+        Some(mem_body("a", "x", &[])),
+    )
+    .await;
+    let (_, b) = req(
+        app.clone(),
+        "POST",
+        "/api/v1/memories",
+        Some(mem_body("b", "y", &[])),
+    )
+    .await;
+    let (aid, bid) = (
+        a["id"].as_str().unwrap().to_string(),
+        b["id"].as_str().unwrap().to_string(),
+    );
+    let (_, edge) = req(
+        app.clone(),
+        "POST",
+        "/api/v1/edges",
+        Some(json!({ "source_id": aid, "target_id": bid, "relationship": "related_to" })),
+    )
+    .await;
+    let edge_id = edge["id"].as_str().unwrap().to_string();
+
+    let (status, _) = req(
+        app.clone(),
+        "PATCH",
+        &format!("/api/v1/edges/{edge_id}"),
+        Some(json!({ "status": "bogus" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    let (status, body) = req(
+        app,
+        "PATCH",
+        &format!("/api/v1/edges/{edge_id}"),
+        Some(json!({ "status": "pending" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["status"], "pending");
+}
+
+#[tokio::test]
+async fn feedback_status_filter_narrows_results() {
+    let (app, _dir) = test_app().await;
+    let (_, mem) = req(
+        app.clone(),
+        "POST",
+        "/api/v1/memories",
+        Some(mem_body("m", "c", &[])),
+    )
+    .await;
+    let mid = mem["id"].as_str().unwrap().to_string();
+    let (_, fb) = req(
+        app.clone(),
+        "POST",
+        "/api/v1/feedback",
+        Some(json!({ "memory_id": mid, "signal": "outdated" })),
+    )
+    .await;
+    let fb_id = fb["id"].as_str().unwrap().to_string();
+
+    req(
+        app.clone(),
+        "PATCH",
+        &format!("/api/v1/feedback/{fb_id}"),
+        Some(json!({ "status": "dismissed" })),
+    )
+    .await;
+
+    let (status, pending) = req(app.clone(), "GET", "/api/v1/feedback?status=pending", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(pending["count"], 0);
+
+    let (status, dismissed) = req(app, "GET", "/api/v1/feedback?status=dismissed", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(dismissed["count"], 1);
+}
