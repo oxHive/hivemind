@@ -48,6 +48,12 @@ pub enum Command {
     },
     /// Migrate the database from the legacy ~/.hivemind/ path to XDG data dir
     Migrate,
+    /// Print the session-start memory context for the current project (for hooks and scripts)
+    SessionStart {
+        /// Emit machine-readable JSON instead of tagged text
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -938,6 +944,59 @@ pub fn cmd_status() -> Result<()> {
     Ok(())
 }
 
+pub fn cmd_session_start(json: bool) -> Result<()> {
+    let cwd = std::env::current_dir()?;
+    if crate::config::discover_project_root(&cwd).is_none() {
+        return Ok(()); // no project config: stay silent so hooks can run unconditionally
+    }
+    let db_path = crate::db::resolve_db_path();
+    let out = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(async {
+            let settings =
+                crate::config::load_server_settings(&crate::config::global_config_path())
+                    .map(|s| s.sync)
+                    .unwrap_or_default();
+            let database = crate::db::open_database(&settings, &db_path).await?;
+            let conn = database.connect()?;
+            crate::db::run_migrations(&conn).await?;
+            let store = crate::store::SqliteStore::new(conn);
+            let config = crate::config::load_config(&cwd)?;
+            let result = crate::session::execute_session_start(&config, &store).await?;
+            Ok::<_, anyhow::Error>(render_session_start(&result, json))
+        })?;
+    if !out.is_empty() {
+        println!("{out}");
+    }
+    Ok(())
+}
+
+fn render_session_start(result: &crate::session::SessionStartResult, json: bool) -> String {
+    if json {
+        return serde_json::to_string_pretty(&result.to_json()).unwrap_or_default();
+    }
+    if result.loaded.is_empty() && result.skipped.is_empty() {
+        return String::new();
+    }
+    let mut out = format!(
+        "<hivemind-context project=\"{}\" tokens=\"{}/{}\">\n",
+        result.project, result.used_tokens, result.max_tokens
+    );
+    for l in &result.loaded {
+        out.push_str(&format!("\n## {}\n{}\n", l.entry.title, l.entry.content));
+    }
+    out.push_str("</hivemind-context>\n");
+    for s in &result.skipped {
+        out.push_str(&format!(
+            "hivemind: skipped recall \"{}\" ({})\n",
+            s.query,
+            s.reason.as_str()
+        ));
+    }
+    out
+}
+
 pub(crate) fn do_migrate_copy(legacy: &Path, new_path: &Path) -> Result<()> {
     if let Some(dir) = new_path.parent() {
         std::fs::create_dir_all(dir)?;
@@ -1109,6 +1168,74 @@ pub async fn render_status(
 mod tests {
     use super::*;
     use std::fs;
+
+    fn sample_result(loaded: bool, skipped: bool) -> crate::session::SessionStartResult {
+        use crate::session::{LoadedEntry, SkipReason, SkippedEntry};
+        use crate::store::MemoryEntry;
+
+        let loaded_vec = if loaded {
+            vec![LoadedEntry {
+                entry: MemoryEntry {
+                    id: "mem_1".to_string(),
+                    title: "pref a".to_string(),
+                    content: "short content a".to_string(),
+                    tags: vec![],
+                    created_at: 0,
+                    updated_at: 0,
+                    token_count: None,
+                    layer: "workspace".to_string(),
+                    memory_type: "project".to_string(),
+                },
+                tokens: 5,
+                source: crate::config::RecallSource::Project,
+            }]
+        } else {
+            vec![]
+        };
+        let skipped_vec = if skipped {
+            vec![SkippedEntry {
+                query: "missing".to_string(),
+                reason: SkipReason::NotFound,
+            }]
+        } else {
+            vec![]
+        };
+        crate::session::SessionStartResult {
+            project: "test-proj".to_string(),
+            loaded: loaded_vec,
+            skipped: skipped_vec,
+            used_tokens: 5,
+            max_tokens: 2000,
+            memories_recalled: if loaded { 1 } else { 0 },
+        }
+    }
+
+    #[test]
+    fn render_session_start_text_wraps_in_hivemind_context_tags() {
+        let result = sample_result(true, false);
+        let out = render_session_start(&result, false);
+        assert!(out.contains("<hivemind-context"));
+        assert!(out.contains("pref a"));
+        assert!(out.contains("short content a"));
+    }
+
+    #[test]
+    fn render_session_start_text_empty_when_nothing_loaded_or_skipped() {
+        let result = sample_result(false, false);
+        let out = render_session_start(&result, false);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn render_session_start_json_parses_and_matches_shape() {
+        let result = sample_result(true, true);
+        let out = render_session_start(&result, true);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["project"], "test-proj");
+        assert_eq!(v["context_loaded"][0]["title"], "pref a");
+        assert_eq!(v["skipped"][0]["query"], "missing");
+        assert_eq!(v["budget"]["max_tokens"], 2000);
+    }
 
     #[test]
     fn write_atomic_creates_file_with_content() {

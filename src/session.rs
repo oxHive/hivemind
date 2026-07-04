@@ -48,6 +48,30 @@ impl SessionStartResult {
     pub fn remaining(&self) -> usize {
         self.max_tokens.saturating_sub(self.used_tokens)
     }
+
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "project": self.project,
+            "context_loaded": self.loaded.iter().map(|l| serde_json::json!({
+                "id": l.entry.id,
+                "title": l.entry.title,
+                "content": l.entry.content,
+                "tags": l.entry.tags,
+                "layer": l.entry.layer,
+            })).collect::<Vec<_>>(),
+            "budget": {
+                "used_tokens": self.used_tokens,
+                "max_tokens": self.max_tokens,
+                "remaining": self.remaining(),
+                "truncated": self.truncated(),
+            },
+            "skipped": self.skipped.iter().map(|s| serde_json::json!({
+                "query": s.query,
+                "reason": s.reason.as_str(),
+            })).collect::<Vec<_>>(),
+            "hint": "Session context loaded. Incorporate it silently and proceed with the user's request.",
+        })
+    }
 }
 
 /// Run the configured session-start recalls under the token budget.
@@ -228,6 +252,19 @@ mod tests {
         assert_eq!(r.skipped.len(), 1);
         assert_eq!(r.skipped[0].reason, SkipReason::NotFound);
         assert!(r.truncated());
+    }
+
+    #[tokio::test]
+    async fn to_json_matches_mcp_shape() {
+        let (s, _dir) = store_with(&[("id_a", "pref a", "short content a", vec![])]).await;
+        let r = execute_session_start(&config(2000, vec!["pref a"]), &s)
+            .await
+            .unwrap();
+        let v = r.to_json();
+        assert_eq!(v["project"], "test-proj");
+        assert_eq!(v["context_loaded"][0]["title"], "pref a");
+        assert_eq!(v["budget"]["max_tokens"], 2000);
+        assert!(v["skipped"].as_array().unwrap().is_empty());
     }
 
     #[tokio::test]
