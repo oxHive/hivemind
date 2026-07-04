@@ -191,31 +191,35 @@ impl SqliteStore {
         Ok(results)
     }
 
-    pub async fn update(&self, id: &str, content: &str, tags: &[String]) -> Result<bool> {
+    pub async fn update(
+        &self,
+        id: &str,
+        title: &str,
+        content: &str,
+        tags: &[String],
+    ) -> Result<bool> {
         let now = chrono_now();
-        let changed = self
-            .conn
+        let token_count = crate::budget::count_entry_tokens(title, content) as i64;
+        let tx = self.conn.transaction().await?;
+        let changed = tx
             .execute(
-                "UPDATE memories SET content = ?1, updated_at = ?2 WHERE id = ?3",
-                params![content, now, id],
+                "UPDATE memories SET title = ?1, content = ?2, updated_at = ?3, token_count = ?4 WHERE id = ?5",
+                params![title, content, now, token_count, id],
             )
             .await?;
         if changed == 0 {
             return Ok(false);
         }
-
-        self.conn
-            .execute("DELETE FROM memory_tags WHERE memory_id = ?1", params![id])
+        tx.execute("DELETE FROM memory_tags WHERE memory_id = ?1", params![id])
             .await?;
-
         for tag in tags {
-            self.conn
-                .execute(
-                    "INSERT OR IGNORE INTO memory_tags (memory_id, tag) VALUES (?1, ?2)",
-                    params![id, tag.as_str()],
-                )
-                .await?;
+            tx.execute(
+                "INSERT OR IGNORE INTO memory_tags (memory_id, tag) VALUES (?1, ?2)",
+                params![id, tag.as_str()],
+            )
+            .await?;
         }
+        tx.commit().await?;
         Ok(true)
     }
 
@@ -666,7 +670,7 @@ mod tests {
     async fn update_returns_false_for_missing_id() {
         let (s, _dir) = make_store().await;
         let updated = s
-            .update("mem_nonexistent", "new content", &[])
+            .update("mem_nonexistent", "title", "new content", &[])
             .await
             .unwrap();
         assert!(!updated);
@@ -866,6 +870,22 @@ mod tests {
             1,
             "one shares_tag edge between the pair, either direction"
         );
+    }
+
+    #[tokio::test]
+    async fn update_changes_title_and_recounts_tokens() {
+        let (s, _dir) = make_store().await;
+        let tags: Vec<String> = vec![];
+        s.store(&test_row("mem_t", "old title", "short", &tags))
+            .await
+            .unwrap();
+        let before = s.recall_by_id("mem_t").await.unwrap().unwrap();
+        let long = "much longer content ".repeat(50);
+        let ok = s.update("mem_t", "new title", &long, &tags).await.unwrap();
+        assert!(ok);
+        let after = s.recall_by_id("mem_t").await.unwrap().unwrap();
+        assert_eq!(after.title, "new title");
+        assert!(after.token_count.unwrap() > before.token_count.unwrap());
     }
 
     #[test]

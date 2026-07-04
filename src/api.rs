@@ -174,6 +174,7 @@ async fn get_memory(
 
 #[derive(Deserialize)]
 struct PatchMemoryBody {
+    title: Option<String>,
     content: Option<String>,
     tags: Option<Vec<String>>,
 }
@@ -188,13 +189,18 @@ async fn patch_memory(
         .recall_by_id(&id)
         .await?
         .ok_or_else(|| not_found(format!("no memory {id}")))?;
+    let title = b.title.as_deref().unwrap_or(&current.title);
     let content = b.content.as_deref().unwrap_or(&current.content);
     let tags = b.tags.as_deref().unwrap_or(&current.tags);
-    let updated = store.update(&id, content, tags).await?;
+    let updated = store.update(&id, title, content, tags).await?;
     if !updated {
         return Err(not_found(format!("no memory {id}")));
     }
-    Ok(Json(json!({ "updated": true, "id": id })))
+    let entry = store
+        .recall_by_id(&id)
+        .await?
+        .ok_or_else(|| not_found(format!("no memory {id}")))?;
+    Ok(Json(entry_json(&entry)))
 }
 
 async fn delete_memory(
@@ -450,7 +456,7 @@ mod tests {
         )
         .await;
         assert_eq!(st, StatusCode::OK);
-        assert_eq!(patched["updated"], true);
+        assert_eq!(patched["content"], "now pgx v6");
 
         let (st, _) = req(
             app.clone(),
@@ -462,6 +468,30 @@ mod tests {
         assert_eq!(st, StatusCode::OK);
         let (st, _) = req(app.clone(), "GET", &format!("/api/v1/memories/{id}"), None).await;
         assert_eq!(st, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn patch_memory_updates_title_and_returns_full_entry() {
+        let (app, _dir) = test_router().await;
+        let (_, created) = req(
+            app.clone(),
+            "POST",
+            "/api/v1/memories",
+            Some(memory_body("old", "content", &[])),
+        )
+        .await;
+        let id = created["id"].as_str().unwrap().to_string();
+        let (st, body) = req(
+            app.clone(),
+            "PATCH",
+            &format!("/api/v1/memories/{id}"),
+            Some(json!({ "title": "renamed" })),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(body["title"], "renamed");
+        assert_eq!(body["content"], "content");
+        assert!(body["updated_at"].is_i64());
     }
 
     #[tokio::test]
