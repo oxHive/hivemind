@@ -60,6 +60,15 @@ pub struct SqliteStore {
     conn: Connection,
 }
 
+pub const VALID_RELATIONSHIPS: &[&str] = &[
+    "shares_tag",
+    "applies_to",
+    "pairs_with",
+    "used_in",
+    "related_to",
+    "custom",
+];
+
 /// Quote a raw user query for FTS5 MATCH: every whitespace-separated term is
 /// wrapped in double quotes (FTS5 string syntax) with embedded quotes doubled,
 /// so characters like / + ' - can never be parsed as FTS5 operators.
@@ -302,24 +311,53 @@ impl SqliteStore {
         source_id: &str,
         target_id: &str,
         relationship: &str,
-    ) -> Result<EdgeEntry> {
+    ) -> Result<crate::model::EdgeCreate> {
+        use crate::model::EdgeCreate;
+        if !VALID_RELATIONSHIPS.contains(&relationship) || source_id == target_id {
+            return Ok(EdgeCreate::InvalidRelationship);
+        }
+        let endpoints: i64 = {
+            let mut rows = self
+                .conn
+                .query(
+                    "SELECT COUNT(*) FROM memories WHERE id IN (?1, ?2)",
+                    params![source_id, target_id],
+                )
+                .await?;
+            rows.next().await?.unwrap().get(0)?
+        };
+        if endpoints != 2 {
+            return Ok(EdgeCreate::MissingEndpoint);
+        }
+        let dup: i64 = {
+            let mut rows = self
+                .conn
+                .query(
+                    "SELECT COUNT(*) FROM edges WHERE relationship = ?3
+                     AND ((source_id = ?1 AND target_id = ?2) OR (source_id = ?2 AND target_id = ?1))",
+                    params![source_id, target_id, relationship],
+                )
+                .await?;
+            rows.next().await?.unwrap().get(0)?
+        };
+        if dup > 0 {
+            return Ok(EdgeCreate::Duplicate);
+        }
         let id = format!("edge_{}", uuid::Uuid::new_v4().simple());
-        let now = chrono_now();
         self.conn
             .execute(
                 "INSERT INTO edges (id, source_id, target_id, relationship, status, created_at)
                  VALUES (?1, ?2, ?3, ?4, 'active', ?5)",
-                params![id.as_str(), source_id, target_id, relationship, now],
+                params![
+                    id.as_str(),
+                    source_id,
+                    target_id,
+                    relationship,
+                    chrono_now()
+                ],
             )
             .await?;
-        Ok(EdgeEntry {
-            id,
-            source_id: source_id.to_string(),
-            target_id: target_id.to_string(),
-            relationship: relationship.to_string(),
-            status: "active".to_string(),
-            created_at: now,
-        })
+        Ok(EdgeCreate::Created(id))
     }
 
     pub async fn set_edge_status(&self, id: &str, status: &str) -> Result<bool> {
@@ -720,10 +758,13 @@ mod tests {
         s.store(&test_row("mem_p", "P", "body", &[])).await.unwrap();
         s.store(&test_row("mem_q", "Q", "body", &[])).await.unwrap();
         let edge = s.create_edge("mem_p", "mem_q", "pairs_with").await.unwrap();
-        let ok = s.set_edge_status(&edge.id, "inactive").await.unwrap();
+        let crate::model::EdgeCreate::Created(edge_id) = edge else {
+            panic!("expected EdgeCreate::Created");
+        };
+        let ok = s.set_edge_status(&edge_id, "inactive").await.unwrap();
         assert!(ok);
         let edges = s.list_edges(None).await.unwrap();
-        let updated = edges.iter().find(|e| e.id == edge.id).unwrap();
+        let updated = edges.iter().find(|e| e.id == edge_id).unwrap();
         assert_eq!(updated.status, "inactive");
     }
 
@@ -735,6 +776,33 @@ mod tests {
             .await
             .unwrap();
         assert!(!ok);
+    }
+
+    #[tokio::test]
+    async fn create_edge_reports_duplicate_and_missing_endpoint() {
+        use crate::model::EdgeCreate;
+        let (s, _dir) = make_store().await;
+        let tags: Vec<String> = vec![];
+        s.store(&test_row("mem_1", "A", "a", &tags)).await.unwrap();
+        s.store(&test_row("mem_2", "B", "b", &tags)).await.unwrap();
+
+        let first = s.create_edge("mem_1", "mem_2", "related_to").await.unwrap();
+        assert!(matches!(first, EdgeCreate::Created(_)));
+        // duplicate, even reversed
+        assert_eq!(
+            s.create_edge("mem_2", "mem_1", "related_to").await.unwrap(),
+            EdgeCreate::Duplicate
+        );
+        assert_eq!(
+            s.create_edge("mem_1", "mem_ghost", "related_to")
+                .await
+                .unwrap(),
+            EdgeCreate::MissingEndpoint
+        );
+        assert_eq!(
+            s.create_edge("mem_1", "mem_2", "banana").await.unwrap(),
+            EdgeCreate::InvalidRelationship
+        );
     }
 
     #[tokio::test]

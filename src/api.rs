@@ -257,10 +257,25 @@ async fn create_edge(
     State(store): State<Store>,
     Json(b): Json<CreateEdgeBody>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
-    let edge = store
+    use crate::model::EdgeCreate;
+    match store
         .create_edge(&b.source_id, &b.target_id, &b.relationship)
-        .await?;
-    Ok((StatusCode::CREATED, Json(json!({ "id": edge.id }))))
+        .await?
+    {
+        EdgeCreate::Created(id) => Ok((StatusCode::CREATED, Json(json!({ "id": id })))),
+        EdgeCreate::Duplicate => Err(ApiError(StatusCode::CONFLICT, "edge already exists".into())),
+        EdgeCreate::MissingEndpoint => Err(ApiError(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "source_id and target_id must be existing, distinct memory IDs".into(),
+        )),
+        EdgeCreate::InvalidRelationship => Err(ApiError(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!(
+                "invalid relationship; valid: {}",
+                crate::store::VALID_RELATIONSHIPS.join(", ")
+            ),
+        )),
+    }
 }
 
 // --- feedback ---
