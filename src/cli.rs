@@ -241,6 +241,7 @@ pub fn scaffold(
             GLOBAL_CLAUDE_BLOCK,
         )?,
         write_if_absent(&config_dir.join("config.toml"), GLOBAL_CONFIG)?,
+        ensure_claude_settings_hook(project_root)?,
     ];
 
     Ok(report)
@@ -307,6 +308,36 @@ fn append_block_if_absent(
     body.push_str(block);
     write_atomic(path, &body)?;
     Ok((path.to_path_buf(), "created"))
+}
+
+/// Merge a SessionStart hook running `hivemind session-start` into the
+/// project's .claude/settings.json, preserving all existing content.
+fn ensure_claude_settings_hook(project_root: &Path) -> Result<(PathBuf, &'static str)> {
+    let path = project_root.join(".claude").join("settings.json");
+    let existing = std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".to_string());
+    if existing.contains("hivemind session-start") {
+        return Ok((path, "exists"));
+    }
+    let mut root: serde_json::Value =
+        serde_json::from_str(&existing).unwrap_or(serde_json::json!({}));
+    let obj = root
+        .as_object_mut()
+        .ok_or_else(|| anyhow::anyhow!("{} root is not a JSON object", path.display()))?;
+    let hooks = obj.entry("hooks").or_insert(serde_json::json!({}));
+    let session_start = hooks
+        .as_object_mut()
+        .ok_or_else(|| anyhow::anyhow!("\"hooks\" is not a JSON object"))?
+        .entry("SessionStart")
+        .or_insert(serde_json::json!([]));
+    session_start
+        .as_array_mut()
+        .ok_or_else(|| anyhow::anyhow!("\"SessionStart\" is not a JSON array"))?
+        .push(serde_json::json!({
+            "hooks": [{ "type": "command", "command": "hivemind session-start" }]
+        }));
+    std::fs::create_dir_all(path.parent().unwrap())?;
+    write_atomic(&path, &serde_json::to_string_pretty(&root)?)?;
+    Ok((path, "created"))
 }
 
 fn project_toml(name: &str) -> String {
@@ -379,6 +410,10 @@ If .hivemind.toml does not exist:
 - Tools remain available on demand.
 - If the user seems to be starting a new project, suggest: \"Run `hivemind init`
   to set up memory hooks for this project.\"
+
+If a <hivemind-context> block is already present in the session context (injected
+by the SessionStart hook), do NOT call hivemind_session_start again; use the
+injected context directly.
 
 ## Suggest storing — never auto-store
 
@@ -1919,6 +1954,40 @@ mod tests {
         let result = cmd_migrate_inner(&legacy, &new_path, &mut std::io::Cursor::new(b"y\n"));
         assert!(result.is_ok());
         assert_eq!(fs::read(&new_path).unwrap(), b"sqlite data");
+    }
+
+    // ── ensure_claude_settings_hook ──────────────────────────────────────────
+
+    #[test]
+    fn scaffold_writes_claude_session_start_hook() {
+        let proj = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let cfg = tempfile::tempdir().unwrap();
+        scaffold(proj.path(), home.path(), cfg.path()).unwrap();
+        let settings =
+            fs::read_to_string(proj.path().join(".claude").join("settings.json")).unwrap();
+        assert!(settings.contains("SessionStart"));
+        assert!(settings.contains("hivemind session-start"));
+        // idempotent
+        scaffold(proj.path(), home.path(), cfg.path()).unwrap();
+        let again = fs::read_to_string(proj.path().join(".claude").join("settings.json")).unwrap();
+        assert_eq!(again.matches("hivemind session-start").count(), 1);
+    }
+
+    #[test]
+    fn hook_merge_preserves_existing_settings() {
+        let proj = tempfile::tempdir().unwrap();
+        let dir = proj.path().join(".claude");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("settings.json"),
+            r#"{"permissions":{"allow":["Bash(ls:*)"]}}"#,
+        )
+        .unwrap();
+        ensure_claude_settings_hook(proj.path()).unwrap();
+        let merged = fs::read_to_string(dir.join("settings.json")).unwrap();
+        assert!(merged.contains("Bash(ls:*)"), "existing keys preserved");
+        assert!(merged.contains("hivemind session-start"));
     }
 
     // ── env-mutation guard ───────────────────────────────────────────────────
