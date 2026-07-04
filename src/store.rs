@@ -50,14 +50,21 @@ pub struct ConflictEntry {
     pub id: String,
     pub memory_id: String,
     pub remote_content: String,
+    pub local_content: String,
     pub remote_updated_at: i64,
     pub local_updated_at: i64,
     pub status: String,
     pub created_at: i64,
 }
 
+pub struct JournalRow {
+    pub memory_id: String,
+    pub content: String,
+    pub updated_at: i64,
+}
+
 pub struct SqliteStore {
-    conn: Connection,
+    pub(crate) conn: Connection,
 }
 
 pub const VALID_RELATIONSHIPS: &[&str] = &[
@@ -136,6 +143,17 @@ impl SqliteStore {
             )
             .await?;
         }
+
+        // Journal the write
+        tx.execute(
+            "INSERT INTO sync_journal (memory_id, content, updated_at, recorded_at)
+             VALUES (?1, ?2, ?3, ?3)
+             ON CONFLICT(memory_id) DO UPDATE SET
+               content = excluded.content, updated_at = excluded.updated_at, recorded_at = excluded.recorded_at",
+            params![m.id, m.content, now],
+        )
+        .await?;
+
         tx.commit().await?;
         Ok(())
     }
@@ -228,6 +246,17 @@ impl SqliteStore {
             )
             .await?;
         }
+
+        // Journal the write
+        tx.execute(
+            "INSERT INTO sync_journal (memory_id, content, updated_at, recorded_at)
+             VALUES (?1, ?2, ?3, ?3)
+             ON CONFLICT(memory_id) DO UPDATE SET
+               content = excluded.content, updated_at = excluded.updated_at, recorded_at = excluded.recorded_at",
+            params![id, content, now],
+        )
+        .await?;
+
         tx.commit().await?;
         Ok(true)
     }
@@ -470,6 +499,18 @@ impl SqliteStore {
     }
 
     pub async fn resolve_conflict(&self, id: &str, resolution: &str) -> Result<bool> {
+        let Some(conflict) = self.get_conflict_by_id(id).await? else {
+            return Ok(false);
+        };
+        if conflict.status != "pending" {
+            return Ok(false);
+        }
+        if resolution == "keep_local"
+            && let Some(mem) = self.recall_by_id(&conflict.memory_id).await?
+        {
+            self.update(&mem.id, &mem.title, &conflict.local_content, &mem.tags)
+                .await?;
+        }
         let changed = self
             .conn
             .execute(
@@ -480,11 +521,90 @@ impl SqliteStore {
         Ok(changed > 0)
     }
 
+    pub async fn take_journal(&self) -> Result<Vec<JournalRow>> {
+        let mut rows = self
+            .conn
+            .query(
+                "SELECT memory_id, content, updated_at FROM sync_journal",
+                (),
+            )
+            .await?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().await? {
+            out.push(JournalRow {
+                memory_id: row.get(0)?,
+                content: row.get(1)?,
+                updated_at: row.get(2)?,
+            });
+        }
+        Ok(out)
+    }
+
+    pub async fn detect_conflicts(&self, journal: &[JournalRow]) -> Result<usize> {
+        let mut found = 0usize;
+        for j in journal {
+            let current = self.recall_by_id(&j.memory_id).await?;
+            if let Some(cur) = current
+                && cur.content != j.content
+            {
+                self.write_conflict(
+                    &j.memory_id,
+                    &cur.content,
+                    &j.content,
+                    cur.updated_at,
+                    j.updated_at,
+                )
+                .await?;
+                found += 1;
+            }
+            self.conn
+                .execute(
+                    "DELETE FROM sync_journal WHERE memory_id = ?1",
+                    params![j.memory_id.as_str()],
+                )
+                .await?;
+        }
+        Ok(found)
+    }
+
+    pub async fn pending_conflict_count(&self) -> Result<i64> {
+        let mut rows = self
+            .conn
+            .query(
+                "SELECT COUNT(*) FROM conflicts WHERE status = 'pending'",
+                (),
+            )
+            .await?;
+        Ok(rows.next().await?.unwrap().get(0)?)
+    }
+
+    pub async fn set_meta(&self, key: &str, value: &str) -> Result<()> {
+        self.conn
+            .execute(
+                "INSERT INTO _meta (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![key, value],
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub async fn get_meta(&self, key: &str) -> Result<Option<String>> {
+        let mut rows = self
+            .conn
+            .query("SELECT value FROM _meta WHERE key = ?1", params![key])
+            .await?;
+        Ok(match rows.next().await? {
+            Some(row) => Some(row.get(0)?),
+            None => None,
+        })
+    }
+
     pub async fn list_conflicts(&self, status: Option<&str>) -> Result<Vec<ConflictEntry>> {
         let mut rows = if let Some(status) = status {
             self.conn
                 .query(
-                    "SELECT id, memory_id, remote_content, remote_updated_at, local_updated_at, status, created_at
+                    "SELECT id, memory_id, remote_content, local_content, remote_updated_at, local_updated_at, status, created_at
                      FROM conflicts WHERE status = ?1 ORDER BY created_at DESC",
                     params![status],
                 )
@@ -492,7 +612,7 @@ impl SqliteStore {
         } else {
             self.conn
                 .query(
-                    "SELECT id, memory_id, remote_content, remote_updated_at, local_updated_at, status, created_at
+                    "SELECT id, memory_id, remote_content, local_content, remote_updated_at, local_updated_at, status, created_at
                      FROM conflicts ORDER BY created_at DESC",
                     (),
                 )
@@ -504,10 +624,11 @@ impl SqliteStore {
                 id: row.get(0)?,
                 memory_id: row.get(1)?,
                 remote_content: row.get(2)?,
-                remote_updated_at: row.get(3)?,
-                local_updated_at: row.get(4)?,
-                status: row.get(5)?,
-                created_at: row.get(6)?,
+                local_content: row.get(3)?,
+                remote_updated_at: row.get(4)?,
+                local_updated_at: row.get(5)?,
+                status: row.get(6)?,
+                created_at: row.get(7)?,
             });
         }
         Ok(results)
@@ -517,7 +638,7 @@ impl SqliteStore {
         let mut rows = self
             .conn
             .query(
-                "SELECT id, memory_id, remote_content, remote_updated_at, local_updated_at, status, created_at
+                "SELECT id, memory_id, remote_content, local_content, remote_updated_at, local_updated_at, status, created_at
                  FROM conflicts WHERE id = ?1",
                 params![id],
             )
@@ -527,21 +648,22 @@ impl SqliteStore {
                 id: row.get(0)?,
                 memory_id: row.get(1)?,
                 remote_content: row.get(2)?,
-                remote_updated_at: row.get(3)?,
-                local_updated_at: row.get(4)?,
-                status: row.get(5)?,
-                created_at: row.get(6)?,
+                local_content: row.get(3)?,
+                remote_updated_at: row.get(4)?,
+                local_updated_at: row.get(5)?,
+                status: row.get(6)?,
+                created_at: row.get(7)?,
             }))
         } else {
             Ok(None)
         }
     }
 
-    #[cfg(test)]
     pub async fn write_conflict(
         &self,
         memory_id: &str,
         remote_content: &str,
+        local_content: &str,
         remote_updated_at: i64,
         local_updated_at: i64,
     ) -> Result<ConflictEntry> {
@@ -549,15 +671,16 @@ impl SqliteStore {
         let now = chrono_now();
         self.conn
             .execute(
-                "INSERT INTO conflicts (id, memory_id, remote_content, remote_updated_at, local_updated_at, status, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6)",
-                params![id.as_str(), memory_id, remote_content, remote_updated_at, local_updated_at, now],
+                "INSERT INTO conflicts (id, memory_id, remote_content, local_content, remote_updated_at, local_updated_at, status, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7)",
+                params![id.as_str(), memory_id, remote_content, local_content, remote_updated_at, local_updated_at, now],
             )
             .await?;
         Ok(ConflictEntry {
             id,
             memory_id: memory_id.to_string(),
             remote_content: remote_content.to_string(),
+            local_content: local_content.to_string(),
             remote_updated_at,
             local_updated_at,
             status: "pending".to_string(),
@@ -727,6 +850,7 @@ mod tests {
             .write_conflict(
                 "mem_c1",
                 "remote content",
+                "local content",
                 entry.updated_at + 1,
                 entry.updated_at,
             )
@@ -894,9 +1018,15 @@ mod tests {
             .await
             .unwrap();
         let entry = s.recall_by_id("mem_h").await.unwrap().unwrap();
-        s.write_conflict("mem_h", "remote", entry.updated_at + 1, entry.updated_at)
-            .await
-            .unwrap();
+        s.write_conflict(
+            "mem_h",
+            "remote",
+            "local",
+            entry.updated_at + 1,
+            entry.updated_at,
+        )
+        .await
+        .unwrap();
         let conflicts = s.list_conflicts(None).await.unwrap();
         assert_eq!(conflicts.len(), 1);
         assert_eq!(conflicts[0].memory_id, "mem_h");
@@ -1021,5 +1151,68 @@ mod tests {
         let (s, _dir) = make_store().await;
         let r = s.resolve_recall("does/not/exist").await.unwrap();
         assert!(r.is_empty());
+    }
+
+    #[tokio::test]
+    async fn detect_conflicts_records_overwritten_local_write() {
+        let (s, _dir) = make_store().await;
+        let tags: Vec<String> = vec![];
+        s.store(&test_row("mem_c", "C", "local version", &tags))
+            .await
+            .unwrap();
+        let journal = s.take_journal().await.unwrap();
+        assert_eq!(journal.len(), 1);
+        // simulate remote frames landing during sync: content replaced out of band
+        s.conn.execute(
+            "UPDATE memories SET content = 'remote version', updated_at = updated_at + 10 WHERE id = 'mem_c'", (),
+        ).await.unwrap();
+        let found = s.detect_conflicts(&journal).await.unwrap();
+        assert_eq!(found, 1);
+        let conflicts = s.list_conflicts(Some("pending")).await.unwrap();
+        assert_eq!(conflicts[0].remote_content, "remote version");
+        assert_eq!(conflicts[0].local_content, "local version");
+        assert!(
+            s.take_journal().await.unwrap().is_empty(),
+            "journal cleared after detection"
+        );
+    }
+
+    #[tokio::test]
+    async fn detect_conflicts_is_silent_when_local_write_survived() {
+        let (s, _dir) = make_store().await;
+        let tags: Vec<String> = vec![];
+        s.store(&test_row("mem_ok", "OK", "content", &tags))
+            .await
+            .unwrap();
+        let journal = s.take_journal().await.unwrap();
+        let found = s.detect_conflicts(&journal).await.unwrap();
+        assert_eq!(found, 0);
+        assert!(s.list_conflicts(Some("pending")).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn resolve_keep_local_restores_content() {
+        let (s, _dir) = make_store().await;
+        let tags: Vec<String> = vec![];
+        s.store(&test_row("mem_r", "R", "remote won", &tags))
+            .await
+            .unwrap();
+        let c = s
+            .write_conflict("mem_r", "remote won", "my local text", 20, 10)
+            .await
+            .unwrap();
+        assert!(s.resolve_conflict(&c.id, "keep_local").await.unwrap());
+        let mem = s.recall_by_id("mem_r").await.unwrap().unwrap();
+        assert_eq!(mem.content, "my local text");
+        let after = s.get_conflict_by_id(&c.id).await.unwrap().unwrap();
+        assert_eq!(after.status, "keep_local");
+    }
+
+    #[tokio::test]
+    async fn meta_roundtrip() {
+        let (s, _dir) = make_store().await;
+        assert!(s.get_meta("last_synced_at").await.unwrap().is_none());
+        s.set_meta("last_synced_at", "1234").await.unwrap();
+        assert_eq!(s.get_meta("last_synced_at").await.unwrap().unwrap(), "1234");
     }
 }
