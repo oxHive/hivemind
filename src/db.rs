@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use libsql::Builder;
+use libsql::{Builder, params};
 
 use crate::config::SyncSettings;
 
@@ -67,44 +67,56 @@ pub async fn init_connection(conn: &libsql::Connection) -> Result<()> {
     Ok(())
 }
 
-pub async fn run_migrations(conn: &libsql::Connection) -> Result<()> {
-    // Enable WAL mode and foreign-key enforcement before any DDL runs.
-    init_connection(conn).await?;
+const MIGRATIONS: &[(&str, &str)] = &[
+    (
+        "V1__initial_schema",
+        include_str!("../migrations/V1__initial_schema.sql"),
+    ),
+    (
+        "V2__layers_conflicts_meta",
+        include_str!("../migrations/V2__layers_conflicts_meta.sql"),
+    ),
+];
 
+pub async fn run_migrations(conn: &libsql::Connection) -> Result<()> {
+    init_connection(conn).await?;
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL);",
     )
     .await?;
 
-    let memories_exists: i64 = {
-        let mut rows = conn
-            .query(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='memories'",
-                (),
-            )
-            .await?;
-        rows.next().await?.unwrap().get(0)?
-    };
-
-    let v1_applied: i64 = {
-        let mut rows = conn
-            .query(
-                "SELECT COUNT(*) FROM _migrations WHERE name='V1__initial_schema'",
-                (),
-            )
-            .await?;
-        rows.next().await?.unwrap().get(0)?
-    };
-
-    if v1_applied == 0 {
-        if memories_exists == 0 {
-            conn.execute_batch(include_str!("../migrations/V1__initial_schema.sql"))
+    for (name, sql) in MIGRATIONS {
+        let applied: i64 = {
+            let mut rows = conn
+                .query(
+                    "SELECT COUNT(*) FROM _migrations WHERE name = ?1",
+                    params![*name],
+                )
+                .await?;
+            rows.next().await?.unwrap().get(0)?
+        };
+        if applied > 0 {
+            continue;
+        }
+        // Pre-migration-tracking installs already have the V1 tables; record
+        // V1 as applied without re-running it in that case.
+        let skip_execute = *name == "V1__initial_schema" && {
+            let mut rows = conn
+                .query(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='memories'",
+                    (),
+                )
+                .await?;
+            rows.next().await?.unwrap().get::<i64>(0)? > 0
+        };
+        if !skip_execute {
+            conn.execute_batch(sql)
                 .await
-                .context("failed to apply V1 schema migration")?;
+                .with_context(|| format!("failed to apply migration {name}"))?;
         }
         conn.execute(
-            "INSERT INTO _migrations (name, applied_at) VALUES ('V1__initial_schema', unixepoch())",
-            (),
+            "INSERT INTO _migrations (name, applied_at) VALUES (?1, unixepoch())",
+            params![*name],
         )
         .await?;
     }
@@ -182,5 +194,36 @@ mod tests {
         let result = open_database(&sync, path.to_str().unwrap()).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("remote_url"));
+    }
+
+    #[tokio::test]
+    async fn migrations_add_v2_columns_and_tables() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.db");
+        let sync = crate::config::SyncSettings::default();
+        let db = open_database(&sync, path.to_str().unwrap()).await.unwrap();
+        let conn = db.connect().unwrap();
+        run_migrations(&conn).await.unwrap();
+        // idempotent
+        run_migrations(&conn).await.unwrap();
+
+        let mut rows = conn
+            .query("SELECT layer, memory_type FROM memories LIMIT 0", ())
+            .await
+            .expect("layer/memory_type columns must exist");
+        assert!(rows.next().await.unwrap().is_none());
+
+        conn.query("SELECT local_content FROM conflicts LIMIT 0", ())
+            .await
+            .unwrap();
+        conn.query(
+            "SELECT memory_id, content, updated_at, recorded_at FROM sync_journal LIMIT 0",
+            (),
+        )
+        .await
+        .unwrap();
+        conn.query("SELECT key, value FROM _meta LIMIT 0", ())
+            .await
+            .unwrap();
     }
 }
