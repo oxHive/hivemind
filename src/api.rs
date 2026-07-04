@@ -68,12 +68,23 @@ pub fn router(store: Store, sync: SyncSettings, dashboard_origin: &str) -> Route
     Router::new()
         .route("/api/v1/memories", get(list_memories).post(create_memory))
         .route(
+            "/api/v1/memories/all",
+            axum::routing::delete(delete_all_memories),
+        )
+        .route(
             "/api/v1/memories/{id}",
             get(get_memory).patch(patch_memory).delete(delete_memory),
         )
+        .route("/api/v1/export", get(export))
+        .route("/api/v1/import", post(import))
         .route("/api/v1/search", get(search))
         .route("/api/v1/edges", get(list_edges).post(create_edge))
+        .route("/api/v1/edges/{id}", axum::routing::patch(patch_edge))
         .route("/api/v1/feedback", get(list_feedback).post(create_feedback))
+        .route(
+            "/api/v1/feedback/{id}",
+            axum::routing::patch(patch_feedback),
+        )
         .route("/api/v1/conflicts", get(list_conflicts))
         .route(
             "/api/v1/conflicts/{id}/resolve",
@@ -109,6 +120,8 @@ fn entry_json(e: &crate::store::MemoryEntry) -> Value {
         "created_at": e.created_at,
         "updated_at": e.updated_at,
         "token_count": e.token_count,
+        "layer": e.layer,
+        "memory_type": e.memory_type,
     })
 }
 
@@ -141,12 +154,30 @@ struct CreateMemoryBody {
     tags: Vec<String>,
     #[serde(default)]
     token_count: Option<i64>,
+    #[serde(default)]
+    layer: Option<String>,
+    #[serde(default)]
+    memory_type: Option<String>,
 }
 
 async fn create_memory(
     State(store): State<Store>,
     Json(b): Json<CreateMemoryBody>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let layer = match &b.layer {
+        Some(l) => l
+            .parse::<crate::model::Layer>()
+            .map_err(|e| ApiError(StatusCode::UNPROCESSABLE_ENTITY, e.to_string()))?
+            .to_string(),
+        None => "workspace".to_string(),
+    };
+    let memory_type = match &b.memory_type {
+        Some(t) => t
+            .parse::<crate::model::MemoryType>()
+            .map_err(|e| ApiError(StatusCode::UNPROCESSABLE_ENTITY, e.to_string()))?
+            .to_string(),
+        None => "project".to_string(),
+    };
     let id = format!("mem_{}", uuid::Uuid::new_v4().simple());
     store
         .store(&crate::store::NewMemoryRow {
@@ -155,8 +186,8 @@ async fn create_memory(
             content: &b.content,
             tags: &b.tags,
             token_count: b.token_count,
-            layer: "workspace",
-            memory_type: "project",
+            layer: &layer,
+            memory_type: &memory_type,
         })
         .await?;
     Ok((StatusCode::CREATED, Json(json!({ "id": id }))))
@@ -211,6 +242,100 @@ async fn delete_memory(
         return Err(not_found(format!("no memory {id}")));
     }
     Ok(Json(json!({ "deleted": true, "id": id })))
+}
+
+async fn delete_all_memories(State(store): State<Store>) -> Result<Json<Value>, ApiError> {
+    let deleted = store.delete_all().await?;
+    Ok(Json(json!({ "deleted": deleted })))
+}
+
+// --- export / import ---
+
+async fn export(State(store): State<Store>) -> Result<Json<Value>, ApiError> {
+    let memories = store.list_memories(100_000, 0).await?;
+    let edges = store.list_edges(None).await?;
+    Ok(Json(json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "exported_at": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+        "memories": memories.iter().map(entry_json).collect::<Vec<_>>(),
+        "edges": edges,
+    })))
+}
+
+#[derive(Deserialize)]
+struct ImportBody {
+    #[serde(default)]
+    memories: Vec<ImportMemory>,
+    #[serde(default)]
+    edges: Vec<ImportEdge>,
+}
+
+#[derive(Deserialize)]
+struct ImportMemory {
+    id: String,
+    title: String,
+    content: String,
+    #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default)]
+    token_count: Option<i64>,
+    #[serde(default = "default_layer")]
+    layer: String,
+    #[serde(default = "default_memory_type")]
+    memory_type: String,
+}
+
+fn default_layer() -> String {
+    "workspace".into()
+}
+
+fn default_memory_type() -> String {
+    "project".into()
+}
+
+#[derive(Deserialize)]
+struct ImportEdge {
+    source_id: String,
+    target_id: String,
+    relationship: String,
+}
+
+async fn import(
+    State(store): State<Store>,
+    Json(b): Json<ImportBody>,
+) -> Result<Json<Value>, ApiError> {
+    let mut mem_count = 0usize;
+    for m in &b.memories {
+        store
+            .store(&crate::store::NewMemoryRow {
+                id: &m.id,
+                title: &m.title,
+                content: &m.content,
+                tags: &m.tags,
+                token_count: m.token_count,
+                layer: &m.layer,
+                memory_type: &m.memory_type,
+            })
+            .await?;
+        mem_count += 1;
+    }
+    let mut edge_count = 0usize;
+    for e in &b.edges {
+        if matches!(
+            store
+                .create_edge(&e.source_id, &e.target_id, &e.relationship)
+                .await?,
+            crate::model::EdgeCreate::Created(_)
+        ) {
+            edge_count += 1;
+        }
+    }
+    Ok(Json(
+        json!({ "imported_memories": mem_count, "imported_edges": edge_count }),
+    ))
 }
 
 // --- search ---
@@ -278,18 +403,43 @@ async fn create_edge(
     }
 }
 
+#[derive(Deserialize)]
+struct StatusBody {
+    status: String,
+}
+
+async fn patch_edge(
+    State(store): State<Store>,
+    Path(id): Path<String>,
+    Json(b): Json<StatusBody>,
+) -> Result<Json<Value>, ApiError> {
+    if !["active", "pending", "rejected"].contains(&b.status.as_str()) {
+        return Err(ApiError(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "status must be active|pending|rejected".into(),
+        ));
+    }
+    if !store.set_edge_status(&id, &b.status).await? {
+        return Err(not_found(format!("no edge {id}")));
+    }
+    Ok(Json(json!({ "id": id, "status": b.status })))
+}
+
 // --- feedback ---
 
 #[derive(Deserialize)]
 struct FeedbackParams {
     memory_id: Option<String>,
+    status: Option<String>,
 }
 
 async fn list_feedback(
     State(store): State<Store>,
     Query(p): Query<FeedbackParams>,
 ) -> Result<Json<Value>, ApiError> {
-    let items = store.list_feedback(p.memory_id.as_deref()).await?;
+    let items = store
+        .list_feedback(p.memory_id.as_deref(), p.status.as_deref())
+        .await?;
     Ok(Json(json!({ "count": items.len(), "items": items })))
 }
 
@@ -311,10 +461,35 @@ async fn create_feedback(
     Ok((StatusCode::CREATED, Json(json!({ "id": entry.id }))))
 }
 
+async fn patch_feedback(
+    State(store): State<Store>,
+    Path(id): Path<String>,
+    Json(b): Json<StatusBody>,
+) -> Result<Json<Value>, ApiError> {
+    if !["pending", "resolved", "dismissed"].contains(&b.status.as_str()) {
+        return Err(ApiError(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "status must be pending|resolved|dismissed".into(),
+        ));
+    }
+    if !store.set_feedback_status(&id, &b.status).await? {
+        return Err(not_found(format!("no feedback {id}")));
+    }
+    Ok(Json(json!({ "id": id, "status": b.status })))
+}
+
 // --- conflicts + status ---
 
-async fn list_conflicts(State(store): State<Store>) -> Result<Json<Value>, ApiError> {
-    let items = store.list_conflicts().await?;
+#[derive(Deserialize)]
+struct ConflictsParams {
+    status: Option<String>,
+}
+
+async fn list_conflicts(
+    State(store): State<Store>,
+    Query(p): Query<ConflictsParams>,
+) -> Result<Json<Value>, ApiError> {
+    let items = store.list_conflicts(p.status.as_deref()).await?;
     Ok(Json(json!({ "count": items.len(), "conflicts": items })))
 }
 
@@ -337,6 +512,7 @@ async fn server_status(
 
 #[derive(Deserialize)]
 struct ResolveBody {
+    #[serde(alias = "action")]
     resolution: String,
 }
 
@@ -345,6 +521,12 @@ async fn resolve_conflict_handler(
     Path(id): Path<String>,
     Json(b): Json<ResolveBody>,
 ) -> Result<Json<Value>, ApiError> {
+    if !["keep_local", "keep_remote"].contains(&b.resolution.as_str()) {
+        return Err(ApiError(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "resolution must be keep_local|keep_remote".into(),
+        ));
+    }
     if !store.resolve_conflict(&id, &b.resolution).await? {
         return Err(not_found(format!(
             "conflict {id} not found or already resolved"
@@ -689,9 +871,123 @@ mod tests {
             app,
             "POST",
             "/api/v1/conflicts/cfl_missing/resolve",
-            Some(json!({ "resolution": "keep" })),
+            Some(json!({ "resolution": "keep_local" })),
         )
         .await;
         assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn delete_all_memories_clears_store() {
+        let (app, _dir) = test_router().await;
+        req(
+            app.clone(),
+            "POST",
+            "/api/v1/memories",
+            Some(memory_body("a", "x", &[])),
+        )
+        .await;
+        req(
+            app.clone(),
+            "POST",
+            "/api/v1/memories",
+            Some(memory_body("b", "y", &[])),
+        )
+        .await;
+        let (st, body) = req(app.clone(), "DELETE", "/api/v1/memories/all", None).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(body["deleted"], 2);
+        let (_, list) = req(app, "GET", "/api/v1/memories", None).await;
+        assert_eq!(list["count"], 0);
+    }
+
+    #[tokio::test]
+    async fn export_import_roundtrip() {
+        let (app, _dir) = test_router().await;
+        req(
+            app.clone(),
+            "POST",
+            "/api/v1/memories",
+            Some(memory_body("m1", "c1", &["t"])),
+        )
+        .await;
+        let (st, dump) = req(app.clone(), "GET", "/api/v1/export", None).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(dump["memories"].as_array().unwrap().len(), 1);
+
+        let (app2, _dir2) = test_router().await;
+        let (st, res) = req(app2.clone(), "POST", "/api/v1/import", Some(dump)).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(res["imported_memories"], 1);
+        let (_, list) = req(app2, "GET", "/api/v1/memories", None).await;
+        assert_eq!(list["memories"][0]["title"], "m1");
+    }
+
+    #[tokio::test]
+    async fn patch_edge_and_feedback_status() {
+        let (app, store, _dir) = test_router_with_store().await;
+        let tags: Vec<String> = vec![];
+        store
+            .store(&crate::store::NewMemoryRow {
+                id: "mem_a",
+                title: "A",
+                content: "a",
+                tags: &tags,
+                token_count: None,
+                layer: "workspace",
+                memory_type: "project",
+            })
+            .await
+            .unwrap();
+        store
+            .store(&crate::store::NewMemoryRow {
+                id: "mem_b",
+                title: "B",
+                content: "b",
+                tags: &tags,
+                token_count: None,
+                layer: "workspace",
+                memory_type: "project",
+            })
+            .await
+            .unwrap();
+        let crate::model::EdgeCreate::Created(edge_id) = store
+            .create_edge("mem_a", "mem_b", "related_to")
+            .await
+            .unwrap()
+        else {
+            panic!()
+        };
+        let (st, body) = req(
+            app.clone(),
+            "PATCH",
+            &format!("/api/v1/edges/{edge_id}"),
+            Some(json!({"status": "rejected"})),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(body["status"], "rejected");
+        let (st, _) = req(
+            app.clone(),
+            "PATCH",
+            &format!("/api/v1/edges/{edge_id}"),
+            Some(json!({"status": "bogus"})),
+        )
+        .await;
+        assert_eq!(st, StatusCode::UNPROCESSABLE_ENTITY);
+
+        let fb = store
+            .create_feedback("mem_a", "outdated", None)
+            .await
+            .unwrap();
+        let (st, body) = req(
+            app,
+            "PATCH",
+            &format!("/api/v1/feedback/{}", fb.id),
+            Some(json!({"status": "dismissed"})),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(body["status"], "dismissed");
     }
 }

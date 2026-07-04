@@ -530,13 +530,11 @@ impl HiveMind {
     }
 
     async fn do_review_feedback_prompt(&self) -> Result<Vec<PromptMessage>, ErrorData> {
-        let items = self
+        let open_items = self
             .store
-            .list_feedback(None)
+            .list_feedback(None, Some("pending"))
             .await
             .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
-
-        let open_items: Vec<_> = items.iter().filter(|i| i.status == "pending").collect();
 
         if open_items.is_empty() {
             return Ok(vec![PromptMessage::new_text(
@@ -1279,7 +1277,7 @@ mod tests {
             "should confirm the flag"
         );
 
-        let feedback = hm.store.list_feedback(None).await.unwrap();
+        let feedback = hm.store.list_feedback(None, None).await.unwrap();
         assert_eq!(feedback.len(), 1, "feedback record should be created");
     }
 

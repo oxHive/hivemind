@@ -250,6 +250,11 @@ impl SqliteStore {
         Ok(results)
     }
 
+    pub async fn delete_all(&self) -> Result<i64> {
+        let changed = self.conn.execute("DELETE FROM memories", ()).await?;
+        Ok(changed as i64)
+    }
+
     pub async fn count(&self) -> Result<i64> {
         let mut rows = self.conn.query("SELECT COUNT(*) FROM memories", ()).await?;
         let row = rows.next().await?.ok_or_else(|| anyhow!("no count row"))?;
@@ -396,23 +401,48 @@ impl SqliteStore {
         })
     }
 
-    pub async fn list_feedback(&self, memory_id: Option<&str>) -> Result<Vec<FeedbackEntry>> {
-        let mut rows = if let Some(mid) = memory_id {
-            self.conn
-                .query(
-                    "SELECT id, memory_id, signal, note, status, created_at
-                     FROM feedback WHERE memory_id = ?1 ORDER BY created_at DESC",
-                    params![mid],
-                )
-                .await?
-        } else {
-            self.conn
-                .query(
-                    "SELECT id, memory_id, signal, note, status, created_at
-                     FROM feedback ORDER BY created_at DESC",
-                    (),
-                )
-                .await?
+    pub async fn list_feedback(
+        &self,
+        memory_id: Option<&str>,
+        status: Option<&str>,
+    ) -> Result<Vec<FeedbackEntry>> {
+        let mut rows = match (memory_id, status) {
+            (Some(mid), Some(status)) => {
+                self.conn
+                    .query(
+                        "SELECT id, memory_id, signal, note, status, created_at
+                         FROM feedback WHERE memory_id = ?1 AND status = ?2 ORDER BY created_at DESC",
+                        params![mid, status],
+                    )
+                    .await?
+            }
+            (Some(mid), None) => {
+                self.conn
+                    .query(
+                        "SELECT id, memory_id, signal, note, status, created_at
+                         FROM feedback WHERE memory_id = ?1 ORDER BY created_at DESC",
+                        params![mid],
+                    )
+                    .await?
+            }
+            (None, Some(status)) => {
+                self.conn
+                    .query(
+                        "SELECT id, memory_id, signal, note, status, created_at
+                         FROM feedback WHERE status = ?1 ORDER BY created_at DESC",
+                        params![status],
+                    )
+                    .await?
+            }
+            (None, None) => {
+                self.conn
+                    .query(
+                        "SELECT id, memory_id, signal, note, status, created_at
+                         FROM feedback ORDER BY created_at DESC",
+                        (),
+                    )
+                    .await?
+            }
         };
         let mut results = Vec::new();
         while let Some(row) = rows.next().await? {
@@ -450,15 +480,24 @@ impl SqliteStore {
         Ok(changed > 0)
     }
 
-    pub async fn list_conflicts(&self) -> Result<Vec<ConflictEntry>> {
-        let mut rows = self
-            .conn
-            .query(
-                "SELECT id, memory_id, remote_content, remote_updated_at, local_updated_at, status, created_at
-                 FROM conflicts ORDER BY created_at DESC",
-                (),
-            )
-            .await?;
+    pub async fn list_conflicts(&self, status: Option<&str>) -> Result<Vec<ConflictEntry>> {
+        let mut rows = if let Some(status) = status {
+            self.conn
+                .query(
+                    "SELECT id, memory_id, remote_content, remote_updated_at, local_updated_at, status, created_at
+                     FROM conflicts WHERE status = ?1 ORDER BY created_at DESC",
+                    params![status],
+                )
+                .await?
+        } else {
+            self.conn
+                .query(
+                    "SELECT id, memory_id, remote_content, remote_updated_at, local_updated_at, status, created_at
+                     FROM conflicts ORDER BY created_at DESC",
+                    (),
+                )
+                .await?
+        };
         let mut results = Vec::new();
         while let Some(row) = rows.next().await? {
             results.push(ConflictEntry {
@@ -819,8 +858,8 @@ mod tests {
             .await
             .unwrap();
 
-        let all = s.list_feedback(None).await.unwrap();
-        let filtered = s.list_feedback(Some("mem_f1")).await.unwrap();
+        let all = s.list_feedback(None, None).await.unwrap();
+        let filtered = s.list_feedback(Some("mem_f1"), None).await.unwrap();
 
         assert_eq!(all.len(), 2);
         assert_eq!(filtered.len(), 1);
@@ -834,7 +873,7 @@ mod tests {
         let fb = s.create_feedback("mem_g", "negative", None).await.unwrap();
         let ok = s.set_feedback_status(&fb.id, "resolved").await.unwrap();
         assert!(ok);
-        let items = s.list_feedback(Some("mem_g")).await.unwrap();
+        let items = s.list_feedback(Some("mem_g"), None).await.unwrap();
         assert_eq!(items[0].status, "resolved");
     }
 
@@ -858,7 +897,7 @@ mod tests {
         s.write_conflict("mem_h", "remote", entry.updated_at + 1, entry.updated_at)
             .await
             .unwrap();
-        let conflicts = s.list_conflicts().await.unwrap();
+        let conflicts = s.list_conflicts(None).await.unwrap();
         assert_eq!(conflicts.len(), 1);
         assert_eq!(conflicts[0].memory_id, "mem_h");
     }
