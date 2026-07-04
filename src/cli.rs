@@ -312,14 +312,22 @@ fn append_block_if_absent(
 
 /// Merge a SessionStart hook running `hivemind session-start` into the
 /// project's .claude/settings.json, preserving all existing content.
+/// If the file exists but is not valid JSON, returns an error instead of
+/// overwriting it, so a malformed user file is never destroyed.
 fn ensure_claude_settings_hook(project_root: &Path) -> Result<(PathBuf, &'static str)> {
+    use anyhow::Context as _;
+
     let path = project_root.join(".claude").join("settings.json");
     let existing = std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".to_string());
     if existing.contains("hivemind session-start") {
         return Ok((path, "exists"));
     }
-    let mut root: serde_json::Value =
-        serde_json::from_str(&existing).unwrap_or(serde_json::json!({}));
+    let mut root: serde_json::Value = serde_json::from_str(&existing).with_context(|| {
+        format!(
+            "{} is not valid JSON; fix or remove it, then re-run hivemind init",
+            path.display()
+        )
+    })?;
     let obj = root
         .as_object_mut()
         .ok_or_else(|| anyhow::anyhow!("{} root is not a JSON object", path.display()))?;
@@ -1988,6 +1996,21 @@ mod tests {
         let merged = fs::read_to_string(dir.join("settings.json")).unwrap();
         assert!(merged.contains("Bash(ls:*)"), "existing keys preserved");
         assert!(merged.contains("hivemind session-start"));
+    }
+
+    #[test]
+    fn hook_merge_refuses_to_overwrite_malformed_settings() {
+        let proj = tempfile::tempdir().unwrap();
+        let dir = proj.path().join(".claude");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("settings.json"), "{oops").unwrap();
+        let result = ensure_claude_settings_hook(proj.path());
+        assert!(result.is_err(), "malformed JSON must be an error");
+        assert_eq!(
+            fs::read_to_string(dir.join("settings.json")).unwrap(),
+            "{oops",
+            "malformed file must be left untouched"
+        );
     }
 
     // ── env-mutation guard ───────────────────────────────────────────────────
