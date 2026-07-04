@@ -131,7 +131,18 @@ mod tests {
         db::run_migrations(&conn).await.unwrap();
         let store = SqliteStore::new(conn);
         for (id, title, content, tags) in memories {
-            store.store(id, title, content, tags, None).await.unwrap();
+            store
+                .store(&crate::store::NewMemoryRow {
+                    id,
+                    title,
+                    content,
+                    tags,
+                    token_count: None,
+                    layer: "workspace",
+                    memory_type: "project",
+                })
+                .await
+                .unwrap();
         }
         (store, dir)
     }

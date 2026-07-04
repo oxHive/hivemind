@@ -1299,13 +1299,15 @@ mod tests {
         let store = SqliteStore::new(conn);
         let id = format!("mem_{}", uuid::Uuid::new_v4().simple());
         store
-            .store(
-                &id,
-                "golang preferences",
-                "uber/zap, sqlc, pgx v5",
-                &["golang".to_string()],
-                None,
-            )
+            .store(&crate::store::NewMemoryRow {
+                id: &id,
+                title: "golang preferences",
+                content: "uber/zap, sqlc, pgx v5",
+                tags: &["golang".to_string()],
+                token_count: None,
+                layer: "workspace",
+                memory_type: "project",
+            })
             .await
             .unwrap();
 
