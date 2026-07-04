@@ -66,6 +66,8 @@ async fn run_server() -> Result<()> {
             }
         });
     let (store, database) = open_store(&settings.sync).await?;
+    // Holds the DB handle so it lives past `server.waiting()` when no sync loop owns it.
+    let mut _db_guard: Option<libsql::Database> = None;
     let service = if settings.sync.enabled {
         let trigger = Arc::new(Notify::new());
         tokio::spawn(sync::run_sync_loop(
@@ -81,8 +83,7 @@ async fn run_server() -> Result<()> {
             HiveMind::with_store(store)
         }
     } else {
-        // keep the DB handle alive for the lifetime of the server
-        let _database = database;
+        _db_guard = Some(database);
         HiveMind::with_store(store)
     };
 
@@ -101,6 +102,8 @@ async fn run_up(headless: bool) -> Result<()> {
     let settings = config::load_server_settings(&config::global_config_path())?;
     let (store, database) = open_store(&settings.sync).await?;
 
+    // Holds the DB handle so it lives past `http::run_up` when no sync loop owns it.
+    let mut _db_guard: Option<libsql::Database> = None;
     let mut notify_on_store = None;
     if settings.sync.enabled {
         let trigger = Arc::new(Notify::new());
@@ -115,7 +118,7 @@ async fn run_up(headless: bool) -> Result<()> {
             notify_on_store = Some(trigger);
         }
     } else {
-        let _database = database;
+        _db_guard = Some(database);
     }
 
     http::run_up(store, &settings, headless, notify_on_store).await
