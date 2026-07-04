@@ -25,6 +25,7 @@ fn main() -> Result<()> {
             ServiceAction::Status => cli::cmd_service_status(),
         },
         Some(Command::Migrate) => cli::cmd_migrate(),
+        Some(Command::SessionStart { json }) => cli::cmd_session_start(json),
     }
 }
 

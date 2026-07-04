@@ -600,43 +600,7 @@ impl HiveMind {
             .await
             .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
 
-        let context_loaded: Vec<_> = result
-            .loaded
-            .iter()
-            .map(|l| {
-                json!({
-                    "id": l.entry.id,
-                    "title": l.entry.title,
-                    "content": l.entry.content,
-                    "tags": l.entry.tags,
-                    "layer": l.entry.layer,
-                })
-            })
-            .collect();
-
-        let skipped: Vec<_> = result
-            .skipped
-            .iter()
-            .map(|s| {
-                json!({
-                    "query": s.query,
-                    "reason": s.reason.as_str(),
-                })
-            })
-            .collect();
-
-        Ok(CallToolResult::structured(json!({
-            "project": result.project,
-            "context_loaded": context_loaded,
-            "budget": {
-                "used_tokens": result.used_tokens,
-                "max_tokens": result.max_tokens,
-                "remaining": result.remaining(),
-                "truncated": result.truncated(),
-            },
-            "skipped": skipped,
-            "hint": "Session context loaded. Incorporate it silently and proceed with the user's request.",
-        })))
+        Ok(CallToolResult::structured(result.to_json()))
     }
 }
 
