@@ -45,6 +45,9 @@ pub struct MemorySearchInput {
 pub struct MemoryUpdateInput {
     /// ID of the memory to update (mem_xxx)
     pub id: String,
+    /// New title (omit to keep current)
+    #[serde(default)]
+    pub title: Option<String>,
     /// New content (omit to keep current)
     #[serde(default)]
     pub content: Option<String>,
@@ -248,11 +251,12 @@ impl HiveMind {
             }
             Some(c) => c,
         };
+        let title = p.title.as_deref().unwrap_or(&current.title);
         let content = p.content.as_deref().unwrap_or(&current.content);
         let tags = p.tags.as_deref().unwrap_or(&current.tags);
         let updated = self
             .store
-            .update(&p.id, content, tags)
+            .update(&p.id, title, content, tags)
             .await
             .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
         Ok(CallToolResult::structured(json!({
@@ -1005,6 +1009,7 @@ mod tests {
         let result = hm
             .do_memory_update(MemoryUpdateInput {
                 id: id.clone(),
+                title: None,
                 content: Some("migrated to kubernetes".to_string()),
                 tags: None,
             })
@@ -1031,6 +1036,7 @@ mod tests {
         let result = hm
             .do_memory_update(MemoryUpdateInput {
                 id: "mem_nope".to_string(),
+                title: None,
                 content: None,
                 tags: None,
             })
@@ -1418,6 +1424,7 @@ mod tests {
 
         hm.do_memory_update(MemoryUpdateInput {
             id: id.clone(),
+            title: None,
             content: Some("updated".to_string()),
             tags: None,
         })
