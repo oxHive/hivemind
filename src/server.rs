@@ -144,7 +144,15 @@ impl HiveMind {
         let id = format!("mem_{}", uuid::Uuid::new_v4().simple());
         let title = p.title.clone();
         self.store
-            .store(&id, &p.title, &p.content, &p.tags, p.token_count)
+            .store(&crate::store::NewMemoryRow {
+                id: &id,
+                title: &p.title,
+                content: &p.content,
+                tags: &p.tags,
+                token_count: p.token_count,
+                layer: "workspace",
+                memory_type: "project",
+            })
             .await
             .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
         if let Some(t) = &self.sync_trigger {

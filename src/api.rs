@@ -149,7 +149,15 @@ async fn create_memory(
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     let id = format!("mem_{}", uuid::Uuid::new_v4().simple());
     store
-        .store(&id, &b.title, &b.content, &b.tags, b.token_count)
+        .store(&crate::store::NewMemoryRow {
+            id: &id,
+            title: &b.title,
+            content: &b.content,
+            tags: &b.tags,
+            token_count: b.token_count,
+            layer: "workspace",
+            memory_type: "project",
+        })
         .await?;
     Ok((StatusCode::CREATED, Json(json!({ "id": id }))))
 }
@@ -601,7 +609,15 @@ mod tests {
         let (app, store, _dir) = test_router_with_store().await;
 
         store
-            .store("mem_rc", "RC Memory", "content", &[], None)
+            .store(&crate::store::NewMemoryRow {
+                id: "mem_rc",
+                title: "RC Memory",
+                content: "content",
+                tags: &[],
+                token_count: None,
+                layer: "workspace",
+                memory_type: "project",
+            })
             .await
             .unwrap();
         let conflict = store

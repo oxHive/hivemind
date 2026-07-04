@@ -11,6 +11,18 @@ pub struct MemoryEntry {
     pub created_at: i64,
     pub updated_at: i64,
     pub token_count: Option<i64>,
+    pub layer: String,
+    pub memory_type: String,
+}
+
+pub struct NewMemoryRow<'a> {
+    pub id: &'a str,
+    pub title: &'a str,
+    pub content: &'a str,
+    pub tags: &'a [String],
+    pub token_count: Option<i64>,
+    pub layer: &'a str,
+    pub memory_type: &'a str,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,63 +76,58 @@ impl SqliteStore {
         Self { conn }
     }
 
-    pub async fn store(
-        &self,
-        id: &str,
-        title: &str,
-        content: &str,
-        tags: &[String],
-        token_count: Option<i64>,
-    ) -> Result<()> {
+    pub async fn store(&self, m: &NewMemoryRow<'_>) -> Result<()> {
         let now = chrono_now();
-        self.conn
-            .execute(
-                "INSERT INTO memories (id, title, content, created_at, updated_at, token_count)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-                 ON CONFLICT(id) DO UPDATE SET
-                   title = excluded.title,
-                   content = excluded.content,
-                   updated_at = excluded.updated_at,
-                   token_count = excluded.token_count",
-                params![id, title, content, now, now, token_count],
+        let token_count = m
+            .token_count
+            .unwrap_or_else(|| crate::budget::count_entry_tokens(m.title, m.content) as i64);
+
+        let tx = self.conn.transaction().await?;
+        tx.execute(
+            "INSERT INTO memories (id, title, content, created_at, updated_at, token_count, layer, memory_type)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT(id) DO UPDATE SET
+               title = excluded.title,
+               content = excluded.content,
+               updated_at = excluded.updated_at,
+               token_count = excluded.token_count,
+               layer = excluded.layer,
+               memory_type = excluded.memory_type",
+            params![m.id, m.title, m.content, now, now, token_count, m.layer, m.memory_type],
+        )
+        .await?;
+
+        tx.execute(
+            "DELETE FROM memory_tags WHERE memory_id = ?1",
+            params![m.id],
+        )
+        .await?;
+        for tag in m.tags {
+            tx.execute(
+                "INSERT OR IGNORE INTO memory_tags (memory_id, tag) VALUES (?1, ?2)",
+                params![m.id, tag.as_str()],
             )
             .await?;
+        }
 
-        self.conn
-            .execute("DELETE FROM memory_tags WHERE memory_id = ?1", params![id])
+        // Auto-connect memories sharing a tag: one statement per tag, skipping
+        // pairs already linked in either direction.
+        for tag in m.tags {
+            tx.execute(
+                "INSERT INTO edges (id, source_id, target_id, relationship, status, created_at)
+                 SELECT 'edge_' || lower(hex(randomblob(16))), ?1, mt.memory_id, 'shares_tag', 'active', ?2
+                 FROM memory_tags mt
+                 WHERE mt.tag = ?3 AND mt.memory_id != ?1
+                   AND NOT EXISTS (
+                       SELECT 1 FROM edges e
+                       WHERE e.relationship = 'shares_tag'
+                         AND ((e.source_id = ?1 AND e.target_id = mt.memory_id)
+                           OR (e.source_id = mt.memory_id AND e.target_id = ?1)))",
+                params![m.id, now, tag.as_str()],
+            )
             .await?;
-
-        for tag in tags {
-            self.conn
-                .execute(
-                    "INSERT OR IGNORE INTO memory_tags (memory_id, tag) VALUES (?1, ?2)",
-                    params![id, tag.as_str()],
-                )
-                .await?;
         }
-
-        // Auto-connect memories sharing a tag
-        for tag in tags {
-            let mut rows = self
-                .conn
-                .query(
-                    "SELECT memory_id FROM memory_tags WHERE tag = ?1 AND memory_id != ?2",
-                    params![tag.as_str(), id],
-                )
-                .await?;
-            while let Some(row) = rows.next().await? {
-                let other_id: String = row.get(0)?;
-                let edge_id = format!("edge_{}", uuid::Uuid::new_v4().simple());
-                self.conn
-                    .execute(
-                        "INSERT OR IGNORE INTO edges (id, source_id, target_id, relationship, status, created_at)
-                         VALUES (?1, ?2, ?3, 'shares_tag', 'active', ?4)",
-                        params![edge_id.as_str(), id, other_id.as_str(), now],
-                    )
-                    .await?;
-            }
-        }
-
+        tx.commit().await?;
         Ok(())
     }
 
@@ -128,7 +135,7 @@ impl SqliteStore {
         let mut rows = self
             .conn
             .query(
-                "SELECT id, title, content, created_at, updated_at, token_count FROM memories WHERE id = ?1",
+                "SELECT id, title, content, created_at, updated_at, token_count, layer, memory_type FROM memories WHERE id = ?1",
                 params![id],
             )
             .await?;
@@ -145,7 +152,7 @@ impl SqliteStore {
         let mut rows = self
             .conn
             .query(
-                "SELECT id, title, content, created_at, updated_at, token_count FROM memories WHERE title = ?1",
+                "SELECT id, title, content, created_at, updated_at, token_count, layer, memory_type FROM memories WHERE title = ?1",
                 params![title],
             )
             .await?;
@@ -166,7 +173,7 @@ impl SqliteStore {
         let mut rows = self
             .conn
             .query(
-                "SELECT m.id, m.title, m.content, m.created_at, m.updated_at, m.token_count
+                "SELECT m.id, m.title, m.content, m.created_at, m.updated_at, m.token_count, m.layer, m.memory_type
                  FROM memories m
                  JOIN memories_fts f ON m.rowid = f.rowid
                  WHERE memories_fts MATCH ?1
@@ -240,7 +247,7 @@ impl SqliteStore {
         let mut rows = self
             .conn
             .query(
-                "SELECT id, title, content, created_at, updated_at, token_count
+                "SELECT id, title, content, created_at, updated_at, token_count, layer, memory_type
                  FROM memories ORDER BY updated_at DESC LIMIT ?1 OFFSET ?2",
                 params![limit, offset],
             )
@@ -501,6 +508,8 @@ impl SqliteStore {
             created_at: row.get(3)?,
             updated_at: row.get(4)?,
             token_count: row.get(5)?,
+            layer: row.get(6)?,
+            memory_type: row.get(7)?,
         })
     }
 }
@@ -533,13 +542,12 @@ mod tests {
     #[tokio::test]
     async fn store_persists_row_and_tags() {
         let (s, _dir) = make_store().await;
-        s.store(
+        s.store(&test_row(
             "mem_1",
             "My Title",
             "content here",
             &["rust".into(), "test".into()],
-            None,
-        )
+        ))
         .await
         .unwrap();
         let entry = s.recall_by_id("mem_1").await.unwrap().unwrap();
@@ -552,13 +560,12 @@ mod tests {
     #[tokio::test]
     async fn store_deduplicates_tags() {
         let (s, _dir) = make_store().await;
-        s.store(
+        s.store(&test_row(
             "mem_2",
             "Title",
             "body",
             &["rust".into(), "rust".into()],
-            None,
-        )
+        ))
         .await
         .unwrap();
         let entry = s.recall_by_id("mem_2").await.unwrap().unwrap();
@@ -568,10 +575,10 @@ mod tests {
     #[tokio::test]
     async fn store_auto_connects_memories_sharing_a_tag() {
         let (s, _dir) = make_store().await;
-        s.store("mem_a", "A", "body a", &["shared".into()], None)
+        s.store(&test_row("mem_a", "A", "body a", &["shared".into()]))
             .await
             .unwrap();
-        s.store("mem_b", "B", "body b", &["shared".into()], None)
+        s.store(&test_row("mem_b", "B", "body b", &["shared".into()]))
             .await
             .unwrap();
         let edges = s.list_edges(None).await.unwrap();
@@ -581,13 +588,12 @@ mod tests {
     #[tokio::test]
     async fn delete_removes_memory_tags_and_fts() {
         let (s, _dir) = make_store().await;
-        s.store(
+        s.store(&test_row(
             "mem_del",
             "Delete Me",
             "some content",
             &["tag1".into()],
-            None,
-        )
+        ))
         .await
         .unwrap();
         s.delete("mem_del").await.unwrap();
@@ -599,10 +605,10 @@ mod tests {
     #[tokio::test]
     async fn delete_removes_connected_edges() {
         let (s, _dir) = make_store().await;
-        s.store("mem_e1", "E1", "body", &["tag_e".into()], None)
+        s.store(&test_row("mem_e1", "E1", "body", &["tag_e".into()]))
             .await
             .unwrap();
-        s.store("mem_e2", "E2", "body", &["tag_e".into()], None)
+        s.store(&test_row("mem_e2", "E2", "body", &["tag_e".into()]))
             .await
             .unwrap();
         s.delete("mem_e1").await.unwrap();
@@ -616,9 +622,14 @@ mod tests {
     #[tokio::test]
     async fn search_returns_results_for_matching_content() {
         let (s, _dir) = make_store().await;
-        s.store("mem_s1", "Rust Tips", "use iterators not loops", &[], None)
-            .await
-            .unwrap();
+        s.store(&test_row(
+            "mem_s1",
+            "Rust Tips",
+            "use iterators not loops",
+            &[],
+        ))
+        .await
+        .unwrap();
         let results = s.search("iterators", 10).await.unwrap();
         assert!(!results.is_empty());
         assert_eq!(results[0].id, "mem_s1");
@@ -627,7 +638,7 @@ mod tests {
     #[tokio::test]
     async fn conflict_round_trip() {
         let (s, _dir) = make_store().await;
-        s.store("mem_c1", "C1", "local content", &[], None)
+        s.store(&test_row("mem_c1", "C1", "local content", &[]))
             .await
             .unwrap();
         let entry = s.recall_by_id("mem_c1").await.unwrap().unwrap();
@@ -664,10 +675,10 @@ mod tests {
     #[tokio::test]
     async fn list_memories_returns_all_stored() {
         let (s, _dir) = make_store().await;
-        s.store("mem_a", "Alpha", "first", &["a".into()], None)
+        s.store(&test_row("mem_a", "Alpha", "first", &["a".into()]))
             .await
             .unwrap();
-        s.store("mem_b", "Beta", "second", &["b".into()], None)
+        s.store(&test_row("mem_b", "Beta", "second", &["b".into()]))
             .await
             .unwrap();
         let list = s.list_memories(10, 0).await.unwrap();
@@ -677,13 +688,13 @@ mod tests {
     #[tokio::test]
     async fn list_edges_filtered_by_memory_id() {
         let (s, _dir) = make_store().await;
-        s.store("mem_x", "X", "body", &["shared_tag".into()], None)
+        s.store(&test_row("mem_x", "X", "body", &["shared_tag".into()]))
             .await
             .unwrap();
-        s.store("mem_y", "Y", "body", &["shared_tag".into()], None)
+        s.store(&test_row("mem_y", "Y", "body", &["shared_tag".into()]))
             .await
             .unwrap();
-        s.store("mem_z", "Z", "body", &["other_tag".into()], None)
+        s.store(&test_row("mem_z", "Z", "body", &["other_tag".into()]))
             .await
             .unwrap();
         s.create_edge("mem_x", "mem_z", "related_to").await.unwrap();
@@ -702,8 +713,8 @@ mod tests {
     #[tokio::test]
     async fn set_edge_status_updates() {
         let (s, _dir) = make_store().await;
-        s.store("mem_p", "P", "body", &[], None).await.unwrap();
-        s.store("mem_q", "Q", "body", &[], None).await.unwrap();
+        s.store(&test_row("mem_p", "P", "body", &[])).await.unwrap();
+        s.store(&test_row("mem_q", "Q", "body", &[])).await.unwrap();
         let edge = s.create_edge("mem_p", "mem_q", "pairs_with").await.unwrap();
         let ok = s.set_edge_status(&edge.id, "inactive").await.unwrap();
         assert!(ok);
@@ -725,8 +736,12 @@ mod tests {
     #[tokio::test]
     async fn list_feedback_filtered_by_memory_id() {
         let (s, _dir) = make_store().await;
-        s.store("mem_f1", "F1", "body", &[], None).await.unwrap();
-        s.store("mem_f2", "F2", "body", &[], None).await.unwrap();
+        s.store(&test_row("mem_f1", "F1", "body", &[]))
+            .await
+            .unwrap();
+        s.store(&test_row("mem_f2", "F2", "body", &[]))
+            .await
+            .unwrap();
         s.create_feedback("mem_f1", "positive", None).await.unwrap();
         s.create_feedback("mem_f2", "negative", Some("outdated"))
             .await
@@ -743,7 +758,7 @@ mod tests {
     #[tokio::test]
     async fn set_feedback_status_updates() {
         let (s, _dir) = make_store().await;
-        s.store("mem_g", "G", "body", &[], None).await.unwrap();
+        s.store(&test_row("mem_g", "G", "body", &[])).await.unwrap();
         let fb = s.create_feedback("mem_g", "negative", None).await.unwrap();
         let ok = s.set_feedback_status(&fb.id, "resolved").await.unwrap();
         assert!(ok);
@@ -764,7 +779,9 @@ mod tests {
     #[tokio::test]
     async fn list_conflicts_returns_entries() {
         let (s, _dir) = make_store().await;
-        s.store("mem_h", "H", "local", &[], None).await.unwrap();
+        s.store(&test_row("mem_h", "H", "local", &[]))
+            .await
+            .unwrap();
         let entry = s.recall_by_id("mem_h").await.unwrap().unwrap();
         s.write_conflict("mem_h", "remote", entry.updated_at + 1, entry.updated_at)
             .await
@@ -781,6 +798,76 @@ mod tests {
         assert!(result.is_none());
     }
 
+    fn test_row<'a>(
+        id: &'a str,
+        title: &'a str,
+        content: &'a str,
+        tags: &'a [String],
+    ) -> NewMemoryRow<'a> {
+        NewMemoryRow {
+            id,
+            title,
+            content,
+            tags,
+            token_count: None,
+            layer: "workspace",
+            memory_type: "project",
+        }
+    }
+
+    #[tokio::test]
+    async fn store_persists_layer_and_memory_type() {
+        let (s, _dir) = make_store().await;
+        s.store(&NewMemoryRow {
+            id: "mem_l1",
+            title: "pref",
+            content: "body",
+            tags: &[],
+            token_count: None,
+            layer: "personal",
+            memory_type: "preference",
+        })
+        .await
+        .unwrap();
+        let e = s.recall_by_id("mem_l1").await.unwrap().unwrap();
+        assert_eq!(e.layer, "personal");
+        assert_eq!(e.memory_type, "preference");
+    }
+
+    #[tokio::test]
+    async fn store_computes_token_count_when_missing() {
+        let (s, _dir) = make_store().await;
+        let tags: Vec<String> = vec![];
+        s.store(&test_row(
+            "mem_tc",
+            "title here",
+            "some content words",
+            &tags,
+        ))
+        .await
+        .unwrap();
+        let e = s.recall_by_id("mem_tc").await.unwrap().unwrap();
+        assert!(e.token_count.unwrap() > 0);
+    }
+
+    #[tokio::test]
+    async fn auto_edges_are_not_duplicated_in_reverse() {
+        let (s, _dir) = make_store().await;
+        let tags = vec!["shared".to_string()];
+        s.store(&test_row("mem_r1", "A", "a", &tags)).await.unwrap();
+        s.store(&test_row("mem_r2", "B", "b", &tags)).await.unwrap();
+        // re-storing the first must not create a reverse duplicate edge
+        s.store(&test_row("mem_r1", "A", "a2", &tags))
+            .await
+            .unwrap();
+        let edges = s.list_edges(None).await.unwrap();
+        assert_eq!(
+            edges.len(),
+            1,
+            "one shares_tag edge between the pair, either direction"
+        );
+    }
+
     #[test]
     fn fts_quote_wraps_terms_and_escapes_quotes() {
         assert_eq!(fts_quote("project/myapp"), "\"project/myapp\"");
@@ -792,7 +879,7 @@ mod tests {
     #[tokio::test]
     async fn search_tolerates_fts_special_characters() {
         let (s, _dir) = make_store().await;
-        s.store("mem_sp", "project/myapp", "slash content", &[], None)
+        s.store(&test_row("mem_sp", "project/myapp", "slash content", &[]))
             .await
             .unwrap();
         // must not error, and exact-ish term still matches via quoted FTS
