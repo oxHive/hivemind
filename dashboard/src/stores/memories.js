@@ -71,6 +71,14 @@ export const useMemoriesStore = defineStore('memories', () => {
     }
   }
 
+  async function create({ title, content, tags, layer }) {
+    const res = await api.createMemory({ title, content, tags, layer })
+    await fetchAll()
+    const created = all.value.find(m => m.id === res.id)
+    if (created) select(created)
+    return res.id
+  }
+
   async function remove(id) {
     await api.deleteMemory(id)
     all.value = all.value.filter(m => m.id !== id)
@@ -83,5 +91,5 @@ export const useMemoriesStore = defineStore('memories', () => {
     select(null)
   }
 
-  return { all, selected, draft, searchQuery, layerFilter, loading, saving, filtered, dirty, fetchAll, select, save, remove, clearAll }
+  return { all, selected, draft, searchQuery, layerFilter, loading, saving, filtered, dirty, fetchAll, select, save, create, remove, clearAll }
 })
