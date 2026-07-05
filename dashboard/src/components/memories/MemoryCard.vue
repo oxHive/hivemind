@@ -60,16 +60,18 @@ defineEmits(['select'])
 }
 
 .memory-card:focus-visible {
-  outline: 2px solid var(--hm-personal);
+  outline: 2px solid var(--hm-accent);
   outline-offset: -2px;
 }
 
 .memory-card--selected-personal {
   background: var(--hm-personal-bg);
+  box-shadow: inset 2px 0 0 var(--hm-personal);
 }
 
 .memory-card--selected-workspace {
   background: var(--hm-workspace-bg);
+  box-shadow: inset 2px 0 0 var(--hm-workspace);
 }
 
 .memory-card--selected-personal:hover,

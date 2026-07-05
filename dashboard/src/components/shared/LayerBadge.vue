@@ -1,12 +1,14 @@
 <script setup>
-defineProps({ layer: String })
+import { computed } from 'vue'
+const props = defineProps({ layer: String })
+const resolved = computed(() => props.layer === 'personal' ? 'personal' : 'workspace')
 </script>
 
 <template>
   <span
     class="inline-block rounded-sm px-2 py-0.5 text-[10px] font-mono"
-    :style="layer === 'personal'
-      ? 'background:#0d2820; color:#1d9e75'
-      : 'background:#1a1830; color:#7f77dd'"
-  >{{ layer }}</span>
+    :style="resolved === 'personal'
+      ? 'background:var(--hm-personal-bg); color:var(--hm-personal)'
+      : 'background:var(--hm-workspace-bg); color:var(--hm-workspace)'"
+  >{{ resolved }}</span>
 </template>

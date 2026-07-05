@@ -31,11 +31,13 @@ const fb = useFeedbackStore()
     <!-- Content -->
     <div class="flex-1 overflow-y-auto px-4 py-4">
       <template v-if="fb.activeTab === 'conflicts'">
-        <EmptyState v-if="!fb.conflicts.length" message="✓ Nothing to review. All memories are clean." icon="✓" />
+        <EmptyState v-if="!fb.conflicts.length" message="No conflicts."
+          hint="Conflicts appear when a sync overwrites a local edit." />
         <ConflictCard v-for="c in fb.conflicts" :key="c.id" :conflict="c" />
       </template>
       <template v-else>
-        <EmptyState v-if="!fb.feedbackItems.length" message="✓ Nothing to review. All memories are clean." icon="✓" />
+        <EmptyState v-if="!fb.feedbackItems.length" message="No open feedback."
+          hint="Flag a memory with /memory-flag <id> to queue it here." />
         <FeedbackCard v-for="item in fb.feedbackItems" :key="item.id" :item="item" />
       </template>
     </div>
