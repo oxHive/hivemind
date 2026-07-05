@@ -80,7 +80,7 @@ async function handleDelete() {
         <textarea
           id="mem-content"
           class="hm-input mb-4 resize-none"
-          style="height:140px; padding-top:8px; padding-bottom:8px"
+          style="height:40vh; min-height:160px; padding:8px 10px; font-family:var(--hm-font-mono); font-size:12px; line-height:1.6; background:var(--hm-mono-bg)"
           :value="memories.draft?.content"
           @input="memories.draft.content = $event.target.value"
         ></textarea>
@@ -125,8 +125,9 @@ async function handleDelete() {
       <!-- Footer -->
       <div class="flex items-center justify-between px-4 py-2"
         style="border-top:0.5px solid var(--hm-border-subtle)">
-        <span class="font-mono" style="font-size:11px; color:var(--hm-text-tertiary)">
-          updated {{ fmtDate(memories.selected.updated_at) }} · {{ memories.selected.layer }}
+        <span class="flex items-center gap-2 font-mono" style="font-size:11px; color:var(--hm-text-tertiary)">
+          updated {{ fmtDate(memories.selected.updated_at) }}
+          <LayerBadge :layer="memories.selected.layer" />
         </span>
         <button class="hm-btn hm-btn-primary hm-btn-sm"
           :disabled="!memories.dirty || memories.saving"

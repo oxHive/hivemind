@@ -20,8 +20,8 @@ const memories = useMemoriesStore()
       <div class="flex-1 relative overflow-hidden">
         <EmptyState
           v-if="!memories.all.length"
-          message="No connections to display. Store some memories first."
-          icon="◎"
+          message="No connections to display."
+          hint="Store some memories first; edges appear as they share tags or get linked."
         />
         <GraphCanvas v-else />
       </div>

@@ -15,7 +15,7 @@ const filters = [
 
 <template>
   <div class="flex flex-col h-full shrink-0"
-    style="width:280px; border-right:0.5px solid var(--hm-border-subtle)">
+    style="width:clamp(240px, 26vw, 320px); border-right:0.5px solid var(--hm-border-subtle)">
 
     <!-- Header -->
     <div class="px-3 pt-3 pb-2" style="border-bottom:0.5px solid var(--hm-border-subtle)">
@@ -53,7 +53,7 @@ const filters = [
           @select="memories.select($event)"
         />
         <div v-if="!memories.filtered.length" class="p-6 text-center"
-          style="font-size:12px; color:var(--hm-text-tertiary)">
+          style="font-size:12px; color:var(--hm-text-secondary)">
           No memories match your filter.
         </div>
       </template>

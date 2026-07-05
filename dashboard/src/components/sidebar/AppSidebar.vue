@@ -125,7 +125,7 @@ const syncDot = computed(() => {
 }
 
 .nav-item:focus-visible {
-  outline: 2px solid var(--hm-personal);
+  outline: 2px solid var(--hm-accent);
   outline-offset: -2px;
 }
 
