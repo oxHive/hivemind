@@ -7,6 +7,7 @@ import LayerBadge from '../shared/LayerBadge.vue'
 import TagChip from '../shared/TagChip.vue'
 import DeleteConfirmModal from './DeleteConfirmModal.vue'
 import { fmtDate } from '../../lib/format.js'
+import { createFeedback } from '../../api/feedback.js'
 
 const memories = useMemoriesStore()
 const ui = useUiStore()
@@ -15,6 +16,13 @@ const graph = useGraphStore()
 const showDeleteModal = ref(false)
 const newTagInput = ref('')
 const addingTag = ref(false)
+const flagOpen = ref(false)
+
+async function flag(signal) {
+  flagOpen.value = false
+  await createFeedback({ memory_id: memories.selected.id, signal })
+  ui.showToast(`Flagged as ${signal}`)
+}
 
 function removeTag(tag) {
   memories.draft.tags = memories.draft.tags.filter(t => t !== tag)
@@ -58,8 +66,17 @@ async function handleDelete() {
           {{ memories.selected.id }}
         </span>
         <div class="flex gap-1">
-          <button class="hm-btn hm-btn-ghost hm-btn-sm" title="Flag"
-            @click="ui.copyToClipboard(`/flag ${memories.selected.id}`)">⚑</button>
+          <div class="relative">
+            <button class="hm-btn hm-btn-ghost hm-btn-sm" title="Flag for review"
+              @click="flagOpen = !flagOpen">⚑</button>
+            <div v-if="flagOpen" class="absolute right-0 mt-1 rounded-md py-1"
+              style="background:var(--hm-bg-overlay); border:0.5px solid var(--hm-border-default); z-index:10">
+              <button v-for="r in ['incorrect','outdated','duplicate','other']" :key="r"
+                class="block w-full text-left px-3 py-1.5"
+                style="font-size:12px; color:var(--hm-text-secondary); background:none; border:none; cursor:pointer"
+                @click="flag(r)">{{ r }}</button>
+            </div>
+          </div>
           <button class="hm-btn hm-btn-danger hm-btn-sm" @click="showDeleteModal = true">Delete</button>
         </div>
       </div>

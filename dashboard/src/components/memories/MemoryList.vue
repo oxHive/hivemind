@@ -1,10 +1,13 @@
 <script setup>
+import { ref } from 'vue'
 import { useMemoriesStore } from '../../stores/memories.js'
 import MemoryCard from './MemoryCard.vue'
 import FilterChip from '../shared/FilterChip.vue'
 import SkeletonCard from '../shared/SkeletonCard.vue'
+import NewMemoryModal from './NewMemoryModal.vue'
 
 const memories = useMemoriesStore()
+const showNew = ref(false)
 
 const filters = [
   { label: 'all', value: 'all' },
@@ -19,6 +22,9 @@ const filters = [
 
     <!-- Header -->
     <div class="px-3 pt-3 pb-2" style="border-bottom:0.5px solid var(--hm-border-subtle)">
+      <button class="hm-btn hm-btn-primary hm-btn-sm mb-2 w-full justify-center"
+        @click="showNew = true">+ New memory</button>
+      <NewMemoryModal v-if="showNew" @close="showNew = false" />
       <div class="relative mb-2">
         <span class="absolute left-2.5 top-1/2 -translate-y-1/2" style="color:var(--hm-text-tertiary); font-size:13px">⌕</span>
         <input
