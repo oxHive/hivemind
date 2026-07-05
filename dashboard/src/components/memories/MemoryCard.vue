@@ -1,14 +1,10 @@
 <script setup>
 import LayerBadge from '../shared/LayerBadge.vue'
 import TagChip from '../shared/TagChip.vue'
+import { fmtDate } from '../../lib/format.js'
 
 const props = defineProps({ mem: Object, selected: Boolean })
 defineEmits(['select'])
-
-function fmtDate(iso) {
-  if (!iso) return ''
-  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-}
 </script>
 
 <template>

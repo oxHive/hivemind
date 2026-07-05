@@ -6,6 +6,7 @@ import { useGraphStore } from '../../stores/graph.js'
 import LayerBadge from '../shared/LayerBadge.vue'
 import TagChip from '../shared/TagChip.vue'
 import DeleteConfirmModal from './DeleteConfirmModal.vue'
+import { fmtDate } from '../../lib/format.js'
 
 const memories = useMemoriesStore()
 const ui = useUiStore()
@@ -14,11 +15,6 @@ const graph = useGraphStore()
 const showDeleteModal = ref(false)
 const newTagInput = ref('')
 const addingTag = ref(false)
-
-function fmtDate(iso) {
-  if (!iso) return ''
-  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-}
 
 function removeTag(tag) {
   memories.draft.tags = memories.draft.tags.filter(t => t !== tag)

@@ -30,8 +30,8 @@ function navToMemory() {
     <div class="flex items-start justify-between mb-2">
       <div class="flex items-center gap-2">
         <span class="font-mono rounded-sm px-1.5 py-0.5"
-          :style="`font-size:9px; background:${(typeColors[item.type]||typeColors.other).bg}; color:${(typeColors[item.type]||typeColors.other).text}; border:0.5px solid ${(typeColors[item.type]||typeColors.other).border}`">
-          {{ item.type || 'other' }}
+          :style="`font-size:9px; background:${(typeColors[item.signal]||typeColors.other).bg}; color:${(typeColors[item.signal]||typeColors.other).text}; border:0.5px solid ${(typeColors[item.signal]||typeColors.other).border}`">
+          {{ item.signal || 'other' }}
         </span>
         <button @click="navToMemory"
           style="font-size:13px; font-weight:500; color:var(--hm-text-primary); cursor:pointer; background:none; border:none; text-align:left">
