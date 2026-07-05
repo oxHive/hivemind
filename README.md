@@ -83,18 +83,20 @@ cargo binstall oxhivemind       # download pre-built binary (faster)
 Install the HiveMind plugin (recommended):
 
 ```sh
-claude plugin install https://github.com/oxHive/hivemind
+claude plugin marketplace add oxHive/hivemind
+claude plugin install hivemind@hivemind
 ```
 
 This registers the MCP server and installs `/memory-store`, `/memory-search`, `/memory-list`, `/memory-edit`, and `/memory-status` as slash commands in one step.
 
-If you have a local clone, you can install from the path instead:
+If you have a local clone, you can add the marketplace from the path instead:
 
 ```sh
-claude plugin install /path/to/hivemind
+claude plugin marketplace add /path/to/hivemind
+claude plugin install hivemind@hivemind
 ```
 
-Verify with `claude mcp list` — you should see `hivemind`. The slash commands appear in the `/` menu in any Claude Code session.
+Verify with `/plugin` in a Claude Code session — HiveMind should be listed as installed, with its MCP server connected under `/mcp`. The slash commands appear in the `/` menu.
 
 **Manual alternative (MCP only, no slash commands):**
 
@@ -220,7 +222,8 @@ If your client only supports HTTP transport, start HiveMind's HTTP server with `
 
 ```sh
 # 1. Install the plugin (once per machine — registers MCP + slash commands)
-claude plugin install https://github.com/oxHive/hivemind
+claude plugin marketplace add oxHive/hivemind
+claude plugin install hivemind@hivemind
 
 # 2. Go to your project and initialise it
 cd ~/projects/myapp
@@ -440,7 +443,7 @@ This only needs to be done once per machine, not per project.
 
 | Client | Detection method |
 |--------|-----------------|
-| Claude Code | Runs `claude mcp list` and checks for "hivemind" |
+| Claude Code | Reads `~/.claude/mcp.json`, `~/.claude/settings.json`, and `~/.claude.json` (user-scope registrations), checks for "hivemind" |
 | Cursor | Reads `~/.cursor/mcp.json`, checks for "hivemind" |
 | Windsurf | Reads `~/.codeium/windsurf/mcp_config.json`, checks for "hivemind" |
 | Kimi | Reads `~/.kimi/mcp.json`, checks for "hivemind" |
