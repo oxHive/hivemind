@@ -13,14 +13,15 @@ Persistent memory for AI coding agents. HiveMind is a local MCP server that give
 
 ### The session start flow in detail
 
-When you open a new Claude Code session in a project that has `.hivemind.toml`:
+When you open a new Claude Code session in a project that has `.hivemind.toml`, the primary mechanism is the SessionStart hook that `hivemind init` installs in `.claude/settings.json`:
 
-1. Claude reads CLAUDE.md, which instructs it to call `hivemind_session_start` once.
-2. Claude calls the MCP tool with the current project path.
-3. HiveMind reads `.hivemind.toml` (and `.hivemind.local.toml` if present), resolves each `recalls` entry against the SQLite database (by exact title, then FTS), and returns the results as structured JSON, staying within `max_tokens`.
-4. Claude incorporates the returned memories silently and proceeds with your request.
+1. Claude Code runs `hivemind session-start` before the session begins.
+2. HiveMind reads `.hivemind.toml` (and `.hivemind.local.toml` if present), resolves each `recalls` entry against the SQLite database (by exact title, then FTS), and prints the results inside a `<hivemind-context>` block, staying within `max_tokens`.
+3. Claude Code injects that output into the session context deterministically — no tool call, no model discretion involved.
 
-That's it. One tool call, one round-trip to the database, zero per-prompt overhead after that.
+For clients without hook support (or projects initialised before the hook existed), the fallback is the CLAUDE.md-instructed tool call: Claude reads CLAUDE.md, calls the `hivemind_session_start` MCP tool with the project path, and incorporates the returned JSON silently. If the hook already injected a `<hivemind-context>` block, Claude skips the tool call.
+
+That's it. One injection, one round-trip to the database, zero per-prompt overhead after that.
 
 ### Context budget
 
@@ -101,7 +102,9 @@ Verify with `claude mcp list` — you should see `hivemind`. The slash commands 
 hivemind mcp install claude
 ```
 
-This registers the MCP server without the plugin skills. Useful if you only want the tools and session start, not the slash commands.
+This registers the MCP server at user scope (once per machine, available in every project) without the plugin skills. Useful if you only want the tools and session start, not the slash commands.
+
+In addition, `hivemind init` installs a Claude Code SessionStart hook in the project's `.claude/settings.json` that runs `hivemind session-start`. This injects the configured memory context deterministically at the start of every session, without relying on Claude deciding to call the MCP tool. The `hivemind_session_start` MCP tool remains available for other clients and for on-demand use.
 
 ### OpenCode
 
@@ -284,6 +287,8 @@ hivemind up                      Start the server (MCP + REST API + dashboard)
 hivemind up --headless           Start without the dashboard UI
 hivemind init                    Scaffold config files for the current project
 hivemind status                  Show config, memory count, and session-start preview
+hivemind migrate                 Move the database from the legacy ~/.hivemind path to the XDG data dir
+hivemind session-start [--json]  Print the session-start context; used by the Claude Code SessionStart hook
 hivemind mcp install claude      Register with Claude Code
 hivemind mcp install opencode    Register with OpenCode
 hivemind mcp install kimi        Register with Kimi Code CLI
@@ -360,7 +365,9 @@ sync_on_startup = true
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `HIVEMIND_DB_PATH` | `~/.hivemind/memories.db` | Path to the SQLite database |
+| `HIVEMIND_DB_PATH` | `~/.local/share/hivemind/memories.db` (or `$XDG_DATA_HOME/hivemind/memories.db`) | Path to the SQLite database |
+
+Databases from versions before 0.3.x lived at `~/.hivemind/memories.db`; run `hivemind migrate` to move them.
 
 ---
 
@@ -386,6 +393,8 @@ Two `remote_url` targets are supported:
 | **Oxhive hosted** *(coming soon)* | `https://sync.oxhive.dev` | Your Oxhive account key |
 
 `api_key` is never sent to Claude or the dashboard. It is only used during replication.
+
+With `sync_on_store = true`, a memory stored through any interface (MCP tool, REST API, or dashboard) triggers an immediate sync in addition to the periodic background sync. If a sync pulls remote changes that overwrite a local edit, HiveMind records a conflict holding both versions; pending conflicts appear in the dashboard's Feedback view. Resolving with `keep_local` restores your version of the content, while `keep_remote` accepts the replicated one.
 
 ---
 
@@ -447,6 +456,7 @@ If `hivemind_session_start` errors during a session, the most likely causes are:
 - **`hivemind` not found in PATH**: verify with `which hivemind`. If you installed via `cargo install`, make sure `~/.cargo/bin` is in your PATH.
 - **Database error**: check `HIVEMIND_DB_PATH` and ensure the directory is writable.
 - **Corrupt config**: run `hivemind status` in the project directory to validate `.hivemind.toml`.
+- **Recalls with special characters**: recall titles containing FTS special characters (`/`, `+`, `-`, quotes) no longer fail the whole call; unmatched entries are simply reported as `not_found` in the result.
 
 ### Session start succeeds but no memories are injected
 
@@ -486,7 +496,7 @@ Yes. Each project has its own `.hivemind.toml` with its own `recalls` list and `
 
 **Do my teammates see my personal memories?**
 
-No. Memories stored with `layer = "personal"` follow you, not the repo. Only `layer = "workspace"` memories are project-scoped. The `.hivemind.local.toml` file is gitignored, and your personal layer is local to your machine unless you configure sync.
+No. Memories stored with `layer = "personal"` follow you, not the repo. Only `layer = "workspace"` memories are project-scoped. The `memory_store` MCP tool accepts `layer: "personal" | "workspace"` (default `workspace`), and the dashboard filters by layer. The `.hivemind.local.toml` file is gitignored, and your personal layer is local to your machine unless you configure sync.
 
 **Is the MCP connection authenticated?**
 
@@ -498,7 +508,7 @@ Yes, as long as the agent supports MCP over stdio. Register it the same way you 
 
 **Where is the database stored?**
 
-`~/.hivemind/memories.db` by default. Override with the `HIVEMIND_DB_PATH` environment variable. It's a plain SQLite file; you can back it up, copy it between machines, or inspect it directly.
+`~/.local/share/hivemind/memories.db` by default (or `$XDG_DATA_HOME/hivemind/memories.db` if `XDG_DATA_HOME` is set). Override with the `HIVEMIND_DB_PATH` environment variable. It's a plain SQLite file; you can back it up, copy it between machines, or inspect it directly. Databases from versions before 0.3.x lived at `~/.hivemind/memories.db`; run `hivemind migrate` to move them.
 
 ---
 
