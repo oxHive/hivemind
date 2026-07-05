@@ -152,8 +152,8 @@ fn detect_registered_clients(home: &Path) -> Vec<&'static str> {
         claude_dot.join("mcp.json"),
         // user-scoped settings (mcpServers key)
         claude_dot.join("settings.json"),
-        // OAuth-connected MCP servers (claude.ai web registration)
-        claude_dot.join(".credentials.json"),
+        // user-scope registrations from `claude mcp add --scope user`
+        home.join(".claude.json"),
     ]
     .iter()
     .any(|p| {
@@ -714,10 +714,12 @@ fn install_claude() -> Result<()> {
     }
 
     // Register as stdio using the full binary path so Claude Code can find it
-    // regardless of whether ~/.cargo/bin is in its subprocess PATH.
+    // regardless of whether ~/.cargo/bin is in its subprocess PATH. User scope:
+    // the default (local) scope is per project directory, but registration is
+    // meant to happen once per machine.
     let exe = exe_path();
     let status = std::process::Command::new("claude")
-        .args(["mcp", "add", "hivemind", "--", &exe])
+        .args(["mcp", "add", "--scope", "user", "hivemind", "--", &exe])
         .status()?;
 
     if !status.success() {
@@ -819,6 +821,11 @@ fn install_kimi() -> Result<()> {
     Ok(())
 }
 
+/// Escape a string for use inside a basic (double-quoted) TOML string.
+fn toml_escape(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 fn install_codex() -> Result<()> {
     let config_path = home_dir().join(".codex").join("config.toml");
     std::fs::create_dir_all(config_path.parent().unwrap())?;
@@ -832,7 +839,7 @@ fn install_codex() -> Result<()> {
 
     let block = format!(
         "\n[mcp_servers.hivemind]\ncommand = \"{}\"\nargs = []\n",
-        exe_path()
+        toml_escape(&exe_path())
     );
     let block = block.as_str();
     let new_content = format!("{}{}", existing.trim_end(), block);
@@ -1594,6 +1601,18 @@ mod tests {
         fs::write(
             claude_dir.join("settings.json"),
             r#"{"mcpServers":{"hivemind":{"command":"hivemind"}}}"#,
+        )
+        .unwrap();
+        let result = detect_registered_clients(home.path());
+        assert!(result.contains(&"claude"));
+    }
+
+    #[test]
+    fn detect_registered_clients_claude_via_user_scope_claude_json() {
+        let home = tempfile::tempdir().unwrap();
+        fs::write(
+            home.path().join(".claude.json"),
+            r#"{"mcpServers":{"hivemind":{"command":"/x/hivemind"}}}"#,
         )
         .unwrap();
         let result = detect_registered_clients(home.path());
