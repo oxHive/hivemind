@@ -39,7 +39,8 @@ export const useMemoriesStore = defineStore('memories', () => {
   async function fetchAll() {
     loading.value = true
     try {
-      all.value = await api.listMemories()
+      const data = await api.listMemories()
+      all.value = data.memories ?? []
     } finally {
       loading.value = false
     }

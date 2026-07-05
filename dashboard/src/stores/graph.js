@@ -15,27 +15,28 @@ export const useGraphStore = defineStore('graph', () => {
   function edgesFor(memoryId) {
     return edges.value.filter(e =>
       (e.source_id === memoryId || e.target_id === memoryId) &&
-      e.status === 'accepted'
+      e.status === 'active'
     )
   }
 
   async function fetchEdges() {
-    edges.value = await api.listEdges()
+    const data = await api.listEdges()
+    edges.value = data.edges ?? []
   }
 
   async function storeEdge(sourceId, targetId, relationship) {
-    const edge = await api.createEdge({ source_id: sourceId, target_id: targetId, relationship, status: 'accepted' })
-    edges.value.push(edge)
+    await api.createEdge({ source_id: sourceId, target_id: targetId, relationship })
+    await fetchEdges()
   }
 
   async function resolveEdge(id, status) {
-    const updated = await api.patchEdge(id, { status })
+    await api.patchEdge(id, { status })
     const idx = edges.value.findIndex(e => e.id === id)
-    if (idx !== -1) edges.value[idx] = updated
+    if (idx !== -1) edges.value[idx] = { ...edges.value[idx], status }
   }
 
   async function acceptAllPending() {
-    await Promise.all(pendingEdges.value.map(e => resolveEdge(e.id, 'accepted')))
+    await Promise.all(pendingEdges.value.map(e => resolveEdge(e.id, 'active')))
   }
 
   async function rejectAllPending() {

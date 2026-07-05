@@ -17,6 +17,7 @@ const graph = useGraphStore()
 const fb = useFeedbackStore()
 
 const VIEWS = ['memories', 'graph', 'feedback', 'settings']
+const apiBase = window.HIVEMIND_API || 'http://localhost:3456'
 let pollInterval
 
 function applyHash() {
@@ -57,7 +58,8 @@ onBeforeUnmount(() => {
     <div v-if="ui.serverStatus === 'unreachable' && !memories.all.length"
       class="flex flex-col items-center justify-center w-full gap-4"
       style="color:var(--hm-text-secondary)">
-      <p style="font-size:14px">Cannot connect to HiveMind server at <code class="font-mono">localhost:3456</code>.</p>
+      <p style="font-size:14px">Cannot connect to HiveMind server at
+        <code class="font-mono">{{ apiBase }}</code>.</p>
       <p style="font-size:12px; color:var(--hm-text-tertiary)">Run <code class="font-mono">hivemind up</code> and then retry.</p>
       <button class="hm-btn hm-btn-default mt-2" @click="ui.pollServerStatus().then(() => memories.fetchAll())">
         Retry

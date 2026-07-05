@@ -3,11 +3,7 @@ import { ref } from 'vue'
 import * as api from '../api/feedback.js'
 
 function mapConflict(c) {
-  return {
-    ...c,
-    incoming: c.winner,
-    current: c.loser,
-  }
+  return { ...c, current: c.remote_content, local: c.local_content }
 }
 
 export const useFeedbackStore = defineStore('feedback', () => {
@@ -37,8 +33,8 @@ export const useFeedbackStore = defineStore('feedback', () => {
     }
   }
 
-  async function resolveConflict(id, action) {
-    await api.resolveConflict(id, action)
+  async function resolveConflict(id, resolution) {
+    await api.resolveConflict(id, resolution)
     conflicts.value = conflicts.value.filter(c => c.id !== id)
   }
 
