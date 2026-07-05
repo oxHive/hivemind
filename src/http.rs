@@ -89,6 +89,12 @@ pub fn dashboard_router(api_url: &str) -> Router {
         }))
 }
 
+/// A real vite build ships an assets/ directory; the committed placeholder
+/// contains only index.html.
+fn dashboard_is_bundled() -> bool {
+    DASHBOARD.get_dir("assets").is_some()
+}
+
 pub async fn run_up(
     store: Arc<SqliteStore>,
     settings: &ServerSettings,
@@ -101,6 +107,14 @@ pub async fn run_up(
         notify_on_store,
         &settings.cors_origin,
     );
+
+    if !matches!(settings.host.as_str(), "127.0.0.1" | "localhost" | "::1") {
+        tracing::warn!(
+            "binding to {}: the REST API and MCP endpoint are UNAUTHENTICATED; \
+             anyone who can reach this address can read and modify all memories",
+            settings.host
+        );
+    }
 
     let listener = tokio::net::TcpListener::bind((settings.host.as_str(), settings.port)).await?;
     tracing::info!(
@@ -119,6 +133,13 @@ pub async fn run_up(
     if headless {
         axum::serve(listener, app).await?;
         return Ok(());
+    }
+    if !dashboard_is_bundled() {
+        tracing::warn!(
+            "dashboard assets are not bundled in this build (source install). \
+             The dashboard page will show setup instructions. \
+             Use a prebuilt release binary, or run `bun install && bun run build` in dashboard/ and rebuild."
+        );
     }
     let dash = dashboard_router(&settings.api_url);
     let dash_listener =
@@ -165,6 +186,20 @@ pub async fn run_dashboard(settings: &ServerSettings, open: bool) -> Result<()> 
 mod tests {
     use super::*;
     use crate::{config::SyncSettings, db, store::SqliteStore};
+
+    #[test]
+    fn placeholder_dist_reports_not_bundled() {
+        // Only meaningful when the committed placeholder is what got embedded;
+        // release builds bundle the real dashboard and skip the assertion.
+        let is_placeholder = DASHBOARD
+            .get_file("index.html")
+            .and_then(|f| f.contents_utf8())
+            .map(|s| s.contains("not bundled"))
+            .unwrap_or(false);
+        if is_placeholder {
+            assert!(!dashboard_is_bundled());
+        }
+    }
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use http_body_util::BodyExt;

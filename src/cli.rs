@@ -965,6 +965,19 @@ pub fn cmd_status() -> Result<()> {
     let db_path = crate::db::resolve_db_path();
     let (out, clients) = with_spinner("checking status...", || {
         let clients = detect_registered_clients(&home);
+        let settings = crate::config::load_server_settings(&crate::config::global_config_path())?;
+        let probe_host = match settings.host.as_str() {
+            "0.0.0.0" | "::" => "127.0.0.1",
+            h => h,
+        };
+        let server_up = format!("{probe_host}:{}", settings.port)
+            .parse::<std::net::SocketAddr>()
+            .ok()
+            .map(|addr| {
+                std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(300))
+                    .is_ok()
+            })
+            .unwrap_or(false);
         let result = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?
@@ -980,6 +993,8 @@ pub fn cmd_status() -> Result<()> {
                     &store,
                     &db_path,
                     &clients,
+                    &settings,
+                    server_up,
                 )
                 .await
             })?;
@@ -1110,6 +1125,8 @@ pub async fn render_status(
     store: &crate::store::SqliteStore,
     db_path: &str,
     registered_clients: &[&str],
+    settings: &crate::config::ServerSettings,
+    server_up: bool,
 ) -> Result<String> {
     use std::fmt::Write as _;
 
@@ -1131,9 +1148,32 @@ pub async fn render_status(
         None => writeln!(out, "HiveMind v{version}")?,
     }
     writeln!(out, "─────────────────────────────────────────────────────")?;
-    writeln!(out, "Server:     stdio (spawned by Claude Code)")?;
+    let probe_host = match settings.host.as_str() {
+        "0.0.0.0" | "::" => "127.0.0.1",
+        h => h,
+    };
+    if server_up {
+        writeln!(
+            out,
+            "Server:     running at http://{}:{} (hivemind up)",
+            probe_host, settings.port
+        )?;
+    } else {
+        writeln!(
+            out,
+            "Server:     not running (stdio instance is spawned per session)"
+        )?;
+    }
     writeln!(out, "Storage:    {db_path} ({count} memories)")?;
-    writeln!(out, "Sync:       disabled (local only)")?;
+    if settings.sync.enabled {
+        writeln!(
+            out,
+            "Sync:       enabled \u{2192} {}",
+            settings.sync.remote_url
+        )?;
+    } else {
+        writeln!(out, "Sync:       disabled (local only)")?;
+    }
     if registered_clients.is_empty() {
         writeln!(out, "AI clients: none registered")?;
     } else {
@@ -1202,7 +1242,7 @@ pub async fn render_status(
     writeln!(out)?;
     writeln!(
         out,
-        "On file open rules:    {} active",
+        "On file open rules:    {} configured (reserved, not yet active)",
         config.file_open_rule_count
     )?;
     writeln!(
@@ -1218,6 +1258,12 @@ pub async fn render_status(
 mod tests {
     use super::*;
     use std::fs;
+
+    /// Default server settings, built the same way `hivemind status` does when
+    /// no global config exists.
+    fn default_settings() -> crate::config::ServerSettings {
+        crate::config::load_server_settings(Path::new("/nonexistent/hivemind-global.toml")).unwrap()
+    }
 
     fn sample_result(loaded: bool, skipped: bool) -> crate::session::SessionStartResult {
         use crate::session::{LoadedEntry, SkipReason, SkippedEntry};
@@ -1495,9 +1541,17 @@ mod tests {
         ).unwrap();
         let missing_global = proj.path().join("no-global.toml");
 
-        let out = render_status(proj.path(), &missing_global, &store, "/tmp/x.db", &[])
-            .await
-            .unwrap();
+        let out = render_status(
+            proj.path(),
+            &missing_global,
+            &store,
+            "/tmp/x.db",
+            &[],
+            &default_settings(),
+            false,
+        )
+        .await
+        .unwrap();
         assert!(out.contains("demo"), "shows project name");
         assert!(
             out.contains("golang preferences"),
@@ -1536,6 +1590,8 @@ mod tests {
             &store,
             "/tmp/x.db",
             &["claude", "cursor"],
+            &default_settings(),
+            false,
         )
         .await
         .unwrap();
@@ -1561,9 +1617,17 @@ mod tests {
 
         let proj = tempfile::tempdir().unwrap();
         let missing_global = proj.path().join("no-global.toml");
-        let out = render_status(proj.path(), &missing_global, &store, "/tmp/x.db", &[])
-            .await
-            .unwrap();
+        let out = render_status(
+            proj.path(),
+            &missing_global,
+            &store,
+            "/tmp/x.db",
+            &[],
+            &default_settings(),
+            false,
+        )
+        .await
+        .unwrap();
         assert!(
             out.contains("hivemind init"),
             "suggests init when no config"
@@ -1863,9 +1927,17 @@ mod tests {
         ).unwrap();
         let missing_global = proj.path().join("no-global.toml");
 
-        let out = render_status(proj.path(), &missing_global, &store, "/tmp/x.db", &[])
-            .await
-            .unwrap();
+        let out = render_status(
+            proj.path(),
+            &missing_global,
+            &store,
+            "/tmp/x.db",
+            &[],
+            &default_settings(),
+            false,
+        )
+        .await
+        .unwrap();
         assert!(
             out.contains("nothing"),
             "should show nothing when no recalls resolve"
@@ -1899,9 +1971,17 @@ mod tests {
         std::fs::write(proj.path().join(".hivemind.local.toml"), "").unwrap();
         let missing_global = proj.path().join("no-global.toml");
 
-        let out = render_status(proj.path(), &missing_global, &store, "/tmp/x.db", &[])
-            .await
-            .unwrap();
+        let out = render_status(
+            proj.path(),
+            &missing_global,
+            &store,
+            "/tmp/x.db",
+            &[],
+            &default_settings(),
+            false,
+        )
+        .await
+        .unwrap();
         assert!(
             out.contains(".hivemind.local.toml"),
             "should mention local toml"
