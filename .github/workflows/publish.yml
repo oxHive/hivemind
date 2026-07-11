@@ -11,7 +11,7 @@ jobs:
       id-token: write
       contents: write
       pull-requests: read
-    uses: oxHive/pipelines/.github/workflows/rust-release.yml@main
+    uses: oxHive/pipelines/.github/workflows/rust-release.yml@v2
     with:
       package-name: oxhivemind
       binary-name: hivemind
