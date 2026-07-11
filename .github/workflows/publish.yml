@@ -15,4 +15,5 @@ jobs:
     with:
       package-name: oxhivemind
       binary-name: hivemind
+      dashboard-dir: dashboard
     secrets: inherit
