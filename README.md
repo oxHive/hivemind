@@ -352,6 +352,8 @@ port = 3456
 
 [dashboard]
 port = 3457
+# api_url = "http://127.0.0.1:3456"      # override if the server isn't on the default host/port
+# cors_origin = "http://127.0.0.1:3457"  # override if you run the dashboard separately (e.g. `bun run dev` on :5173)
 
 [sync]
 enabled = false
