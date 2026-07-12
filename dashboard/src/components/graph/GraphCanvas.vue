@@ -35,6 +35,19 @@ function nodeRadius(n) {
   return Math.max(10, 10 + connections * 1.5)
 }
 
+// Memories render as hexagonal cells — the honeycomb is the graph.
+function traceHex(ctx, x, y, r) {
+  ctx.beginPath()
+  for (let i = 0; i < 6; i++) {
+    const a = (Math.PI / 180) * (60 * i - 90)
+    const px = x + r * Math.cos(a)
+    const py = y + r * Math.sin(a)
+    if (i === 0) ctx.moveTo(px, py)
+    else ctx.lineTo(px, py)
+  }
+  ctx.closePath()
+}
+
 function draw() {
   const canvas = canvasEl.value
   if (!canvas) return
@@ -76,8 +89,7 @@ function draw() {
 
     // Ring for selected
     if (isSelected) {
-      ctx.beginPath()
-      ctx.arc(node.x, node.y, r + 3.5, 0, Math.PI * 2)
+      traceHex(ctx, node.x, node.y, r + 3.5)
       ctx.strokeStyle = color
       ctx.globalAlpha = 0.4
       ctx.lineWidth = 1.5
@@ -85,17 +97,16 @@ function draw() {
       ctx.globalAlpha = 1
     }
 
-    ctx.beginPath()
-    ctx.arc(node.x, node.y, r, 0, Math.PI * 2)
+    traceHex(ctx, node.x, node.y, r)
     ctx.fillStyle = color
     ctx.globalAlpha = isSelected ? 1 : 0.72
     ctx.fill()
     ctx.globalAlpha = 1
 
-    // Label at zoom >= 2
-    if (graph.zoom >= 2) {
-      ctx.fillStyle = '#f0f0f0'
-      ctx.font = '10px "JetBrains Mono", monospace'
+    // Label at zoom >= 2, always for the selected node
+    if (graph.zoom >= 2 || isSelected) {
+      ctx.fillStyle = '#f2f0ec'
+      ctx.font = '10px "IBM Plex Mono", monospace'
       ctx.textAlign = 'center'
       ctx.fillText(node.title.slice(0, 20), node.x, node.y + r + 13)
     }

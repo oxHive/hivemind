@@ -37,16 +37,16 @@ async function handleImport(e) {
 
 <template>
   <div>
-    <p class="hm-label mb-3">DATA</p>
-    <div class="flex flex-col gap-3">
+    <p class="hm-label mb-4">DATA</p>
+    <div class="flex flex-col gap-5">
       <div>
-        <p style="font-size:12px; font-weight:500; color:var(--hm-text-primary)" class="mb-1">Export to JSON</p>
-        <p style="font-size:11px; color:var(--hm-text-tertiary)" class="mb-2">Download all memories as a JSON file</p>
+        <p style="font-size:12px; font-weight:500; color:var(--hm-text-primary)" class="mb-1.5">Export to JSON</p>
+        <p style="font-size:11px; color:var(--hm-text-tertiary)" class="mb-3">Download all memories as a JSON file</p>
         <button class="hm-btn hm-btn-default" @click="handleExport">Export</button>
       </div>
       <div>
-        <p style="font-size:12px; font-weight:500; color:var(--hm-text-primary)" class="mb-1">Import from JSON</p>
-        <p style="font-size:11px; color:var(--hm-text-tertiary)" class="mb-2">Restore from a previous HiveMind export</p>
+        <p style="font-size:12px; font-weight:500; color:var(--hm-text-primary)" class="mb-1.5">Import from JSON</p>
+        <p style="font-size:11px; color:var(--hm-text-tertiary)" class="mb-3">Restore from a previous HiveMind export</p>
         <button class="hm-btn hm-btn-default" @click="fileInput.click()">Import</button>
         <input ref="fileInput" type="file" accept=".json" class="hidden" @change="handleImport" />
       </div>

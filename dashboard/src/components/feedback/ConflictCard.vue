@@ -6,10 +6,10 @@ const fb = useFeedbackStore()
 </script>
 
 <template>
-  <div class="rounded-lg p-4 mb-3"
+  <div class="rounded-lg p-5 mb-4"
     style="background:var(--hm-bg-elevated); border:0.5px solid var(--hm-border-default)">
 
-    <div class="flex items-start justify-between mb-3">
+    <div class="flex items-start justify-between mb-4">
       <div>
         <span class="font-mono" style="font-size:10px; color:var(--hm-text-tertiary)">{{ conflict.id }}</span>
         <p class="mt-1" style="font-size:13px; font-weight:500; color:var(--hm-text-primary)">{{ conflict.title || 'Conflict' }}</p>
@@ -17,13 +17,13 @@ const fb = useFeedbackStore()
     </div>
 
     <!-- Two-column diff -->
-    <div class="grid grid-cols-2 gap-2 mb-3">
-      <div class="rounded p-2" style="background:var(--hm-danger-bg); border:0.5px solid var(--hm-danger-border)">
-        <p class="font-mono mb-1" style="font-size:9px; color:var(--hm-danger)">YOUR LOCAL VERSION</p>
+    <div class="grid grid-cols-2 gap-3 mb-4">
+      <div class="rounded p-3" style="background:var(--hm-danger-bg); border:0.5px solid var(--hm-danger-border)">
+        <p class="font-mono mb-1.5" style="font-size:9px; color:var(--hm-danger)">YOUR LOCAL VERSION</p>
         <p style="font-size:11px; color:var(--hm-text-secondary)">{{ conflict.local }}</p>
       </div>
-      <div class="rounded p-2" style="background:var(--hm-bg-overlay); border:0.5px solid var(--hm-border-default)">
-        <p class="font-mono mb-1" style="font-size:9px; color:var(--hm-text-tertiary)">CURRENT (FROM REMOTE)</p>
+      <div class="rounded p-3" style="background:var(--hm-bg-overlay); border:0.5px solid var(--hm-border-default)">
+        <p class="font-mono mb-1.5" style="font-size:9px; color:var(--hm-text-tertiary)">CURRENT (FROM REMOTE)</p>
         <p style="font-size:11px; color:var(--hm-text-secondary)">{{ conflict.current }}</p>
       </div>
     </div>

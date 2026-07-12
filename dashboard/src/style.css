@@ -1,22 +1,22 @@
 @import "tailwindcss";
 
 :root {
-  /* Backgrounds */
-  --hm-bg-base: #0f0f0f;
-  --hm-bg-surface: #171717;
-  --hm-bg-elevated: #1f1f1f;
-  --hm-bg-overlay: #2a2a2a;
+  /* Backgrounds — warm dark, a shade of the hive rather than pure gray */
+  --hm-bg-base: #121110;
+  --hm-bg-surface: #181716;
+  --hm-bg-elevated: #201e1c;
+  --hm-bg-overlay: #2b2825;
 
   /* Borders */
-  --hm-border-subtle: #2a2a2a;
-  --hm-border-default: #383838;
-  --hm-border-strong: #505050;
+  --hm-border-subtle: #2b2825;
+  --hm-border-default: #3a3732;
+  --hm-border-strong: #524e47;
 
   /* Text */
-  --hm-text-primary: #f0f0f0;
-  --hm-text-secondary: #a0a0a0;
-  --hm-text-tertiary: #606060;
-  --hm-text-disabled: #404040;
+  --hm-text-primary: #f2f0ec;
+  --hm-text-secondary: #a49e95;
+  --hm-text-tertiary: #67625a;
+  --hm-text-disabled: #44403a;
 
   /* Brand — Personal (teal) */
   --hm-personal: #1d9e75;
@@ -41,17 +41,18 @@
   --hm-pending: #ba7517;
 
   /* Monospace surfaces */
-  --hm-mono-bg: #161616;
-  --hm-mono-border: #2a2a2a;
+  --hm-mono-bg: #171614;
+  --hm-mono-border: #2b2825;
 
-  /* Interaction accent — deliberately neutral so teal/purple stay reserved
-     for the personal/workspace layer semantics */
-  --hm-accent: #5b8dbe;
-  --hm-accent-ring: #5b8dbe55;
+  /* Brand accent — honey gold. Used for focus, active markers, and the hex
+     mark only, so teal/purple stay reserved for the layer semantics and
+     amber-orange stays reserved for warnings. */
+  --hm-accent: #d9a441;
+  --hm-accent-ring: #d9a44155;
 
   /* Typography */
-  --hm-font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --hm-font-mono: "JetBrains Mono", "Fira Code", "Cascadia Code", "SF Mono", monospace;
+  --hm-font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --hm-font-mono: "IBM Plex Mono", "JetBrains Mono", "SF Mono", monospace;
 
   /* Type scale */
   --hm-text-xs: 10px;
@@ -60,12 +61,6 @@
   --hm-text-md: 13px;
   --hm-text-lg: 14px;
   --hm-text-xl: 15px;
-}
-
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
 }
 
 html, body, #app {
@@ -141,14 +136,16 @@ button:focus-visible {
   font-family: var(--hm-font-mono);
 }
 
+/* Primary action: light on dark, so teal/purple keep their layer meaning */
 .hm-btn-primary {
-  background: var(--hm-personal-bg);
-  border-color: var(--hm-personal);
-  color: var(--hm-personal);
+  background: var(--hm-text-primary);
+  border-color: var(--hm-text-primary);
+  color: var(--hm-bg-base);
+  font-weight: 500;
 }
 
 .hm-btn-primary:hover {
-  background: color-mix(in srgb, var(--hm-personal-bg) 70%, var(--hm-personal));
+  background: #ffffff;
 }
 
 .hm-btn-default {
@@ -193,7 +190,7 @@ button:focus-visible {
   color: var(--hm-text-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
   display: block;
 }
 
@@ -218,4 +215,15 @@ button:focus-visible {
   background-size: 800px 100%;
   animation: shimmer 1.5s infinite;
   border-radius: 4px;
+}
+
+/* Hexagon cell — the HiveMind mark, shared by legends and badges */
+.hm-hex {
+  display: inline-block;
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hm-skeleton { animation: none; }
+  * { transition-duration: 0.01ms !important; }
 }

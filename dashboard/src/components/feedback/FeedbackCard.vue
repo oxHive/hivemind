@@ -25,9 +25,9 @@ function navToMemory() {
 </script>
 
 <template>
-  <div class="rounded-lg p-4 mb-3"
+  <div class="rounded-lg p-5 mb-4"
     style="background:var(--hm-bg-elevated); border:0.5px solid var(--hm-border-default)">
-    <div class="flex items-start justify-between mb-2">
+    <div class="flex items-start justify-between mb-3">
       <div class="flex items-center gap-2">
         <span class="font-mono rounded-sm px-1.5 py-0.5"
           :style="`font-size:9px; background:${(typeColors[item.signal]||typeColors.other).bg}; color:${(typeColors[item.signal]||typeColors.other).text}; border:0.5px solid ${(typeColors[item.signal]||typeColors.other).border}`">
@@ -41,7 +41,7 @@ function navToMemory() {
       <button class="hm-btn hm-btn-ghost hm-btn-sm" aria-label="Dismiss feedback" @click="fb.dismissFeedback(item.id)">✕</button>
     </div>
 
-    <p v-if="item.note" style="font-size:12px; color:var(--hm-text-secondary)" class="mb-3">{{ item.note }}</p>
+    <p v-if="item.note" style="font-size:12px; color:var(--hm-text-secondary)" class="mb-4">{{ item.note }}</p>
 
     <button class="hm-btn hm-btn-default hm-btn-sm font-mono"
       @click="ui.copyToClipboard(`/memory-edit ${item.memory_id}`)">

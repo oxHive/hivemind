@@ -20,7 +20,7 @@ defineEmits(['select'])
     @keydown.enter.space.prevent="$emit('select', mem)"
   >
     <!-- Row 1: title + layer badge -->
-    <div class="flex items-start justify-between gap-2 mb-1">
+    <div class="flex items-start justify-between gap-2 mb-1.5">
       <span class="font-medium leading-snug"
         style="font-size:13px; color:var(--hm-text-primary); overflow:hidden; display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical">
         {{ mem.title }}
@@ -28,7 +28,7 @@ defineEmits(['select'])
       <LayerBadge :layer="mem.layer" class="shrink-0 mt-0.5" />
     </div>
     <!-- Row 2: snippet -->
-    <p class="mb-1.5"
+    <p class="mb-2"
       style="font-size:12px; color:var(--hm-text-secondary); overflow:hidden; display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical">
       {{ mem.content }}
     </p>
@@ -46,7 +46,7 @@ defineEmits(['select'])
 
 <style scoped>
 .memory-card {
-  padding: 12px 14px;
+  padding: 14px 16px;
   cursor: pointer;
   border-bottom: 0.5px solid var(--hm-border-subtle);
   background: transparent;

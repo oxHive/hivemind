@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useMemoriesStore } from '../../stores/memories.js'
 import MemoryCard from './MemoryCard.vue'
 import FilterChip from '../shared/FilterChip.vue'
@@ -8,6 +8,18 @@ import NewMemoryModal from './NewMemoryModal.vue'
 
 const memories = useMemoriesStore()
 const showNew = ref(false)
+const searchEl = ref(null)
+
+function handleSlash(e) {
+  if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return
+  const tag = document.activeElement?.tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return
+  e.preventDefault()
+  searchEl.value?.focus()
+}
+
+onMounted(() => window.addEventListener('keydown', handleSlash))
+onBeforeUnmount(() => window.removeEventListener('keydown', handleSlash))
 
 const filters = [
   { label: 'all', value: 'all' },
@@ -21,20 +33,21 @@ const filters = [
     style="width:clamp(240px, 26vw, 320px); border-right:0.5px solid var(--hm-border-subtle)">
 
     <!-- Header -->
-    <div class="px-3 pt-3 pb-2" style="border-bottom:0.5px solid var(--hm-border-subtle)">
-      <button class="hm-btn hm-btn-primary hm-btn-sm mb-2 w-full justify-center"
+    <div class="px-4 pt-4 pb-3" style="border-bottom:0.5px solid var(--hm-border-subtle)">
+      <button class="hm-btn hm-btn-primary hm-btn-sm mb-3 w-full justify-center"
         @click="showNew = true">+ New memory</button>
       <NewMemoryModal v-if="showNew" @close="showNew = false" />
-      <div class="relative mb-2">
+      <div class="relative mb-3">
         <span class="absolute left-2.5 top-1/2 -translate-y-1/2" style="color:var(--hm-text-tertiary); font-size:13px">⌕</span>
         <input
+          ref="searchEl"
           class="hm-input pl-7"
-          placeholder="Search memories…"
+          placeholder="Search memories…  ( / )"
           :value="memories.searchQuery"
           @input="memories.searchQuery = $event.target.value"
         />
       </div>
-      <div class="flex gap-1">
+      <div class="flex gap-1.5">
         <FilterChip
           v-for="f in filters" :key="f.value"
           :label="f.label" :value="f.value"
@@ -66,7 +79,7 @@ const filters = [
     </div>
 
     <!-- Footer -->
-    <div class="px-3.5 py-2" style="border-top:0.5px solid var(--hm-border-subtle)">
+    <div class="px-4 py-2.5" style="border-top:0.5px solid var(--hm-border-subtle)">
       <span class="font-mono" style="font-size:11px; color:var(--hm-text-tertiary)">
         <template v-if="memories.searchQuery || memories.layerFilter !== 'all'">
           {{ memories.filtered.length }} of {{ memories.all.length }} memories
