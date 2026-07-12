@@ -46,27 +46,27 @@ const intervalLabel = computed(() => {
 
 <template>
   <div>
-    <p class="hm-label mb-3">SYNC</p>
+    <p class="hm-label mb-4">SYNC</p>
     <p v-if="loading" style="font-size:12px; color:var(--hm-text-tertiary)">Loading…</p>
     <template v-else>
-      <label class="flex items-center gap-3 mb-4 cursor-pointer">
+      <label class="flex items-center gap-3 mb-5 cursor-pointer">
         <input type="checkbox" v-model="enabled" class="w-4 h-4" />
         <span style="font-size:12px; color:var(--hm-text-primary)">Enable sync</span>
       </label>
       <template v-if="enabled">
         <label class="hm-label">REMOTE URL</label>
-        <input class="hm-input mb-3" v-model="remoteUrl" placeholder="http://pi.local:3456" />
+        <input class="hm-input mb-4" v-model="remoteUrl" placeholder="http://pi.local:3456" />
         <label class="hm-label">API KEY</label>
-        <input class="hm-input mb-3" type="password" v-model="apiKey" placeholder="Leave blank if no auth" />
+        <input class="hm-input mb-4" type="password" v-model="apiKey" placeholder="Leave blank if no auth" />
         <label class="hm-label">SYNC INTERVAL — {{ intervalLabel }}</label>
-        <input class="hm-input mb-3" type="number" min="30" v-model.number="intervalSeconds" />
-        <label class="flex items-center gap-3 mb-4 cursor-pointer">
+        <input class="hm-input mb-4" type="number" min="30" v-model.number="intervalSeconds" />
+        <label class="flex items-center gap-3 mb-5 cursor-pointer">
           <input type="checkbox" v-model="syncOnStore" class="w-4 h-4" />
           <span style="font-size:12px; color:var(--hm-text-secondary)">Sync immediately after storing a memory</span>
         </label>
       </template>
-      <button class="hm-btn hm-btn-primary mb-2" @click="save">Save sync settings</button>
-      <p v-if="message" style="font-size:11px; color:var(--hm-text-tertiary); margin-top:6px">{{ message }}</p>
+      <button class="hm-btn hm-btn-primary" @click="save">Save sync settings</button>
+      <p v-if="message" style="font-size:11px; color:var(--hm-text-tertiary)" class="mt-3">{{ message }}</p>
     </template>
   </div>
 </template>

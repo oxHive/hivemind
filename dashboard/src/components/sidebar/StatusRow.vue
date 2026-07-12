@@ -7,7 +7,7 @@ defineProps({
 </script>
 
 <template>
-  <div class="flex items-center gap-2 py-0.5">
+  <div class="flex items-center gap-2 py-1">
     <span class="dot rounded-full shrink-0" :class="`dot--${dot || 'gray'}`"></span>
     <span :class="mono ? 'font-mono' : ''" style="font-size:11px; color:var(--hm-text-secondary)">{{ text }}</span>
   </div>

@@ -1,10 +1,11 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useMemoriesStore } from '../../stores/memories.js'
 import { useUiStore } from '../../stores/ui.js'
 import { useGraphStore } from '../../stores/graph.js'
 import LayerBadge from '../shared/LayerBadge.vue'
 import TagChip from '../shared/TagChip.vue'
+import EmptyState from '../shared/EmptyState.vue'
 import DeleteConfirmModal from './DeleteConfirmModal.vue'
 import { fmtDate } from '../../lib/format.js'
 import { createFeedback } from '../../api/feedback.js'
@@ -46,21 +47,29 @@ async function handleDelete() {
   await memories.remove(id)
   ui.showToast('Memory deleted')
 }
+
+function handleKeydown(e) {
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    e.preventDefault()
+    if (memories.selected && memories.dirty && !memories.saving) handleSave()
+  }
+}
+
+onMounted(() => window.addEventListener('keydown', handleKeydown))
+onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
 </script>
 
 <template>
   <div class="flex flex-col h-full flex-1" style="background:var(--hm-bg-base)">
 
     <!-- Empty state -->
-    <div v-if="!memories.selected" class="flex flex-col items-center justify-center h-full gap-2"
-      style="color:var(--hm-text-tertiary)">
-      <span style="font-size:20px">←</span>
-      <p style="font-size:13px">Select a memory to view or edit</p>
-    </div>
+    <EmptyState v-if="!memories.selected"
+      message="Select a memory to view or edit"
+      hint="Press / to search, Ctrl+S to save changes" />
 
     <template v-else>
       <!-- Toolbar -->
-      <div class="flex items-center justify-between px-4 py-2"
+      <div class="flex items-center justify-between px-5 py-2.5"
         style="border-bottom:0.5px solid var(--hm-border-subtle)">
         <span class="font-mono" style="font-size:10px; color:var(--hm-text-tertiary)">
           {{ memories.selected.id }}
@@ -68,12 +77,12 @@ async function handleDelete() {
         <div class="flex gap-1">
           <div class="relative">
             <button class="hm-btn hm-btn-ghost hm-btn-sm" title="Flag for review"
-              @click="flagOpen = !flagOpen">⚑</button>
+              @click="flagOpen = !flagOpen" @keydown.esc="flagOpen = false">⚑</button>
+            <div v-if="flagOpen" class="fixed inset-0" style="z-index:9" @click="flagOpen = false"></div>
             <div v-if="flagOpen" class="absolute right-0 mt-1 rounded-md py-1"
               style="background:var(--hm-bg-overlay); border:0.5px solid var(--hm-border-default); z-index:10">
               <button v-for="r in ['incorrect','outdated','duplicate','other']" :key="r"
-                class="block w-full text-left px-3 py-1.5"
-                style="font-size:12px; color:var(--hm-text-secondary); background:none; border:none; cursor:pointer"
+                class="flag-option block w-full text-left px-3 py-1.5"
                 @click="flag(r)">{{ r }}</button>
             </div>
           </div>
@@ -82,12 +91,12 @@ async function handleDelete() {
       </div>
 
       <!-- Body -->
-      <div class="flex-1 overflow-y-auto px-4 py-3">
+      <div class="flex-1 overflow-y-auto px-6 py-5">
         <!-- Title -->
         <label class="hm-label" for="mem-title">TITLE</label>
         <input
           id="mem-title"
-          class="hm-input mb-4"
+          class="hm-input mb-6"
           :value="memories.draft?.title"
           @input="memories.draft.title = $event.target.value"
         />
@@ -96,17 +105,17 @@ async function handleDelete() {
         <label class="hm-label" for="mem-content">CONTENT</label>
         <textarea
           id="mem-content"
-          class="hm-input mb-4 resize-none"
-          style="height:40vh; min-height:160px; padding:8px 10px; font-family:var(--hm-font-mono); font-size:12px; line-height:1.6; background:var(--hm-mono-bg)"
+          class="hm-input mb-6 resize-none"
+          style="height:40vh; min-height:160px; padding:10px 12px; font-family:var(--hm-font-mono); font-size:12px; line-height:1.6; background:var(--hm-mono-bg)"
           :value="memories.draft?.content"
           @input="memories.draft.content = $event.target.value"
         ></textarea>
 
         <!-- Tags -->
         <label class="hm-label" id="mem-tags-label">TAGS</label>
-        <div class="flex flex-wrap gap-1.5 p-2 mb-4 rounded-md"
+        <div class="flex flex-wrap gap-1.5 p-2.5 mb-6 rounded-md"
           aria-labelledby="mem-tags-label"
-          style="border:0.5px solid var(--hm-border-subtle); min-height:36px">
+          style="border:0.5px solid var(--hm-border-subtle); min-height:40px">
           <TagChip
             v-for="tag in memories.draft?.tags" :key="tag"
             :tag="tag" :removable="true"
@@ -122,9 +131,9 @@ async function handleDelete() {
         <!-- Connections -->
         <template v-if="memories.selected && graph.edgesFor(memories.selected.id).length">
           <label class="hm-label">CONNECTIONS</label>
-          <div class="flex flex-col gap-1">
+          <div class="flex flex-col gap-1.5">
             <div v-for="edge in graph.edgesFor(memories.selected.id)" :key="edge.id"
-              class="flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer"
+              class="flex items-center justify-between px-3 py-2 rounded-md cursor-pointer"
               style="border:0.5px solid var(--hm-border-subtle); font-size:12px"
               @click="memories.select(memories.all.find(m => m.id === (edge.source_id === memories.selected.id ? edge.target_id : edge.source_id)))">
               <span class="font-mono" style="font-size:10px; color:var(--hm-text-tertiary); margin-right:8px">
@@ -140,7 +149,7 @@ async function handleDelete() {
       </div>
 
       <!-- Footer -->
-      <div class="flex items-center justify-between px-4 py-2"
+      <div class="flex items-center justify-between px-5 py-3"
         style="border-top:0.5px solid var(--hm-border-subtle)">
         <span class="flex items-center gap-2 font-mono" style="font-size:11px; color:var(--hm-text-tertiary)">
           updated {{ fmtDate(memories.selected.updated_at) }}
@@ -162,3 +171,20 @@ async function handleDelete() {
     />
   </div>
 </template>
+
+<style scoped>
+.flag-option {
+  font-size: 12px;
+  color: var(--hm-text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.flag-option:hover,
+.flag-option:focus-visible {
+  background: var(--hm-bg-elevated);
+  color: var(--hm-text-primary);
+  outline: none;
+}
+</style>

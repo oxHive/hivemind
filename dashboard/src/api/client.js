@@ -1,4 +1,4 @@
-const BASE = window.HIVEMIND_API || 'http://localhost:3456'
+const BASE = window.HIVEMIND_API || (import.meta.env.DEV ? '' : 'http://localhost:3456')
 
 /**
  * @param {'GET'|'POST'|'PATCH'|'DELETE'} method

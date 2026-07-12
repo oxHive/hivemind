@@ -13,13 +13,13 @@ const emit = defineEmits(['filter-change', 'search-change'])
 </script>
 
 <template>
-  <div class="flex items-center gap-2 px-3 py-2 shrink-0"
+  <div class="flex items-center gap-3 px-4 py-2.5 shrink-0"
     style="border-bottom:0.5px solid var(--hm-border-subtle); background:var(--hm-bg-surface)">
 
     <input class="hm-input" style="width:180px" placeholder="Find node…"
       v-model="searchQuery" @input="emit('search-change', searchQuery)" />
 
-    <div class="flex gap-1">
+    <div class="flex gap-1.5">
       <FilterChip
         v-for="f in [{label:'all',value:'all'},{label:'personal',value:'personal',layer:'personal'},{label:'workspace',value:'workspace',layer:'workspace'}]"
         :key="f.value" :label="f.label" :value="f.value"

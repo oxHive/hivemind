@@ -60,15 +60,23 @@ const syncDot = computed(() => {
     style="width:200px; background:var(--hm-bg-surface); border-right:0.5px solid var(--hm-border-subtle)">
 
     <!-- Logo -->
-    <div class="px-4 pt-5 pb-4" style="border-bottom:0.5px solid var(--hm-border-subtle)">
-      <div style="font-size:15px; font-weight:500; color:var(--hm-text-primary)">HiveMind</div>
-      <div class="font-mono mt-0.5" style="font-size:10px; color:var(--hm-text-tertiary)">
-        v{{ ui.serverInfo?.version || '—' }}
+    <div class="px-5 pt-6 pb-7 flex items-end justify-between gap-2"
+      style="border-bottom:0.5px solid var(--hm-border-subtle)">
+      <div class="flex items-center gap-2">
+        <svg width="18" height="18" viewBox="0 0 16 16" aria-hidden="true">
+          <polygon points="8,1.5 13.6,4.75 13.6,11.25 8,14.5 2.4,11.25 2.4,4.75"
+            fill="none" stroke="var(--hm-accent)" stroke-width="1.2" />
+          <circle cx="8" cy="8" r="2" fill="var(--hm-accent)" />
+        </svg>
+        <div style="font-size:15px; font-weight:600; letter-spacing:-0.01em; color:var(--hm-text-primary); line-height:1">HiveMind</div>
       </div>
+      <span class="font-mono shrink-0" style="font-size:10px; color:var(--hm-text-tertiary); line-height:1">
+        v{{ ui.serverInfo?.version || '—' }}
+      </span>
     </div>
 
     <!-- Nav -->
-    <ul class="flex flex-col py-2">
+    <ul class="flex flex-col py-3">
       <li v-for="item in navItems" :key="item.id">
         <button
           @click="ui.activeView = item.id"
@@ -87,16 +95,16 @@ const syncDot = computed(() => {
     </ul>
 
     <!-- Status (push to bottom) -->
-    <div class="mt-auto px-4 pb-4 pt-3" style="border-top:0.5px solid var(--hm-border-subtle)">
-      <StatusRow :dot="statusDot" :text="statusText" />
-      <StatusRow dot="gray" :text="`${memoryCount} memories`" class="mt-1" />
-      <StatusRow v-if="syncStatusText" :dot="syncDot" :text="syncStatusText" class="mt-1" />
+    <div class="mt-auto px-5 pb-5 pt-4" style="border-top:0.5px solid var(--hm-border-subtle)">
+      <StatusRow v-if="syncStatusText" :dot="syncDot" :text="syncStatusText" />
       <StatusRow
         v-if="(syncInfo?.conflict_count ?? 0) > 0"
         dot="amber"
         :text="`${syncInfo.conflict_count} conflict${syncInfo.conflict_count > 1 ? 's' : ''} need review`"
-        class="mt-1"
+        :class="{ 'mt-1': syncStatusText }"
       />
+      <StatusRow :dot="statusDot" :text="statusText" :class="{ 'mt-1': syncStatusText || (syncInfo?.conflict_count ?? 0) > 0 }" />
+      <StatusRow dot="gray" :text="`${memoryCount} memories`" class="mt-1" />
     </div>
   </nav>
 </template>
@@ -107,7 +115,7 @@ const syncDot = computed(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 16px;
+  padding: 10px 20px;
   font-size: 13px;
   text-align: left;
   color: var(--hm-text-secondary);
@@ -133,5 +141,6 @@ const syncDot = computed(() => {
   background: var(--hm-bg-elevated);
   color: var(--hm-text-primary);
   font-weight: 500;
+  box-shadow: inset 2px 0 0 var(--hm-accent);
 }
 </style>
