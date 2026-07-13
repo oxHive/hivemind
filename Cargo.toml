@@ -3,6 +3,7 @@ name = "oxhivemind"
 version = "0.3.30"
 edition = "2024"
 description = "A persistent memory MCP server for AI agents"
+repository = "https://github.com/oxhive/hivemind"
 license = "AGPL-3.0-only"
 keywords = ["mcp", "memory", "ai", "agent", "cli"]
 categories = ["command-line-utilities", "development-tools"]
