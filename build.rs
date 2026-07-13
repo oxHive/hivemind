@@ -1,11 +1,6 @@
 fn main() {
     println!("cargo:rerun-if-changed=dashboard/dist");
 
-    // include_dir! (src/http.rs) requires this path to exist at compile time.
-    // dashboard/dist is gitignored build output, so a fresh clone won't have
-    // it — create it empty so source builds compile without the dashboard.
-    std::fs::create_dir_all("dashboard/dist").ok();
-
     let sha = std::process::Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])
         .output()
