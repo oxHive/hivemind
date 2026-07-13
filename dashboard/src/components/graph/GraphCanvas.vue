@@ -101,6 +101,13 @@ function hitTestNode(wx, wy) {
   return null
 }
 
+function nodeLabel(node) {
+  const projectTag = (node.tags || []).find(t => t.toLowerCase().startsWith('project:'))
+  if (!projectTag) return node.title
+  const projectValue = projectTag.slice(projectTag.indexOf(':') + 1)
+  return `${projectValue}: ${node.title}`
+}
+
 // Memories render as hexagonal cells — the honeycomb is the graph.
 function traceHex(ctx, x, y, r) {
   ctx.beginPath()
@@ -178,7 +185,7 @@ function draw() {
       ctx.fillStyle = '#f2f0ec'
       ctx.font = '10px "IBM Plex Mono", monospace'
       ctx.textAlign = 'center'
-      ctx.fillText(node.title.slice(0, 20), node.x, node.y + r + 13)
+      ctx.fillText(nodeLabel(node).slice(0, 20), node.x, node.y + r + 13)
     }
   }
 
