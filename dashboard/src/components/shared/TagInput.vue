@@ -1,12 +1,14 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useTagSettingsStore } from '../../stores/tagSettings.js'
+import { useUiStore } from '../../stores/ui.js'
 import TagChip from './TagChip.vue'
 
 const props = defineProps({ modelValue: { type: Array, default: () => [] } })
 const emit = defineEmits(['update:modelValue'])
 
 const tagSettings = useTagSettingsStore()
+const ui = useUiStore()
 const inputValue = ref('')
 const showSuggestions = ref(false)
 
@@ -32,8 +34,14 @@ function commit(rawTag) {
   const tag = rawTag.trim().toLowerCase()
   if (!tag) return
   const isProjectTag = tag.startsWith('project:')
+  const existingProjectTag = isProjectTag
+    ? props.modelValue.find(t => t.toLowerCase().startsWith('project:'))
+    : null
   let next = props.modelValue.filter(t => !(isProjectTag && t.toLowerCase().startsWith('project:')))
   if (!next.includes(tag)) next = [...next, tag]
+  if (existingProjectTag && existingProjectTag !== tag) {
+    ui.showToast(`Replaced project tag: ${existingProjectTag} → ${tag}`)
+  }
   emit('update:modelValue', next)
   inputValue.value = ''
   showSuggestions.value = false
