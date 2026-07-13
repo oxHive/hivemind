@@ -1,6 +1,7 @@
 <script setup>
 import ServerSection from '../components/settings/ServerSection.vue'
 import SyncSection from '../components/settings/SyncSection.vue'
+import TagsSection from '../components/settings/TagsSection.vue'
 import DataSection from '../components/settings/DataSection.vue'
 import DangerSection from '../components/settings/DangerSection.vue'
 </script>
@@ -11,6 +12,7 @@ import DangerSection from '../components/settings/DangerSection.vue'
     <div class="flex flex-col gap-10">
       <ServerSection />
       <SyncSection />
+      <TagsSection />
       <DataSection />
       <DangerSection />
     </div>
