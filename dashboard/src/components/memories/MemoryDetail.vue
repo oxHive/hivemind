@@ -4,7 +4,7 @@ import { useMemoriesStore } from '../../stores/memories.js'
 import { useUiStore } from '../../stores/ui.js'
 import { useGraphStore } from '../../stores/graph.js'
 import LayerBadge from '../shared/LayerBadge.vue'
-import TagChip from '../shared/TagChip.vue'
+import TagInput from '../shared/TagInput.vue'
 import EmptyState from '../shared/EmptyState.vue'
 import DeleteConfirmModal from './DeleteConfirmModal.vue'
 import { fmtDate } from '../../lib/format.js'
@@ -15,25 +15,12 @@ const ui = useUiStore()
 const graph = useGraphStore()
 
 const showDeleteModal = ref(false)
-const newTagInput = ref('')
-const addingTag = ref(false)
 const flagOpen = ref(false)
 
 async function flag(signal) {
   flagOpen.value = false
   await createFeedback({ memory_id: memories.selected.id, signal })
   ui.showToast(`Flagged as ${signal}`)
-}
-
-function removeTag(tag) {
-  memories.draft.tags = memories.draft.tags.filter(t => t !== tag)
-}
-
-function addTag() {
-  const t = newTagInput.value.trim()
-  if (t && !memories.draft.tags.includes(t)) memories.draft.tags.push(t)
-  newTagInput.value = ''
-  addingTag.value = false
 }
 
 async function handleSave() {
@@ -113,19 +100,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
 
         <!-- Tags -->
         <label class="hm-label" id="mem-tags-label">TAGS</label>
-        <div class="flex flex-wrap gap-1.5 p-2.5 mb-6 rounded-md"
-          aria-labelledby="mem-tags-label"
-          style="border:0.5px solid var(--hm-border-subtle); min-height:40px">
-          <TagChip
-            v-for="tag in memories.draft?.tags" :key="tag"
-            :tag="tag" :removable="true"
-            @remove="removeTag(tag)" />
-          <template v-if="addingTag">
-            <input class="hm-input" style="width:100px; height:22px; font-size:10px; padding:0 6px"
-              v-model="newTagInput" @keydown.enter="addTag" @keydown.esc="addingTag = false" @blur="addTag" />
-          </template>
-          <button v-else class="font-mono" style="font-size:10px; color:var(--hm-text-tertiary)"
-            @click="addingTag = true">+ add tag</button>
+        <div class="mb-6" aria-labelledby="mem-tags-label">
+          <TagInput
+            :model-value="memories.draft?.tags ?? []"
+            @update:model-value="memories.draft.tags = $event" />
         </div>
 
         <!-- Connections -->

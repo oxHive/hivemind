@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { useMemoriesStore } from '../../stores/memories.js'
 import { useUiStore } from '../../stores/ui.js'
+import TagInput from '../shared/TagInput.vue'
 
 const emit = defineEmits(['close'])
 const memories = useMemoriesStore()
@@ -9,7 +10,7 @@ const ui = useUiStore()
 
 const title = ref('')
 const content = ref('')
-const tagsInput = ref('')
+const tags = ref([])
 const layer = ref('workspace')
 const saving = ref(false)
 
@@ -20,7 +21,7 @@ async function submit() {
     await memories.create({
       title: title.value.trim(),
       content: content.value,
-      tags: tagsInput.value.split(',').map(t => t.trim()).filter(Boolean),
+      tags: tags.value,
       layer: layer.value,
     })
     ui.showToast('Memory created')
@@ -43,8 +44,10 @@ async function submit() {
       <textarea id="nm-content" class="hm-input mb-4 resize-none"
         style="height:120px; padding:10px 12px; font-family:var(--hm-font-mono); font-size:12px"
         v-model="content"></textarea>
-      <label class="hm-label" for="nm-tags">TAGS (comma separated)</label>
-      <input id="nm-tags" class="hm-input mb-4" v-model="tagsInput" placeholder="golang, preferences" />
+      <label class="hm-label">TAGS</label>
+      <div class="mb-4">
+        <TagInput v-model="tags" />
+      </div>
       <label class="hm-label">LAYER</label>
       <div class="flex gap-1.5 mb-6">
         <button class="hm-btn hm-btn-sm"
