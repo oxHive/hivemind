@@ -15,6 +15,30 @@ let rafId = null
 let nodes = []
 let links = []
 
+const CAMERA_KEY = 'hivemind.graph.camera'
+
+function loadCamera() {
+  try {
+    const raw = localStorage.getItem(CAMERA_KEY)
+    if (raw) {
+      const p = JSON.parse(raw)
+      if (typeof p.x === 'number' && typeof p.y === 'number' && typeof p.k === 'number') return p
+    }
+  } catch { /* malformed storage, fall through to default */ }
+  return { x: 0, y: 0, k: 1 }
+}
+
+function saveCamera() {
+  localStorage.setItem(CAMERA_KEY, JSON.stringify(transform))
+}
+
+let transform = loadCamera()
+let zoomBehavior = null
+
+function toWorld(px, py) {
+  return [(px - transform.x) / transform.k, (py - transform.y) / transform.k]
+}
+
 function isEditableTarget(el) {
   return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
 }
@@ -71,6 +95,10 @@ function draw() {
   const h = canvas.height
   ctx.clearRect(0, 0, w, h)
 
+  ctx.save()
+  ctx.translate(transform.x, transform.y)
+  ctx.scale(transform.k, transform.k)
+
   // Draw edges
   for (const link of links) {
     const sx = link.source?.x, sy = link.source?.y
@@ -126,6 +154,8 @@ function draw() {
       ctx.fillText(node.title.slice(0, 20), node.x, node.y + r + 13)
     }
   }
+
+  ctx.restore()
 }
 
 function startSimulation() {
@@ -155,7 +185,7 @@ function startSimulation() {
 
 function handleClick(e) {
   if (panMode.value) return
-  const { offsetX: mx, offsetY: my } = e
+  const [mx, my] = toWorld(e.offsetX, e.offsetY)
   for (const node of nodes) {
     const r = nodeRadius(node)
     const dx = mx - node.x, dy = my - node.y
@@ -186,7 +216,7 @@ function handleMouseMove(e) {
     emit('edge-hover', null)
     return
   }
-  const { offsetX: mx, offsetY: my } = e
+  const [mx, my] = toWorld(e.offsetX, e.offsetY)
   let foundNode = null
   for (const node of nodes) {
     const r = nodeRadius(node)
@@ -223,6 +253,27 @@ onMounted(() => {
   })
   ro.observe(canvasEl.value.parentElement)
   window.addEventListener('keydown', handleKeydown)
+
+  zoomBehavior = d3.zoom()
+    .scaleExtent([0.2, 5])
+    .filter(event => event.type === 'wheel' || panMode.value)
+    .on('start', () => {
+      if (panMode.value) canvasEl.value.style.cursor = 'grabbing'
+    })
+    .on('zoom', event => {
+      transform.x = event.transform.x
+      transform.y = event.transform.y
+      transform.k = event.transform.k
+      if (rafId) cancelAnimationFrame(rafId)
+      rafId = requestAnimationFrame(draw)
+    })
+    .on('end', () => {
+      saveCamera()
+      if (panMode.value) canvasEl.value.style.cursor = 'grab'
+    })
+  const sel = d3.select(canvasEl.value)
+  sel.call(zoomBehavior)
+  sel.call(zoomBehavior.transform, d3.zoomIdentity.translate(transform.x, transform.y).scale(transform.k))
 })
 
 onUnmounted(() => {
