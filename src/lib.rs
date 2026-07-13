@@ -9,5 +9,6 @@ pub mod server;
 pub mod session;
 pub mod store;
 pub mod sync;
+pub mod tag_query;
 #[cfg(test)]
 mod test_env_lock;
