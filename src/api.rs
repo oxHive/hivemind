@@ -100,6 +100,10 @@ pub fn router(store: Store, sync: SyncSettings, dashboard_origin: &str, events: 
             "/api/v1/settings/sync",
             get(get_sync_settings).post(save_sync_settings),
         )
+        .route(
+            "/api/v1/settings/tags",
+            get(get_tag_settings).post(save_tag_settings),
+        )
         .route("/api/v1/status", get(server_status))
         .route("/api/v1/events", get(sse_events))
         .with_state(store)
@@ -594,6 +598,32 @@ async fn save_sync_settings(Json(_): Json<Value>) -> Json<Value> {
     )
 }
 
+fn default_tag_namespaces() -> Value {
+    json!({
+        "project": { "color": "#4a9eff", "values": [] },
+        "lang": { "color": "#e0607e", "values": [] },
+        "area": { "color": "#5fb8b0", "values": [] },
+        "status": { "color": "#a875d1", "values": [] },
+    })
+}
+
+async fn get_tag_settings(State(store): State<Store>) -> Result<Json<Value>, ApiError> {
+    let raw = store.get_meta("tag_namespaces").await?;
+    let registry = match raw {
+        Some(s) => serde_json::from_str(&s).unwrap_or_else(|_| default_tag_namespaces()),
+        None => default_tag_namespaces(),
+    };
+    Ok(Json(registry))
+}
+
+async fn save_tag_settings(
+    State(store): State<Store>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    store.set_meta("tag_namespaces", &body.to_string()).await?;
+    Ok(Json(json!({ "saved": true })))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -791,6 +821,40 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["saved"], false);
+    }
+
+    #[tokio::test]
+    async fn get_tag_settings_returns_seeded_defaults_when_unset() {
+        let (app, _dir) = test_router().await;
+        let (status, body) = req(app, "GET", "/api/v1/settings/tags", None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body["project"]["color"].is_string());
+        assert!(body["lang"]["color"].is_string());
+        assert!(body["area"]["color"].is_string());
+        assert!(body["status"]["color"].is_string());
+        assert_eq!(body["project"]["values"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn save_tag_settings_persists_and_get_returns_it() {
+        let (app, _dir) = test_router().await;
+        let custom = json!({
+            "project": { "color": "#4a9eff", "values": ["hivemind", "oxhive"] },
+            "lang": { "color": "#e0607e", "values": ["rust"] },
+        });
+        let (status, saved) = req(
+            app.clone(),
+            "POST",
+            "/api/v1/settings/tags",
+            Some(custom.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(saved["saved"], true);
+
+        let (status, body) = req(app, "GET", "/api/v1/settings/tags", None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, custom);
     }
 
     #[test]
