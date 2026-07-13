@@ -32,6 +32,23 @@ function saveCamera() {
   localStorage.setItem(CAMERA_KEY, JSON.stringify(transform))
 }
 
+const PINNED_KEY = 'hivemind.graph.pinned'
+
+function loadPinned() {
+  try {
+    const raw = localStorage.getItem(PINNED_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch {
+    return {}
+  }
+}
+
+function savePinnedPosition(id, x, y) {
+  const all = loadPinned()
+  all[id] = { x, y }
+  localStorage.setItem(PINNED_KEY, JSON.stringify(all))
+}
+
 let transform = loadCamera()
 let zoomBehavior = null
 
@@ -163,10 +180,15 @@ function startSimulation() {
   const canvas = canvasEl.value
   const w = canvas?.width || 800
   const h = canvas?.height || 600
+  const pinned = loadPinned()
 
   nodes = nodeData.value.map(n => {
     const existing = nodes.find(x => x.id === n.id)
-    return existing ? { ...n, x: existing.x, y: existing.y, vx: existing.vx, vy: existing.vy } : { ...n }
+    if (existing) {
+      return { ...n, x: existing.x, y: existing.y, vx: existing.vx, vy: existing.vy, fx: existing.fx, fy: existing.fy }
+    }
+    const p = pinned[n.id]
+    return p ? { ...n, x: p.x, y: p.y, fx: p.x, fy: p.y } : { ...n }
   })
 
   links = linkData.value.map(l => ({ ...l,
@@ -274,6 +296,38 @@ onMounted(() => {
   const sel = d3.select(canvasEl.value)
   sel.call(zoomBehavior)
   sel.call(zoomBehavior.transform, d3.zoomIdentity.translate(transform.x, transform.y).scale(transform.k))
+
+  const dragBehavior = d3.drag()
+    .filter(() => !panMode.value)
+    .subject(event => {
+      const [mx, my] = toWorld(event.x, event.y)
+      for (const node of nodes) {
+        const r = nodeRadius(node)
+        const dx = mx - node.x, dy = my - node.y
+        if (dx * dx + dy * dy <= (r + 4) * (r + 4)) return node
+      }
+      return null
+    })
+    .on('start', event => {
+      if (!event.subject) return
+      event.subject.fx = event.subject.x
+      event.subject.fy = event.subject.y
+      sim?.alphaTarget(0.3).restart()
+    })
+    .on('drag', event => {
+      if (!event.subject) return
+      const [wx, wy] = toWorld(event.x, event.y)
+      event.subject.fx = wx
+      event.subject.fy = wy
+      if (rafId) cancelAnimationFrame(rafId)
+      rafId = requestAnimationFrame(draw)
+    })
+    .on('end', event => {
+      if (!event.subject) return
+      sim?.alphaTarget(0)
+      savePinnedPosition(event.subject.id, event.subject.fx, event.subject.fy)
+    })
+  sel.call(dragBehavior)
 })
 
 onUnmounted(() => {
