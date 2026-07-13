@@ -20,7 +20,7 @@ const nodeData = computed(() =>
 
 const linkData = computed(() =>
   graph.edges
-    .filter(e => e.status === 'accepted' || e.status === 'pending')
+    .filter(e => e.status === 'active' || e.status === 'pending')
     .map(e => ({ id: e.id, source: e.source_id, target: e.target_id, status: e.status, relationship: e.relationship }))
 )
 
