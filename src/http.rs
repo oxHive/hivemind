@@ -19,6 +19,7 @@ use rmcp::transport::streamable_http_server::{
 use std::sync::Arc;
 
 static DASHBOARD: Dir = include_dir!("$CARGO_MANIFEST_DIR/dashboard/dist");
+static PLACEHOLDER_HTML: &str = include_str!("dashboard_placeholder.html");
 
 pub fn app_router(
     store: Arc<SqliteStore>,
@@ -26,21 +27,28 @@ pub fn app_router(
     notify_on_store: Option<Arc<tokio::sync::Notify>>,
     dashboard_origin: &str,
 ) -> Router {
+    // Fires whenever a memory or edge is created/updated/deleted, either via
+    // an MCP tool call (below) or the REST API (api::router) — the dashboard
+    // subscribes to it over SSE to silently refresh in the background.
+    let (events_tx, _) = tokio::sync::broadcast::channel::<()>(16);
+
     let mcp = StreamableHttpService::new(
         {
             let store = store.clone();
             let trigger = notify_on_store.clone();
+            let events_tx = events_tx.clone();
             move || {
-                Ok(match &trigger {
+                let hivemind = match &trigger {
                     Some(t) => HiveMind::with_sync(store.clone(), t.clone()),
                     None => HiveMind::with_store(store.clone()),
-                })
+                };
+                Ok(hivemind.with_events(events_tx.clone()))
             }
         },
         Arc::new(LocalSessionManager::default()),
         Default::default(),
     );
-    api::router(store, sync, dashboard_origin).nest_service("/mcp", mcp)
+    api::router(store, sync, dashboard_origin, events_tx).nest_service("/mcp", mcp)
 }
 
 pub fn dashboard_router(api_url: &str) -> Router {
@@ -62,6 +70,12 @@ pub fn dashboard_router(api_url: &str) -> Router {
             }),
         )
         .fallback(get(|req: axum::extract::Request| async move {
+            if !dashboard_is_bundled() {
+                return Response::builder()
+                    .header(header::CONTENT_TYPE, "text/html")
+                    .body(Body::from(PLACEHOLDER_HTML))
+                    .unwrap();
+            }
             let path = req.uri().path().trim_start_matches('/');
             let path = if path.is_empty() { "index.html" } else { path };
             match DASHBOARD.get_file(path) {
@@ -89,8 +103,8 @@ pub fn dashboard_router(api_url: &str) -> Router {
         }))
 }
 
-/// A real vite build ships an assets/ directory; the committed placeholder
-/// contains only index.html.
+/// A real vite build ships an assets/ directory; a source install has an
+/// empty dashboard/dist (see build.rs) and falls back to PLACEHOLDER_HTML.
 fn dashboard_is_bundled() -> bool {
     DASHBOARD.get_dir("assets").is_some()
 }
@@ -187,18 +201,22 @@ mod tests {
     use super::*;
     use crate::{config::SyncSettings, db, store::SqliteStore};
 
-    #[test]
-    fn placeholder_dist_reports_not_bundled() {
-        // Only meaningful when the committed placeholder is what got embedded;
-        // release builds bundle the real dashboard and skip the assertion.
-        let is_placeholder = DASHBOARD
-            .get_file("index.html")
-            .and_then(|f| f.contents_utf8())
-            .map(|s| s.contains("not bundled"))
-            .unwrap_or(false);
-        if is_placeholder {
-            assert!(!dashboard_is_bundled());
+    #[tokio::test]
+    async fn unbundled_dashboard_serves_placeholder() {
+        // Only meaningful for a source build without dashboard/dist/assets;
+        // a local `bun run build` before `cargo build` legitimately bundles
+        // the real dashboard and this assertion is skipped.
+        if dashboard_is_bundled() {
+            return;
         }
+        let dash = dashboard_router("http://127.0.0.1:3456");
+        let resp = dash
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        assert!(std::str::from_utf8(&body).unwrap().contains("not bundled"));
     }
     use axum::body::Body;
     use axum::http::{Request, StatusCode};

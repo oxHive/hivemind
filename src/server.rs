@@ -124,6 +124,7 @@ pub struct MemoryStoreEdgeInput {
 pub struct HiveMind {
     store: Arc<SqliteStore>,
     sync_trigger: Option<Arc<tokio::sync::Notify>>,
+    events: Option<tokio::sync::broadcast::Sender<()>>,
 }
 
 impl HiveMind {
@@ -132,6 +133,7 @@ impl HiveMind {
         Self {
             store: Arc::new(store),
             sync_trigger: None,
+            events: None,
         }
     }
 
@@ -139,6 +141,7 @@ impl HiveMind {
         Self {
             store,
             sync_trigger: None,
+            events: None,
         }
     }
 
@@ -146,6 +149,20 @@ impl HiveMind {
         Self {
             store,
             sync_trigger: Some(trigger),
+            events: None,
+        }
+    }
+
+    /// Broadcasts a "changed" signal to dashboard SSE subscribers whenever a
+    /// memory or edge is created/updated/deleted through this MCP handle.
+    pub fn with_events(mut self, tx: tokio::sync::broadcast::Sender<()>) -> Self {
+        self.events = Some(tx);
+        self
+    }
+
+    fn notify_change(&self) {
+        if let Some(tx) = &self.events {
+            let _ = tx.send(());
         }
     }
 
@@ -178,6 +195,7 @@ impl HiveMind {
         if let Some(t) = &self.sync_trigger {
             t.notify_one();
         }
+        self.notify_change();
         Ok(CallToolResult::structured(json!({
             "id": id,
             "title": title,
@@ -279,6 +297,9 @@ impl HiveMind {
             .update(&p.id, title, content, tags)
             .await
             .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+        if updated {
+            self.notify_change();
+        }
         Ok(CallToolResult::structured(json!({
             "updated": updated,
             "id": p.id,
@@ -300,6 +321,9 @@ impl HiveMind {
             .delete(&p.id)
             .await
             .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+        if deleted {
+            self.notify_change();
+        }
         Ok(CallToolResult::structured(json!({
             "deleted": deleted,
             "id": p.id,
@@ -679,10 +703,13 @@ impl HiveMind {
             .create_edge(&p.source_id, &p.target_id, &p.relationship)
             .await
         {
-            Ok(EdgeCreate::Created(id)) => Ok(CallToolResult::structured(json!({
-                "created": true, "id": id,
-                "source_id": p.source_id, "target_id": p.target_id, "relationship": p.relationship,
-            }))),
+            Ok(EdgeCreate::Created(id)) => {
+                self.notify_change();
+                Ok(CallToolResult::structured(json!({
+                    "created": true, "id": id,
+                    "source_id": p.source_id, "target_id": p.target_id, "relationship": p.relationship,
+                })))
+            }
             Ok(EdgeCreate::Duplicate) => Ok(CallToolResult::structured(json!({
                 "created": false, "reason": "an edge between these memories with this relationship already exists",
             }))),

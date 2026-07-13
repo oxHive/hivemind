@@ -38,6 +38,7 @@ anyhow = "1"
 uuid = { version = "1", features = ["v4"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
 clap = { version = "4", features = ["derive"] }
 toml = "1.1"
 tiktoken-rs = "0.12"

@@ -1445,6 +1445,7 @@ dependencies = [
  "tempfile",
  "tiktoken-rs",
  "tokio",
+ "tokio-stream",
  "toml",
  "tower 0.5.3",
  "tower-http 0.7.0",
@@ -2296,6 +2297,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

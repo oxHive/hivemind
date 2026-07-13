@@ -46,6 +46,23 @@ export const useMemoriesStore = defineStore('memories', () => {
     }
   }
 
+  // Re-fetches without the loading flag, and without disturbing the
+  // currently open item's unsaved edits or the list's scroll position —
+  // used to reflect memories changed elsewhere (e.g. via MCP) in the background.
+  async function refreshSilently() {
+    const data = await api.listMemories()
+    all.value = data.memories ?? []
+    if (!selected.value) return
+    const match = all.value.find(m => m.id === selected.value.id)
+    const wasDirty = dirty.value
+    selected.value = match || null
+    if (match && !wasDirty) {
+      draft.value = { title: match.title, content: match.content, tags: [...(match.tags || [])] }
+    } else if (!match) {
+      draft.value = null
+    }
+  }
+
   function select(entry) {
     selected.value = entry
     draft.value = entry
@@ -91,5 +108,5 @@ export const useMemoriesStore = defineStore('memories', () => {
     select(null)
   }
 
-  return { all, selected, draft, searchQuery, layerFilter, loading, saving, filtered, dirty, fetchAll, select, save, create, remove, clearAll }
+  return { all, selected, draft, searchQuery, layerFilter, loading, saving, filtered, dirty, fetchAll, refreshSilently, select, save, create, remove, clearAll }
 })

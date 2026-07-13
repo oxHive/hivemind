@@ -208,7 +208,7 @@ onUnmounted(() => {
   if (rafId) cancelAnimationFrame(rafId)
 })
 
-watch([() => memories.all.length, () => graph.edges.length, () => graph.zoom], startSimulation)
+watch([nodeData, linkData, () => graph.zoom], startSimulation)
 </script>
 
 <template>
