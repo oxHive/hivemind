@@ -4,7 +4,7 @@ import { getStatus } from '../api/memories.js'
 
 export const useUiStore = defineStore('ui', () => {
   const activeView = ref('memories')
-  const serverStatus = ref('unreachable') // 'running'|'unreachable'|'syncing'|'sync_failed'
+  const serverStatus = ref('checking') // 'checking'|'running'|'unreachable'|'syncing'|'sync_failed'
   const serverInfo = ref(null)
   const syncInfo = ref(null)
   const toast = ref({ message: '', visible: false })

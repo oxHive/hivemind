@@ -68,8 +68,16 @@ onBeforeUnmount(() => {
 <template>
   <div class="hm-shell">
 
+    <!-- First-load loader while we confirm the backend is reachable -->
+    <div v-if="ui.serverStatus === 'checking'"
+      class="flex flex-col items-center justify-center w-full gap-3"
+      style="color:var(--hm-text-tertiary)">
+      <div class="hm-hex hm-skeleton" style="width:28px; height:28px"></div>
+      <p style="font-size:12px">Connecting to HiveMind server…</p>
+    </div>
+
     <!-- Full-screen error when server unreachable on first load -->
-    <div v-if="ui.serverStatus === 'unreachable' && !memories.all.length"
+    <div v-else-if="ui.serverStatus === 'unreachable' && !memories.all.length"
       class="flex flex-col items-center justify-center w-full gap-4"
       style="color:var(--hm-text-secondary)">
       <p style="font-size:14px">Cannot connect to HiveMind server at
