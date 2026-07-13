@@ -620,7 +620,12 @@ mod tests {
     async fn test_router() -> (Router, TempDir) {
         let (store, dir) = test_store().await;
         let (events, _) = broadcast::channel(16);
-        let r = router(store, SyncSettings::default(), "http://127.0.0.1:3457", events);
+        let r = router(
+            store,
+            SyncSettings::default(),
+            "http://127.0.0.1:3457",
+            events,
+        );
         (r, dir)
     }
 
