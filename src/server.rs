@@ -40,8 +40,14 @@ pub struct MemoryRecallInput {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct MemorySearchInput {
-    /// Keywords to search memory titles and content
-    pub query: String,
+    /// Keywords to search memory titles and content. Optional if `tags` is
+    /// provided — a pure tag-boolean search with no keyword component.
+    #[serde(default)]
+    pub query: Option<String>,
+    /// Require all of these tags (namespace:value form, e.g. "lang:rust").
+    /// ANDed together, and ANDed with `query` if both are provided.
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
     /// Max results (default 5, capped at 10)
     #[serde(default)]
     pub limit: Option<i64>,
@@ -239,18 +245,49 @@ impl HiveMind {
         p: MemorySearchInput,
     ) -> Result<CallToolResult, ErrorData> {
         let limit = p.limit.unwrap_or(5).clamp(1, 10);
-        let trimmed = p.query.trim();
-        if trimmed.is_empty() {
+        let query = p.query.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        let tags = p.tags.filter(|t| !t.is_empty());
+
+        if query.is_none() && tags.is_none() {
             return Ok(CallToolResult::structured(json!({
                 "count": 0,
                 "results": [],
             })));
         }
-        let hits = self
-            .store
-            .search(trimmed, limit)
-            .await
-            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+
+        let hits = match (query, tags) {
+            (Some(q), Some(tags)) => {
+                let expr = crate::tag_query::TagExpr::and_all(&tags)
+                    .expect("tags checked non-empty above");
+                let candidates = self
+                    .store
+                    .search(q, 50)
+                    .await
+                    .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+                let mut filtered: Vec<_> =
+                    candidates.into_iter().filter(|e| expr.eval(&e.tags)).collect();
+                filtered.truncate(limit as usize);
+                filtered
+            }
+            (Some(q), None) => self
+                .store
+                .search(q, limit)
+                .await
+                .map_err(|e| ErrorData::internal_error(e.to_string(), None))?,
+            (None, Some(tags)) => {
+                let expr = crate::tag_query::TagExpr::and_all(&tags)
+                    .expect("tags checked non-empty above");
+                let mut results = self
+                    .store
+                    .find_by_tag_expr(&expr)
+                    .await
+                    .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+                results.truncate(limit as usize);
+                results
+            }
+            (None, None) => unreachable!("handled by the early return above"),
+        };
+
         let results: Vec<_> = hits
             .iter()
             .map(|h| {
@@ -990,7 +1027,8 @@ mod tests {
 
         let result = hm
             .do_memory_search(MemorySearchInput {
-                query: "pgx".to_string(),
+                query: Some("pgx".to_string()),
+                tags: None,
                 limit: None,
             })
             .await
@@ -1016,12 +1054,88 @@ mod tests {
         let (hm, _dir) = test_hivemind().await;
         let result = hm
             .do_memory_search(MemorySearchInput {
-                query: "  ".to_string(),
+                query: Some("  ".to_string()),
+                tags: None,
                 limit: None,
             })
             .await
             .unwrap();
         assert_eq!(result.structured_content.unwrap()["count"], 0);
+    }
+
+    #[tokio::test]
+    async fn memory_search_by_tags_only() {
+        let (hm, _dir) = test_hivemind().await;
+        hm.do_memory_store(MemoryStoreInput {
+            title: "rust preferences".to_string(),
+            content: "use anyhow for errors".to_string(),
+            tags: vec!["lang:rust".to_string(), "project:hivemind".to_string()],
+            token_count: None,
+            layer: None,
+            memory_type: None,
+        })
+        .await
+        .unwrap();
+        hm.do_memory_store(MemoryStoreInput {
+            title: "vue preferences".to_string(),
+            content: "use pinia for state".to_string(),
+            tags: vec!["lang:vue".to_string(), "project:hivemind".to_string()],
+            token_count: None,
+            layer: None,
+            memory_type: None,
+        })
+        .await
+        .unwrap();
+
+        let result = hm
+            .do_memory_search(MemorySearchInput {
+                query: None,
+                tags: Some(vec!["lang:rust".to_string()]),
+                limit: None,
+            })
+            .await
+            .unwrap();
+        let val = result.structured_content.unwrap();
+        assert_eq!(val["count"], 1);
+        assert_eq!(val["results"][0]["title"], "rust preferences");
+    }
+
+    #[tokio::test]
+    async fn memory_search_query_and_tags_combined() {
+        let (hm, _dir) = test_hivemind().await;
+        hm.do_memory_store(MemoryStoreInput {
+            title: "rust error handling".to_string(),
+            content: "use anyhow for errors".to_string(),
+            tags: vec!["lang:rust".to_string()],
+            token_count: None,
+            layer: None,
+            memory_type: None,
+        })
+        .await
+        .unwrap();
+        hm.do_memory_store(MemoryStoreInput {
+            title: "vue error handling".to_string(),
+            content: "use error boundaries".to_string(),
+            tags: vec!["lang:vue".to_string()],
+            token_count: None,
+            layer: None,
+            memory_type: None,
+        })
+        .await
+        .unwrap();
+
+        // "error handling" FTS-matches both, but only the rust one carries the tag.
+        let result = hm
+            .do_memory_search(MemorySearchInput {
+                query: Some("error handling".to_string()),
+                tags: Some(vec!["lang:rust".to_string()]),
+                limit: None,
+            })
+            .await
+            .unwrap();
+        let val = result.structured_content.unwrap();
+        assert_eq!(val["count"], 1);
+        assert_eq!(val["results"][0]["title"], "rust error handling");
     }
 
     #[tokio::test]
