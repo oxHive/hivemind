@@ -14,6 +14,7 @@ let sim = null
 let rafId = null
 let nodes = []
 let links = []
+let panning = false
 
 const CAMERA_KEY = 'hivemind.graph.camera'
 
@@ -89,6 +90,15 @@ const COLORS = {
 function nodeRadius(n) {
   const connections = links.filter(l => l.source?.id === n.id || l.target?.id === n.id).length
   return Math.max(10, 10 + connections * 1.5)
+}
+
+function hitTestNode(wx, wy) {
+  for (const node of nodes) {
+    const r = nodeRadius(node)
+    const dx = wx - node.x, dy = wy - node.y
+    if (dx * dx + dy * dy <= (r + 4) * (r + 4)) return node
+  }
+  return null
 }
 
 // Memories render as hexagonal cells — the honeycomb is the graph.
@@ -208,18 +218,15 @@ function startSimulation() {
 function handleClick(e) {
   if (panMode.value) return
   const [mx, my] = toWorld(e.offsetX, e.offsetY)
-  for (const node of nodes) {
-    const r = nodeRadius(node)
-    const dx = mx - node.x, dy = my - node.y
-    if (dx * dx + dy * dy <= (r + 4) * (r + 4)) {
-      if (graph.connectMode && graph.connectSourceId && graph.connectSourceId !== node.id) {
-        graph.pendingConnect = { sourceId: graph.connectSourceId, targetId: node.id }
-        return
-      }
-      graph.selectedNodeId = node.id
-      emit('node-click', node.id)
+  const node = hitTestNode(mx, my)
+  if (node) {
+    if (graph.connectMode && graph.connectSourceId && graph.connectSourceId !== node.id) {
+      graph.pendingConnect = { sourceId: graph.connectSourceId, targetId: node.id }
       return
     }
+    graph.selectedNodeId = node.id
+    emit('node-click', node.id)
+    return
   }
   graph.selectedNodeId = null
 }
@@ -233,18 +240,13 @@ function ptSegDist(px, py, ax, ay, bx, by) {
 
 function handleMouseMove(e) {
   if (panMode.value) {
-    canvasEl.value.style.cursor = 'grab'
+    canvasEl.value.style.cursor = panning ? 'grabbing' : 'grab'
     emit('node-hover', null)
     emit('edge-hover', null)
     return
   }
   const [mx, my] = toWorld(e.offsetX, e.offsetY)
-  let foundNode = null
-  for (const node of nodes) {
-    const r = nodeRadius(node)
-    const dx = mx - node.x, dy = my - node.y
-    if (dx * dx + dy * dy <= (r + 4) * (r + 4)) { foundNode = node; break }
-  }
+  const foundNode = hitTestNode(mx, my)
   emit('node-hover', foundNode)
 
   let foundEdge = null
@@ -279,8 +281,11 @@ onMounted(() => {
   zoomBehavior = d3.zoom()
     .scaleExtent([0.2, 5])
     .filter(event => event.type === 'wheel' || panMode.value)
-    .on('start', () => {
-      if (panMode.value) canvasEl.value.style.cursor = 'grabbing'
+    .on('start', event => {
+      if (panMode.value && event.sourceEvent?.type !== 'wheel') {
+        panning = true
+        canvasEl.value.style.cursor = 'grabbing'
+      }
     })
     .on('zoom', event => {
       transform.x = event.transform.x
@@ -289,9 +294,12 @@ onMounted(() => {
       if (rafId) cancelAnimationFrame(rafId)
       rafId = requestAnimationFrame(draw)
     })
-    .on('end', () => {
+    .on('end', event => {
       saveCamera()
-      if (panMode.value) canvasEl.value.style.cursor = 'grab'
+      if (event.sourceEvent?.type !== 'wheel') {
+        panning = false
+        if (panMode.value) canvasEl.value.style.cursor = 'grab'
+      }
     })
   const sel = d3.select(canvasEl.value)
   sel.call(zoomBehavior)
@@ -301,15 +309,11 @@ onMounted(() => {
     .filter(() => !panMode.value)
     .subject(event => {
       const [mx, my] = toWorld(event.x, event.y)
-      for (const node of nodes) {
-        const r = nodeRadius(node)
-        const dx = mx - node.x, dy = my - node.y
-        if (dx * dx + dy * dy <= (r + 4) * (r + 4)) return node
-      }
-      return null
+      return hitTestNode(mx, my)
     })
     .on('start', event => {
       if (!event.subject) return
+      event.subject.__wasPinned = event.subject.fx != null
       event.subject.fx = event.subject.x
       event.subject.fy = event.subject.y
       event.subject.__dragStartScreen = [event.x, event.y]
@@ -317,7 +321,7 @@ onMounted(() => {
     })
     .on('drag', event => {
       if (!event.subject) return
-      const [wx, wy] = toWorld(event.x, event.y)
+      const [wx, wy] = toWorld(event.sourceEvent.offsetX, event.sourceEvent.offsetY)
       event.subject.fx = wx
       event.subject.fy = wy
       if (rafId) cancelAnimationFrame(rafId)
@@ -328,10 +332,12 @@ onMounted(() => {
       sim?.alphaTarget(0)
       const [sx, sy] = event.subject.__dragStartScreen || [event.x, event.y]
       const moved = Math.hypot(event.x - sx, event.y - sy) > 3
+      const wasPinned = event.subject.__wasPinned
       delete event.subject.__dragStartScreen
+      delete event.subject.__wasPinned
       if (moved) {
         savePinnedPosition(event.subject.id, event.subject.fx, event.subject.fy)
-      } else {
+      } else if (!wasPinned) {
         event.subject.fx = null
         event.subject.fy = null
       }
