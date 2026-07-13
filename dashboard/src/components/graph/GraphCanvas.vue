@@ -9,10 +9,25 @@ const memories = useMemoriesStore()
 const graph = useGraphStore()
 
 const canvasEl = ref(null)
+const panMode = ref(false)
 let sim = null
 let rafId = null
 let nodes = []
 let links = []
+
+function isEditableTarget(el) {
+  return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+}
+
+function handleKeydown(e) {
+  if (isEditableTarget(document.activeElement)) return
+  if (e.code === 'Space') {
+    e.preventDefault()
+    panMode.value = !panMode.value
+  } else if (e.key === 'Escape') {
+    panMode.value = false
+  }
+}
 
 const nodeData = computed(() =>
   memories.all.map(m => ({ id: m.id, title: m.title, layer: m.layer, tags: m.tags || [] }))
@@ -139,6 +154,7 @@ function startSimulation() {
 }
 
 function handleClick(e) {
+  if (panMode.value) return
   const { offsetX: mx, offsetY: my } = e
   for (const node of nodes) {
     const r = nodeRadius(node)
@@ -164,6 +180,12 @@ function ptSegDist(px, py, ax, ay, bx, by) {
 }
 
 function handleMouseMove(e) {
+  if (panMode.value) {
+    canvasEl.value.style.cursor = 'grab'
+    emit('node-hover', null)
+    emit('edge-hover', null)
+    return
+  }
   const { offsetX: mx, offsetY: my } = e
   let foundNode = null
   for (const node of nodes) {
@@ -200,12 +222,14 @@ onMounted(() => {
     startSimulation()
   })
   ro.observe(canvasEl.value.parentElement)
+  window.addEventListener('keydown', handleKeydown)
 })
 
 onUnmounted(() => {
   ro?.disconnect()
   sim?.stop()
   if (rafId) cancelAnimationFrame(rafId)
+  window.removeEventListener('keydown', handleKeydown)
 })
 
 watch([nodeData, linkData, () => graph.zoom], startSimulation)
