@@ -35,6 +35,7 @@ The `recalls` list in `.hivemind.toml` is only for **automatic injection at sess
 
 - **By title or ID**: ask Claude: *"recall the memory titled 'golang preferences'"* → Claude calls `memory_recall`
 - **By keyword**: ask Claude: *"search my memories for postgres"* → Claude calls `memory_search` (FTS, returns snippets)
+- **By tag**: ask Claude: *"find memories tagged lang:rust and project:hivemind"* → Claude calls `memory_search` with a `tags` array (AND-only; combine with a keyword `query` too if you like)
 - **Browse all**: use the `/memory-list` prompt
 
 Memories not listed in `recalls` are still available; they're just not auto-loaded. They live in the database and are available any time you ask.
@@ -341,6 +342,18 @@ recalls = [
 ```
 
 `recalls` is a list of memory titles to auto-inject at session start. Each entry is looked up by exact title, then falls back to FTS. The combined size is capped at `max_tokens`.
+
+A recall entry can also be a boolean tag expression instead of a title — use `&` (AND), `|` (OR), `!` (NOT), and parens for grouping, with each tag written as `tag:<namespace:value>`:
+
+```toml
+recalls = [
+  "tag:project:hivemind & tag:lang:rust",
+  "tag:project:hivemind & !tag:status:done",
+  "my exact memory title",
+]
+```
+
+Unlike a plain title recall (which loads at most one memory), a tag expression loads **every** matching memory, still subject to the overall `max_tokens` budget. An entry is only parsed as a tag expression if it starts with `tag:`, `!tag:`, or `(` — anything else is treated as a plain title/FTS query exactly as before.
 
 ### Personal config: `.hivemind.local.toml`
 
