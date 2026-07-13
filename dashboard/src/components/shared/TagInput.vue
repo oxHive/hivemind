@@ -46,6 +46,10 @@ function selectSuggestion(s) {
 function removeTag(tag) {
   emit('update:modelValue', props.modelValue.filter(t => t !== tag))
 }
+
+function handleBlur() {
+  setTimeout(() => { showSuggestions.value = false }, 150)
+}
 </script>
 
 <template>
@@ -58,7 +62,7 @@ function removeTag(tag) {
         @focus="showSuggestions = true"
         @keydown.enter.prevent="commit(inputValue)"
         @keydown.esc="showSuggestions = false"
-        @blur="setTimeout(() => showSuggestions = false, 150)" />
+        @blur="handleBlur" />
     </div>
     <div v-if="showSuggestions && suggestions.length"
       class="absolute left-0 mt-1 rounded-md py-1"
