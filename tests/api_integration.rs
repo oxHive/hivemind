@@ -20,7 +20,8 @@ async fn test_app() -> (axum::Router, TempDir) {
     let conn = database.connect().unwrap();
     db::run_migrations(&conn).await.unwrap();
     let store = Arc::new(SqliteStore::new(conn));
-    let router = oxhivemind::api::router(store, sync, "http://127.0.0.1:3457");
+    let (events, _) = tokio::sync::broadcast::channel(16);
+    let router = oxhivemind::api::router(store, sync, "http://127.0.0.1:3457", events);
     (router, dir)
 }
 
