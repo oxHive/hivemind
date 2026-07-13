@@ -74,8 +74,22 @@ This runs a shell command and injects its stdout into the conversation. It works
 ## Installation
 
 ```sh
-cargo install oxhivemind        # compile from source
-cargo binstall oxhivemind       # download pre-built binary (faster)
+cargo binstall oxhivemind       # download pre-built binary (recommended, includes dashboard)
+```
+
+Compile from source instead:
+
+```sh
+cargo install oxhivemind        # dashboard shows setup instructions instead of the UI
+```
+
+To get the dashboard bundled in a source build, compile from a local checkout instead of crates.io:
+
+```sh
+git clone https://github.com/oxhive/hivemind
+cd hivemind
+(cd dashboard && bun install && bun run build)
+cargo install --path .
 ```
 
 ### Claude Code
