@@ -11,7 +11,7 @@
       <span class="inline-block w-4 h-0 border-t border-dashed" style="border-color:#ba7517; opacity:0.7"></span>pending
     </span>
     <span class="flex items-center gap-1.5">
-      <span class="inline-block w-4 h-0 border-t" style="border-color:#1d9e75; opacity:0.4"></span>accepted
+      <span class="inline-block w-4 h-0 border-t" style="border-color:#1d9e75; opacity:0.4"></span>active
     </span>
   </div>
 </template>

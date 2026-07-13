@@ -10,7 +10,7 @@ const graph = useGraphStore()
     :style="{ left: x + 'px', top: y + 'px' }">
     <p class="mb-2" style="font-size:11px; color:var(--hm-warning); font-family:monospace">{{ edge.relationship }}</p>
     <div class="flex gap-1.5">
-      <button class="hm-btn hm-btn-primary hm-btn-sm" @click="graph.resolveEdge(edge.id,'accepted')">Accept</button>
+      <button class="hm-btn hm-btn-primary hm-btn-sm" @click="graph.resolveEdge(edge.id,'active')">Accept</button>
       <button class="hm-btn hm-btn-default hm-btn-sm" @click="graph.resolveEdge(edge.id,'rejected')">Reject</button>
     </div>
   </div>
