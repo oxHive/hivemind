@@ -327,6 +327,16 @@ impl SqliteStore {
         Ok(results)
     }
 
+    /// Evaluates a tag boolean expression against every stored memory. Reuses
+    /// `list_memories`'s per-row tag fetch (same N+1 pattern already used by
+    /// `list_memories`/`search`) rather than a bulk-query optimization — fine
+    /// at this tool's realistic memory counts (see `export()`'s identical
+    /// `list_memories(100_000, 0)` full-table convention).
+    pub async fn find_by_tag_expr(&self, expr: &crate::tag_query::TagExpr) -> Result<Vec<MemoryEntry>> {
+        let all = self.list_memories(100_000, 0).await?;
+        Ok(all.into_iter().filter(|e| expr.eval(&e.tags)).collect())
+    }
+
     pub async fn list_edges(&self, memory_id: Option<&str>) -> Result<Vec<EdgeEntry>> {
         let mut rows = if let Some(mid) = memory_id {
             self.conn
@@ -955,6 +965,47 @@ mod tests {
             .unwrap();
         let list = s.list_memories(10, 0).await.unwrap();
         assert_eq!(list.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn find_by_tag_expr_returns_matching_memories() {
+        let (s, _dir) = make_store().await;
+        s.store(&test_row(
+            "mem_rust",
+            "Rust notes",
+            "content",
+            &["lang:rust".into(), "project:hivemind".into()],
+        ))
+        .await
+        .unwrap();
+        s.store(&test_row(
+            "mem_vue",
+            "Vue notes",
+            "content",
+            &["lang:vue".into(), "project:hivemind".into()],
+        ))
+        .await
+        .unwrap();
+        s.store(&test_row(
+            "mem_other",
+            "Unrelated",
+            "content",
+            &["project:oxhive".into()],
+        ))
+        .await
+        .unwrap();
+
+        let expr = crate::tag_query::parse("tag:project:hivemind & tag:lang:rust").unwrap();
+        let results = s.find_by_tag_expr(&expr).await.unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "Rust notes");
+
+        let expr_or = crate::tag_query::parse("tag:lang:rust | tag:lang:vue").unwrap();
+        let mut results_or = s.find_by_tag_expr(&expr_or).await.unwrap();
+        results_or.sort_by(|a, b| a.title.cmp(&b.title));
+        assert_eq!(results_or.len(), 2);
+        assert_eq!(results_or[0].title, "Rust notes");
+        assert_eq!(results_or[1].title, "Vue notes");
     }
 
     #[tokio::test]
