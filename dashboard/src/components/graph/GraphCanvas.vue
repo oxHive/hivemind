@@ -312,6 +312,7 @@ onMounted(() => {
       if (!event.subject) return
       event.subject.fx = event.subject.x
       event.subject.fy = event.subject.y
+      event.subject.__dragStartScreen = [event.x, event.y]
       sim?.alphaTarget(0.3).restart()
     })
     .on('drag', event => {
@@ -325,7 +326,15 @@ onMounted(() => {
     .on('end', event => {
       if (!event.subject) return
       sim?.alphaTarget(0)
-      savePinnedPosition(event.subject.id, event.subject.fx, event.subject.fy)
+      const [sx, sy] = event.subject.__dragStartScreen || [event.x, event.y]
+      const moved = Math.hypot(event.x - sx, event.y - sy) > 3
+      delete event.subject.__dragStartScreen
+      if (moved) {
+        savePinnedPosition(event.subject.id, event.subject.fx, event.subject.fy)
+      } else {
+        event.subject.fx = null
+        event.subject.fy = null
+      }
     })
   sel.call(dragBehavior)
 })
