@@ -87,12 +87,27 @@ pub(crate) fn fts_quote(query: &str) -> String {
         .join(" ")
 }
 
+/// A memory may have at most one tag in the `project` namespace — this is
+/// the only namespace with this restriction (see the tag-namespace-system
+/// design spec); all others allow multiple values per memory.
+fn validate_single_project_tag(tags: &[String]) -> Result<()> {
+    let project_tag_count = tags
+        .iter()
+        .filter(|t| t.to_lowercase().starts_with("project:"))
+        .count();
+    if project_tag_count > 1 {
+        return Err(anyhow!("a memory can have at most one project:* tag"));
+    }
+    Ok(())
+}
+
 impl SqliteStore {
     pub fn new(conn: Connection) -> Self {
         Self { conn }
     }
 
     pub async fn store(&self, m: &NewMemoryRow<'_>) -> Result<()> {
+        validate_single_project_tag(m.tags)?;
         let now = chrono_now();
         let token_count = m
             .token_count
@@ -119,9 +134,10 @@ impl SqliteStore {
         )
         .await?;
         for tag in m.tags {
+            let tag_lower = tag.to_lowercase();
             tx.execute(
                 "INSERT OR IGNORE INTO memory_tags (memory_id, tag) VALUES (?1, ?2)",
-                params![m.id, tag.as_str()],
+                params![m.id, tag_lower.as_str()],
             )
             .await?;
         }
@@ -129,6 +145,7 @@ impl SqliteStore {
         // Auto-connect memories sharing a tag: one statement per tag, skipping
         // pairs already linked in either direction.
         for tag in m.tags {
+            let tag_lower = tag.to_lowercase();
             tx.execute(
                 "INSERT INTO edges (id, source_id, target_id, relationship, status, created_at)
                  SELECT 'edge_' || lower(hex(randomblob(16))), ?1, mt.memory_id, 'shares_tag', 'active', ?2
@@ -139,7 +156,7 @@ impl SqliteStore {
                        WHERE e.relationship = 'shares_tag'
                          AND ((e.source_id = ?1 AND e.target_id = mt.memory_id)
                            OR (e.source_id = mt.memory_id AND e.target_id = ?1)))",
-                params![m.id, now, tag.as_str()],
+                params![m.id, now, tag_lower.as_str()],
             )
             .await?;
         }
@@ -225,6 +242,7 @@ impl SqliteStore {
         content: &str,
         tags: &[String],
     ) -> Result<bool> {
+        validate_single_project_tag(tags)?;
         let now = chrono_now();
         let token_count = crate::budget::count_entry_tokens(title, content) as i64;
         let tx = self.conn.transaction().await?;
@@ -240,9 +258,10 @@ impl SqliteStore {
         tx.execute("DELETE FROM memory_tags WHERE memory_id = ?1", params![id])
             .await?;
         for tag in tags {
+            let tag_lower = tag.to_lowercase();
             tx.execute(
                 "INSERT OR IGNORE INTO memory_tags (memory_id, tag) VALUES (?1, ?2)",
-                params![id, tag.as_str()],
+                params![id, tag_lower.as_str()],
             )
             .await?;
         }
@@ -774,6 +793,54 @@ mod tests {
         .unwrap();
         let entry = s.recall_by_id("mem_2").await.unwrap().unwrap();
         assert_eq!(entry.tags.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn store_lowercases_tags() {
+        let (s, _dir) = make_store().await;
+        s.store(&test_row(
+            "mem_upper",
+            "Title",
+            "content",
+            &["Lang:Rust".into(), "PROJECT:HiveMind".into()],
+        ))
+        .await
+        .unwrap();
+        let entry = s.recall_by_id("mem_upper").await.unwrap().unwrap();
+        assert!(entry.tags.contains(&"lang:rust".to_string()));
+        assert!(entry.tags.contains(&"project:hivemind".to_string()));
+    }
+
+    #[tokio::test]
+    async fn store_rejects_more_than_one_project_tag() {
+        let (s, _dir) = make_store().await;
+        let result = s
+            .store(&test_row(
+                "mem_multi_project",
+                "Title",
+                "content",
+                &["project:hivemind".into(), "project:oxhive".into()],
+            ))
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn update_rejects_more_than_one_project_tag() {
+        let (s, _dir) = make_store().await;
+        let tags: Vec<String> = vec![];
+        s.store(&test_row("mem_up", "Title", "content", &tags))
+            .await
+            .unwrap();
+        let result = s
+            .update(
+                "mem_up",
+                "Title",
+                "content",
+                &["project:a".into(), "project:b".into()],
+            )
+            .await;
+        assert!(result.is_err());
     }
 
     #[tokio::test]
