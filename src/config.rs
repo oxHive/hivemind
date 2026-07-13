@@ -491,9 +491,9 @@ mod tests {
 
     #[test]
     fn global_config_dir_uses_xdg_when_set() {
+        let _lock = crate::test_env_lock::ENV_MUTEX.lock().unwrap();
         let tmp = tempfile::tempdir().unwrap();
-        // Safety: tests run with RUST_TEST_THREADS=1 or we accept the data race risk;
-        // this is a test-only convenience and env mutation is unavoidable here.
+        // SAFETY: test-only env mutation; serialised by ENV_MUTEX.
         unsafe {
             std::env::set_var("XDG_CONFIG_HOME", tmp.path());
         }

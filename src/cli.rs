@@ -1753,7 +1753,7 @@ mod tests {
     fn detect_registered_clients_opencode_via_config_home() {
         // detect_registered_clients reads XDG_CONFIG_HOME; hold the mutex so
         // other tests that set that env var don't interfere.
-        let _lock = XDG_MUTEX.lock().unwrap();
+        let _lock = crate::test_env_lock::ENV_MUTEX.lock().unwrap();
         unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
         let home = tempfile::tempdir().unwrap();
         let dir = home.path().join(".config").join("opencode");
@@ -2112,18 +2112,13 @@ mod tests {
         );
     }
 
-    // ── env-mutation guard ───────────────────────────────────────────────────
-    // Tests that mutate XDG_CONFIG_HOME / HOME must hold this lock so they
-    // don't race with each other inside the same test binary.
-    static XDG_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     // ── ensure_global_config ─────────────────────────────────────────────────
 
     #[test]
     fn ensure_global_config_creates_file_when_missing() {
-        let _lock = XDG_MUTEX.lock().unwrap();
+        let _lock = crate::test_env_lock::ENV_MUTEX.lock().unwrap();
         let cfg_dir = tempfile::tempdir().unwrap();
-        // SAFETY: test-only env mutation; serialised by XDG_MUTEX.
+        // SAFETY: test-only env mutation; serialised by ENV_MUTEX.
         unsafe { std::env::set_var("XDG_CONFIG_HOME", cfg_dir.path()) };
         ensure_global_config();
         unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
@@ -2132,7 +2127,7 @@ mod tests {
 
     #[test]
     fn ensure_global_config_is_idempotent() {
-        let _lock = XDG_MUTEX.lock().unwrap();
+        let _lock = crate::test_env_lock::ENV_MUTEX.lock().unwrap();
         let cfg_dir = tempfile::tempdir().unwrap();
         let config_file = cfg_dir.path().join("hivemind").join("config.toml");
         fs::create_dir_all(config_file.parent().unwrap()).unwrap();
@@ -2147,9 +2142,9 @@ mod tests {
 
     #[test]
     fn warn_if_not_initialized_no_config_prints_hint() {
-        let _lock = XDG_MUTEX.lock().unwrap();
+        let _lock = crate::test_env_lock::ENV_MUTEX.lock().unwrap();
         let cfg_dir = tempfile::tempdir().unwrap();
-        // SAFETY: test-only env mutation; serialised by XDG_MUTEX.
+        // SAFETY: test-only env mutation; serialised by ENV_MUTEX.
         unsafe { std::env::set_var("XDG_CONFIG_HOME", cfg_dir.path()) };
         warn_if_not_initialized(); // exercises the "no config" branch
         unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
@@ -2157,13 +2152,13 @@ mod tests {
 
     #[test]
     fn warn_if_not_initialized_config_but_no_clients_prints_hint() {
-        let _lock = XDG_MUTEX.lock().unwrap();
+        let _lock = crate::test_env_lock::ENV_MUTEX.lock().unwrap();
         let cfg_dir = tempfile::tempdir().unwrap();
         let home_dir_tmp = tempfile::tempdir().unwrap();
         let config_file = cfg_dir.path().join("hivemind").join("config.toml");
         fs::create_dir_all(config_file.parent().unwrap()).unwrap();
         fs::write(&config_file, "[server]\n").unwrap();
-        // SAFETY: test-only env mutation; serialised by XDG_MUTEX.
+        // SAFETY: test-only env mutation; serialised by ENV_MUTEX.
         unsafe { std::env::set_var("XDG_CONFIG_HOME", cfg_dir.path()) };
         unsafe { std::env::set_var("HOME", home_dir_tmp.path()) };
         warn_if_not_initialized(); // exercises the "config found, no clients" branch
