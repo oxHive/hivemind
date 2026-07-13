@@ -4,6 +4,7 @@ import { useUiStore } from './stores/ui.js'
 import { useMemoriesStore } from './stores/memories.js'
 import { useGraphStore } from './stores/graph.js'
 import { useFeedbackStore } from './stores/feedback.js'
+import { useTagSettingsStore } from './stores/tagSettings.js'
 import { BASE } from './api/client.js'
 import AppSidebar from './components/sidebar/AppSidebar.vue'
 import Toast from './components/shared/Toast.vue'
@@ -16,6 +17,7 @@ const ui = useUiStore()
 const memories = useMemoriesStore()
 const graph = useGraphStore()
 const fb = useFeedbackStore()
+const tagSettings = useTagSettingsStore()
 
 const VIEWS = ['memories', 'graph', 'feedback', 'settings']
 const apiBase = window.HIVEMIND_API || 'http://localhost:3456'
@@ -41,6 +43,7 @@ onMounted(async () => {
       graph.fetchEdges(),
       fb.fetchConflicts(),
       fb.fetchFeedback(),
+      tagSettings.fetchNamespaces(),
     ])
   }
 
