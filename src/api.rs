@@ -3,15 +3,21 @@ use axum::{
     Json, Router,
     extract::{Extension, Path, Query, State},
     http::{Method, StatusCode, header},
-    response::{IntoResponse, Response},
+    response::{
+        IntoResponse, Response,
+        sse::{Event, KeepAlive, Sse},
+    },
     routing::{get, post},
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::Arc;
+use tokio::sync::broadcast;
+use tokio_stream::{Stream, StreamExt, wrappers::BroadcastStream};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
 type Store = Arc<SqliteStore>;
+type Events = broadcast::Sender<()>;
 
 pub struct ApiError(StatusCode, String);
 
@@ -64,7 +70,7 @@ fn localhost_origins(origin: &str) -> AllowOrigin {
     }
 }
 
-pub fn router(store: Store, sync: SyncSettings, dashboard_origin: &str) -> Router {
+pub fn router(store: Store, sync: SyncSettings, dashboard_origin: &str, events: Events) -> Router {
     Router::new()
         .route("/api/v1/memories", get(list_memories).post(create_memory))
         .route(
@@ -95,8 +101,10 @@ pub fn router(store: Store, sync: SyncSettings, dashboard_origin: &str) -> Route
             get(get_sync_settings).post(save_sync_settings),
         )
         .route("/api/v1/status", get(server_status))
+        .route("/api/v1/events", get(sse_events))
         .with_state(store)
         .layer(Extension(sync))
+        .layer(Extension(events))
         .layer(
             CorsLayer::new()
                 .allow_origin(localhost_origins(dashboard_origin))
@@ -109,6 +117,14 @@ pub fn router(store: Store, sync: SyncSettings, dashboard_origin: &str) -> Route
                 ])
                 .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]),
         )
+}
+
+async fn sse_events(
+    Extension(events): Extension<Events>,
+) -> Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>> {
+    let stream = BroadcastStream::new(events.subscribe())
+        .filter_map(|msg| msg.ok().map(|_| Ok(Event::default().data("changed"))));
+    Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
 fn entry_json(e: &crate::store::MemoryEntry) -> Value {
@@ -162,6 +178,7 @@ struct CreateMemoryBody {
 
 async fn create_memory(
     State(store): State<Store>,
+    Extension(events): Extension<Events>,
     Json(b): Json<CreateMemoryBody>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     let layer = match &b.layer {
@@ -190,6 +207,7 @@ async fn create_memory(
             memory_type: &memory_type,
         })
         .await?;
+    let _ = events.send(());
     Ok((StatusCode::CREATED, Json(json!({ "id": id }))))
 }
 
@@ -212,6 +230,7 @@ struct PatchMemoryBody {
 
 async fn patch_memory(
     State(store): State<Store>,
+    Extension(events): Extension<Events>,
     Path(id): Path<String>,
     Json(b): Json<PatchMemoryBody>,
 ) -> Result<Json<Value>, ApiError> {
@@ -231,21 +250,28 @@ async fn patch_memory(
         .recall_by_id(&id)
         .await?
         .ok_or_else(|| not_found(format!("no memory {id}")))?;
+    let _ = events.send(());
     Ok(Json(entry_json(&entry)))
 }
 
 async fn delete_memory(
     State(store): State<Store>,
+    Extension(events): Extension<Events>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     if !store.delete(&id).await? {
         return Err(not_found(format!("no memory {id}")));
     }
+    let _ = events.send(());
     Ok(Json(json!({ "deleted": true, "id": id })))
 }
 
-async fn delete_all_memories(State(store): State<Store>) -> Result<Json<Value>, ApiError> {
+async fn delete_all_memories(
+    State(store): State<Store>,
+    Extension(events): Extension<Events>,
+) -> Result<Json<Value>, ApiError> {
     let deleted = store.delete_all().await?;
+    let _ = events.send(());
     Ok(Json(json!({ "deleted": deleted })))
 }
 
@@ -380,6 +406,7 @@ struct CreateEdgeBody {
 
 async fn create_edge(
     State(store): State<Store>,
+    Extension(events): Extension<Events>,
     Json(b): Json<CreateEdgeBody>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     use crate::model::EdgeCreate;
@@ -387,7 +414,10 @@ async fn create_edge(
         .create_edge(&b.source_id, &b.target_id, &b.relationship)
         .await?
     {
-        EdgeCreate::Created(id) => Ok((StatusCode::CREATED, Json(json!({ "id": id })))),
+        EdgeCreate::Created(id) => {
+            let _ = events.send(());
+            Ok((StatusCode::CREATED, Json(json!({ "id": id }))))
+        }
         EdgeCreate::Duplicate => Err(ApiError(StatusCode::CONFLICT, "edge already exists".into())),
         EdgeCreate::MissingEndpoint => Err(ApiError(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -410,6 +440,7 @@ struct StatusBody {
 
 async fn patch_edge(
     State(store): State<Store>,
+    Extension(events): Extension<Events>,
     Path(id): Path<String>,
     Json(b): Json<StatusBody>,
 ) -> Result<Json<Value>, ApiError> {
@@ -422,6 +453,7 @@ async fn patch_edge(
     if !store.set_edge_status(&id, &b.status).await? {
         return Err(not_found(format!("no edge {id}")));
     }
+    let _ = events.send(());
     Ok(Json(json!({ "id": id, "status": b.status })))
 }
 
@@ -587,16 +619,19 @@ mod tests {
 
     async fn test_router() -> (Router, TempDir) {
         let (store, dir) = test_store().await;
-        let r = router(store, SyncSettings::default(), "http://127.0.0.1:3457");
+        let (events, _) = broadcast::channel(16);
+        let r = router(store, SyncSettings::default(), "http://127.0.0.1:3457", events);
         (r, dir)
     }
 
     async fn test_router_with_store() -> (Router, Arc<SqliteStore>, TempDir) {
         let (store, dir) = test_store().await;
+        let (events, _) = broadcast::channel(16);
         let r = router(
             Arc::clone(&store),
             SyncSettings::default(),
             "http://127.0.0.1:3457",
+            events,
         );
         (r, store, dir)
     }
