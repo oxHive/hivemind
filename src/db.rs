@@ -80,6 +80,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "V3__session_start_log",
         include_str!("../migrations/V3__session_start_log.sql"),
     ),
+    (
+        "V4__mention_edges",
+        include_str!("../migrations/V4__mention_edges.sql"),
+    ),
 ];
 
 pub async fn run_migrations(conn: &libsql::Connection) -> Result<()> {
@@ -234,5 +238,48 @@ mod tests {
         conn.query("SELECT key, value FROM _meta LIMIT 0", ())
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn migrations_add_v4_link_text_and_target_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.db");
+        let sync = crate::config::SyncSettings::default();
+        let db = open_database(&sync, path.to_str().unwrap()).await.unwrap();
+        let conn = db.connect().unwrap();
+        run_migrations(&conn).await.unwrap();
+
+        conn.execute(
+            "INSERT INTO memories (id, title, content, created_at, updated_at) VALUES ('mem_x', 't', 'c', 0, 0), ('mem_y', 't', 'c', 0, 0)",
+            (),
+        )
+        .await
+        .unwrap();
+        conn.execute(
+            "INSERT INTO edges (id, source_id, target_id, relationship, status, created_at, link_text)
+             VALUES ('edge_1', 'mem_x', 'mem_y', 'mentions', 'active', 0, 'the phrase')",
+            (),
+        )
+        .await
+        .unwrap();
+
+        let mut rows = conn
+            .query("SELECT link_text FROM edges WHERE id = 'edge_1'", ())
+            .await
+            .unwrap();
+        let row = rows.next().await.unwrap().unwrap();
+        let text: String = row.get(0).unwrap();
+        assert_eq!(text, "the phrase");
+
+        let mut rows = conn
+            .query(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_edges_target_id'",
+                (),
+            )
+            .await
+            .unwrap();
+        let row = rows.next().await.unwrap().unwrap();
+        let n: i64 = row.get(0).unwrap();
+        assert_eq!(n, 1);
     }
 }
