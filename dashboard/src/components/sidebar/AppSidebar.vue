@@ -62,17 +62,17 @@ const syncDot = computed(() => {
     style="width:200px; background:var(--hm-bg-surface); border-right:0.5px solid var(--hm-border-subtle)">
 
     <!-- Logo -->
-    <div class="px-5 pt-6 pb-7 flex items-end justify-between gap-2"
+    <div class="px-5 pt-6 pb-7 flex items-center justify-start gap-2"
       style="border-bottom:0.5px solid var(--hm-border-subtle)">
-      <div class="flex items-center gap-2">
-        <svg width="18" height="18" viewBox="0 0 16 16" aria-hidden="true">
+      <div class="flex items-center" style="gap:4px">
+        <svg width="24" height="24" viewBox="0 0 16 16" aria-hidden="true">
           <polygon points="8,1.5 13.6,4.75 13.6,11.25 8,14.5 2.4,11.25 2.4,4.75"
             fill="none" stroke="var(--hm-accent)" stroke-width="1.2" />
           <circle cx="8" cy="8" r="2" fill="var(--hm-accent)" />
         </svg>
-        <div style="font-size:15px; font-weight:600; letter-spacing:-0.01em; color:var(--hm-text-primary); line-height:1">HiveMind</div>
+        <div style="font-size:19px; font-weight:600; letter-spacing:-0.01em; color:var(--hm-text-primary); line-height:1">HiveMind</div>
       </div>
-      <span class="font-mono shrink-0" style="font-size:10px; color:var(--hm-text-tertiary); line-height:1">
+      <span class="font-mono self-end" style="font-size:10px; color:var(--hm-text-tertiary); line-height:1">
         v{{ ui.serverInfo?.version || '—' }}
       </span>
     </div>
@@ -156,7 +156,7 @@ const syncDot = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 5px;
   padding: 14px 20px 16px;
 }
 
