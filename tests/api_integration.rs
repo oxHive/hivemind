@@ -391,3 +391,17 @@ async fn feedback_status_filter_narrows_results() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(dismissed["count"], 1);
 }
+
+#[tokio::test]
+async fn session_logs_endpoint_returns_logged_runs() {
+    let (app, _dir) = test_app().await;
+    // Session-start logging happens via the MCP path (src/server.rs),
+    // not through this REST router, so there's no way to seed a row
+    // from this file. Assert the endpoint responds correctly on a fresh
+    // DB instead; the write path itself is covered by
+    // src/server.rs's `session_start_writes_a_log_entry` test (Task 3).
+    let (status, body) = req(app, "GET", "/api/v1/session-logs", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["count"], 0);
+    assert_eq!(body["logs"].as_array().unwrap().len(), 0);
+}

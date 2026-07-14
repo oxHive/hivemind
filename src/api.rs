@@ -104,6 +104,7 @@ pub fn router(store: Store, sync: SyncSettings, dashboard_origin: &str, events: 
             "/api/v1/settings/tags",
             get(get_tag_settings).post(save_tag_settings),
         )
+        .route("/api/v1/session-logs", get(list_session_logs))
         .route("/api/v1/status", get(server_status))
         .route("/api/v1/events", get(sse_events))
         .with_state(store)
@@ -459,6 +460,22 @@ async fn patch_edge(
     }
     let _ = events.send(());
     Ok(Json(json!({ "id": id, "status": b.status })))
+}
+
+// --- session logs ---
+
+#[derive(Deserialize)]
+struct SessionLogsParams {
+    limit: Option<i64>,
+}
+
+async fn list_session_logs(
+    State(store): State<Store>,
+    Query(p): Query<SessionLogsParams>,
+) -> Result<Json<Value>, ApiError> {
+    let limit = p.limit.unwrap_or(50).clamp(1, 200);
+    let logs = store.list_session_logs(limit).await?;
+    Ok(Json(json!({ "count": logs.len(), "logs": logs })))
 }
 
 // --- feedback ---
