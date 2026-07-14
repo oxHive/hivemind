@@ -231,10 +231,6 @@ function handleClick(e) {
   const [mx, my] = toWorld(e.offsetX, e.offsetY)
   const node = hitTestNode(mx, my)
   if (node) {
-    if (graph.connectMode && graph.connectSourceId && graph.connectSourceId !== node.id) {
-      graph.pendingConnect = { sourceId: graph.connectSourceId, targetId: node.id }
-      return
-    }
     graph.selectedNodeId = node.id
     emit('node-click', node.id)
     return
@@ -272,9 +268,7 @@ function handleMouseMove(e) {
   }
   emit('edge-hover', foundEdge)
 
-  canvasEl.value.style.cursor = foundNode
-    ? (graph.connectMode ? 'crosshair' : 'pointer')
-    : graph.connectMode ? 'crosshair' : 'default'
+  canvasEl.value.style.cursor = foundNode ? 'pointer' : 'default'
 }
 
 let ro = null

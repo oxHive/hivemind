@@ -43,18 +43,6 @@ const node = computed(() => memories.all.find(m => m.id === graph.selectedNodeId
         <div class="flex flex-col gap-2">
           <CopyButton :command="`/memory-edit ${node.id}`" label="/memory-edit" />
           <CopyButton :command="`/suggest-connections`" label="/suggest-connections" />
-          <button
-            v-if="!graph.connectMode"
-            class="hm-btn hm-btn-default hm-btn-sm w-full justify-center"
-            @click="graph.startConnect(node.id)">
-            Connect to…
-          </button>
-          <button
-            v-else
-            class="hm-btn hm-btn-danger hm-btn-sm w-full justify-center"
-            @click="graph.cancelConnect()">
-            Cancel connect
-          </button>
         </div>
       </div>
     </div>

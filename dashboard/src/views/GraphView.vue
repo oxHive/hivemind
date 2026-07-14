@@ -5,7 +5,6 @@ import GraphCanvas from '../components/graph/GraphCanvas.vue'
 import GraphToolbar from '../components/graph/GraphToolbar.vue'
 import PendingBar from '../components/graph/PendingBar.vue'
 import DetailPanel from '../components/graph/DetailPanel.vue'
-import RelationshipPicker from '../components/graph/RelationshipPicker.vue'
 import Legend from '../components/graph/Legend.vue'
 import EmptyState from '../components/shared/EmptyState.vue'
 import Tooltip from '../components/shared/Tooltip.vue'
@@ -48,9 +47,6 @@ const tooltipText = computed(() => {
 
     <!-- Right: detail panel (slides in) -->
     <DetailPanel />
-
-    <!-- Floating picker when connecting -->
-    <RelationshipPicker />
 
     <Tooltip :visible="!!(hoveredNode || hoveredEdge)" :text="tooltipText" :x="mouseX" :y="mouseY" />
   </div>
