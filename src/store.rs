@@ -332,7 +332,10 @@ impl SqliteStore {
     /// `list_memories`/`search`) rather than a bulk-query optimization — fine
     /// at this tool's realistic memory counts (see `export()`'s identical
     /// `list_memories(100_000, 0)` full-table convention).
-    pub async fn find_by_tag_expr(&self, expr: &crate::tag_query::TagExpr) -> Result<Vec<MemoryEntry>> {
+    pub async fn find_by_tag_expr(
+        &self,
+        expr: &crate::tag_query::TagExpr,
+    ) -> Result<Vec<MemoryEntry>> {
         let all = self.list_memories(100_000, 0).await?;
         Ok(all.into_iter().filter(|e| expr.eval(&e.tags)).collect())
     }

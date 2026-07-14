@@ -264,8 +264,10 @@ impl HiveMind {
                     .search(q, 50)
                     .await
                     .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
-                let mut filtered: Vec<_> =
-                    candidates.into_iter().filter(|e| expr.eval(&e.tags)).collect();
+                let mut filtered: Vec<_> = candidates
+                    .into_iter()
+                    .filter(|e| expr.eval(&e.tags))
+                    .collect();
                 filtered.truncate(limit as usize);
                 filtered
             }
