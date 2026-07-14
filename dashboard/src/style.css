@@ -63,6 +63,40 @@
   --hm-text-xl: 15px;
 }
 
+/* Light theme — same warm hive undertone, inverted. Brand hues (personal,
+   workspace, warning, danger, accent) stay the same values as dark so the
+   palette reads as one identity across both modes; only surfaces, borders,
+   text, and the tinted -bg/-border variants (which exist purely for
+   legibility against their surface) change. */
+:root[data-theme="light"] {
+  --hm-bg-base: #f7f4ee;
+  --hm-bg-surface: #ffffff;
+  --hm-bg-elevated: #efeae1;
+  --hm-bg-overlay: #fffdf9;
+
+  --hm-border-subtle: #e7e0d3;
+  --hm-border-default: #d8cfbd;
+  --hm-border-strong: #b6a98e;
+
+  --hm-text-primary: #211d17;
+  --hm-text-secondary: #6e6759;
+  --hm-text-tertiary: #948c7a;
+  --hm-text-disabled: #c2bbaa;
+
+  --hm-personal-bg: #e2f4ec;
+  --hm-workspace-bg: #ecebfa;
+
+  --hm-warning-bg: #fbf0dc;
+  --hm-warning-border: #dba14b;
+  --hm-danger-bg: #fbe9e9;
+  --hm-danger-border: #cf6c6c;
+
+  --hm-mono-bg: #f1ece0;
+  --hm-mono-border: #e7e0d3;
+
+  --hm-accent-ring: #d9a44133;
+}
+
 html, body, #app {
   height: 100%;
   width: 100%;

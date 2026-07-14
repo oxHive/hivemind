@@ -5,6 +5,7 @@ import { useMemoriesStore } from './stores/memories.js'
 import { useGraphStore } from './stores/graph.js'
 import { useFeedbackStore } from './stores/feedback.js'
 import { useTagSettingsStore } from './stores/tagSettings.js'
+import { useThemeStore } from './stores/theme.js'
 import { BASE } from './api/client.js'
 import AppSidebar from './components/sidebar/AppSidebar.vue'
 import Toast from './components/shared/Toast.vue'
@@ -18,6 +19,7 @@ const memories = useMemoriesStore()
 const graph = useGraphStore()
 const fb = useFeedbackStore()
 const tagSettings = useTagSettingsStore()
+useThemeStore() // applies data-theme to <html> as soon as the store is created
 
 const VIEWS = ['memories', 'graph', 'feedback', 'settings']
 const apiBase = window.HIVEMIND_API || 'http://localhost:3456'

@@ -182,7 +182,7 @@ function draw() {
 
     // Label at zoom >= 2, always for the selected node
     if (graph.zoom >= 2 || isSelected) {
-      ctx.fillStyle = '#f2f0ec'
+      ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--hm-text-primary').trim()
       ctx.font = '10px "IBM Plex Mono", monospace'
       ctx.textAlign = 'center'
       ctx.fillText(nodeLabel(node).slice(0, 20), node.x, node.y + r + 13)
