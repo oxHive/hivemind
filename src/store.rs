@@ -1555,6 +1555,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn update_dropping_one_of_two_targets_deletes_only_that_edge() {
+        let (s, _dir) = make_store().await;
+        s.store(&test_row(T_B, "B", "b", &[])).await.unwrap();
+        s.store(&test_row(T_C, "C", "c", &[])).await.unwrap();
+        s.store(&test_row(
+            "mem_src",
+            "Src",
+            &format!("[a]({T_B}) [b]({T_C})"),
+            &[],
+        ))
+        .await
+        .unwrap();
+        let first = s.list_edges(Some("mem_src")).await.unwrap();
+        assert_eq!(first.len(), 2);
+
+        // Rephrase to drop the link to T_C, keeping only the link to T_B.
+        s.update("mem_src", "Src", &format!("[a]({T_B})"), &[])
+            .await
+            .unwrap();
+        let second = s.list_edges(Some("mem_src")).await.unwrap();
+        assert_eq!(
+            second.len(),
+            1,
+            "the T_C edge should have been stale-deleted"
+        );
+        assert_eq!(second[0].target_id, T_B);
+    }
+
+    #[tokio::test]
     async fn relationship_link_to_nonexistent_target_creates_no_edge() {
         let (s, _dir) = make_store().await;
         s.store(&test_row("mem_src", "Src", &format!("[ghost]({T_B})"), &[]))
