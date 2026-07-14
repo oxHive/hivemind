@@ -112,9 +112,10 @@ function hitTestNode(wx, wy) {
 
 function nodeLabel(node) {
   const projectTag = (node.tags || []).find(t => t.toLowerCase().startsWith('project:'))
-  if (!projectTag) return node.title
-  const projectValue = projectTag.slice(projectTag.indexOf(':') + 1)
-  return `${projectValue}: ${node.title}`
+  const title = projectTag
+    ? `${projectTag.slice(projectTag.indexOf(':') + 1)}: ${node.title}`
+    : node.title
+  return { isDraft: memories.isDraft(node.id), text: title }
 }
 
 // Memories render as hexagonal cells — the honeycomb is the graph.
@@ -195,10 +196,23 @@ function draw() {
 
     // Label at zoom >= 2, always for the selected node
     if ((graph.zoom >= 2 && isMatch) || isSelected) {
-      ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--hm-text-primary').trim()
+      const label = nodeLabel(node)
+      const text = label.text.slice(0, 20)
+      const draftPrefix = label.isDraft ? '[DRAFT] ' : ''
+      const textColor = getComputedStyle(document.documentElement).getPropertyValue('--hm-text-primary').trim()
+      const draftColor = getComputedStyle(document.documentElement).getPropertyValue('--hm-warning').trim()
       ctx.font = '10px "IBM Plex Mono", monospace'
-      ctx.textAlign = 'center'
-      ctx.fillText(nodeLabel(node).slice(0, 20), node.x, node.y + r + 13)
+      ctx.textAlign = 'left'
+      const prefixWidth = draftPrefix ? ctx.measureText(draftPrefix).width : 0
+      const textWidth = ctx.measureText(text).width
+      const startX = node.x - (prefixWidth + textWidth) / 2
+      const y = node.y + r + 13
+      if (draftPrefix) {
+        ctx.fillStyle = draftColor
+        ctx.fillText(draftPrefix, startX, y)
+      }
+      ctx.fillStyle = textColor
+      ctx.fillText(text, startX + prefixWidth, y)
     }
   }
 
