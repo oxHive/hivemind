@@ -19,20 +19,23 @@ const relativeTime = computed(() => {
 </script>
 
 <template>
-  <div class="py-3" style="border-bottom:0.5px solid var(--hm-border-subtle)">
-    <div class="flex items-center gap-3 cursor-pointer" @click="expanded = !expanded">
+  <div class="session-row" :class="{ 'session-row--expanded': expanded }">
+    <div class="session-row__header" @click="expanded = !expanded">
+      <svg class="session-row__chevron" width="8" height="8" viewBox="0 0 8 8" aria-hidden="true">
+        <path d="M1 1l3 3-3 3" fill="none" stroke="var(--hm-text-tertiary)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
       <span style="font-size:12px; color:var(--hm-text-primary); width:140px">{{ log.project_name }}</span>
       <span style="font-size:11px; color:var(--hm-text-tertiary); width:70px">{{ relativeTime }}</span>
-      <div class="flex-1" style="height:6px; background:var(--hm-bg-elevated); border-radius:3px; overflow:hidden">
+      <div class="flex-1" style="height:6px; background:var(--hm-bg-overlay); border-radius:3px; overflow:hidden">
         <div :style="{ width: pct + '%', height: '100%', background: barColor }"></div>
       </div>
-      <span style="font-size:11px; color:var(--hm-text-secondary); width:110px; text-align:right">
+      <span style="font-size:11px; color:var(--hm-text-secondary); width:110px; text-align:right; font-variant-numeric:tabular-nums">
         {{ log.used_tokens }} / {{ log.max_tokens }} tok
       </span>
-      <span v-if="log.truncated" style="font-size:10px; color:var(--hm-warning)">truncated</span>
+      <span v-if="log.truncated" style="font-size:10px; color:var(--hm-warning); width:60px; text-align:right">truncated</span>
     </div>
 
-    <div v-if="expanded" class="mt-3 pl-4" style="font-size:11px">
+    <div v-if="expanded" class="session-row__detail" style="font-size:11px">
       <div v-for="l in log.loaded" :key="l.id" class="flex justify-between py-1" style="color:var(--hm-text-secondary)">
         <span>{{ l.title }}</span>
         <span style="color:var(--hm-text-tertiary)">{{ l.tokens }} tok</span>
@@ -47,3 +50,28 @@ const relativeTime = computed(() => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.session-row {
+  border-bottom: 0.5px solid var(--hm-border-subtle);
+  margin: 0 -12px;
+}
+.session-row:last-child { border-bottom: none; }
+.session-row__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.session-row__header:hover { background: var(--hm-bg-overlay); }
+.session-row__chevron {
+  flex-shrink: 0;
+  transition: transform 120ms ease;
+}
+.session-row--expanded .session-row__chevron { transform: rotate(90deg); }
+.session-row__detail {
+  padding: 2px 12px 12px 32px;
+}
+</style>

@@ -29,52 +29,52 @@ const typeColor = (d) => {
 
 <template>
   <div class="flex-1 overflow-y-auto px-8 py-8">
-    <h2 class="mb-8 font-medium" style="font-size:16px; color:var(--hm-text-primary)">Analytics</h2>
+    <h2 class="mb-6 font-medium" style="font-size:16px; color:var(--hm-text-primary)">Analytics</h2>
 
-    <div class="grid grid-cols-4 gap-4 mb-10">
-      <div class="hm-card px-5 py-4" style="border:0.5px solid var(--hm-border-subtle); border-radius:8px">
-        <div style="font-size:11px; color:var(--hm-text-tertiary)">Total memories</div>
-        <div style="font-size:22px; font-weight:600; color:var(--hm-text-primary)">{{ totalMemories }}</div>
+    <div class="grid grid-cols-4 gap-4 mb-6">
+      <div class="analytics-tile">
+        <div class="analytics-tile__label">Total memories</div>
+        <div class="analytics-tile__value">{{ totalMemories }}</div>
       </div>
-      <div class="hm-card px-5 py-4" style="border:0.5px solid var(--hm-border-subtle); border-radius:8px">
-        <div style="font-size:11px; color:var(--hm-text-tertiary)">Distinct tags</div>
-        <div style="font-size:22px; font-weight:600; color:var(--hm-text-primary)">{{ totalTags }}</div>
+      <div class="analytics-tile">
+        <div class="analytics-tile__label">Distinct tags</div>
+        <div class="analytics-tile__value">{{ totalTags }}</div>
       </div>
-      <div class="hm-card px-5 py-4" style="border:0.5px solid var(--hm-border-subtle); border-radius:8px">
-        <div style="font-size:11px; color:var(--hm-text-tertiary)">Projects</div>
-        <div style="font-size:22px; font-weight:600; color:var(--hm-text-primary)">{{ totalProjects }}</div>
+      <div class="analytics-tile">
+        <div class="analytics-tile__label">Projects</div>
+        <div class="analytics-tile__value">{{ totalProjects }}</div>
       </div>
-      <div class="hm-card px-5 py-4" style="border:0.5px solid var(--hm-border-subtle); border-radius:8px">
-        <div style="font-size:11px; color:var(--hm-text-tertiary)">Added last 7 days</div>
-        <div style="font-size:22px; font-weight:600; color:var(--hm-text-primary)">{{ addedThisWeek }}</div>
+      <div class="analytics-tile">
+        <div class="analytics-tile__label">Added last 7 days</div>
+        <div class="analytics-tile__value">{{ addedThisWeek }}</div>
       </div>
     </div>
 
-    <div class="grid grid-cols-2 gap-8 mb-10">
-      <div>
-        <h3 class="mb-3" style="font-size:12px; color:var(--hm-text-secondary)">Top tags</h3>
+    <div class="grid grid-cols-2 gap-4 mb-6">
+      <div class="analytics-panel">
+        <h3 class="analytics-panel__title">Top tags</h3>
         <BarChart v-if="topTags.length" :data="topTags" labelKey="tag" valueKey="count" />
         <EmptyState v-else message="No tags yet" />
       </div>
-      <div>
-        <h3 class="mb-3" style="font-size:12px; color:var(--hm-text-secondary)">Memory types</h3>
+      <div class="analytics-panel">
+        <h3 class="analytics-panel__title">Memory types</h3>
         <BarChart v-if="analytics.typeCounts.length" :data="analytics.typeCounts" labelKey="type" valueKey="count" :color="typeColor" />
         <EmptyState v-else message="No memories yet" />
       </div>
-      <div>
-        <h3 class="mb-3" style="font-size:12px; color:var(--hm-text-secondary)">By project</h3>
+      <div class="analytics-panel">
+        <h3 class="analytics-panel__title">By project</h3>
         <BarChart v-if="analytics.projectCounts.length" :data="analytics.projectCounts" labelKey="project" valueKey="count" />
         <EmptyState v-else message="No project-tagged memories yet" hint="Add a project:* tag to a memory to see it here." />
       </div>
-      <div>
-        <h3 class="mb-3" style="font-size:12px; color:var(--hm-text-secondary)">Activity by day</h3>
+      <div class="analytics-panel">
+        <h3 class="analytics-panel__title">Activity by day</h3>
         <BarChart v-if="analytics.activityByDay.length" :data="analytics.activityByDay" labelKey="day" valueKey="count" />
         <EmptyState v-else message="No activity recorded yet" />
       </div>
     </div>
 
-    <div>
-      <h3 class="mb-3" style="font-size:12px; color:var(--hm-text-secondary)">Recall sessions</h3>
+    <div class="analytics-panel">
+      <h3 class="analytics-panel__title">Recall sessions</h3>
       <div v-if="analytics.sessionLogs.length">
         <SessionLogRow v-for="log in analytics.sessionLogs" :key="log.id" :log="log" />
       </div>
@@ -84,3 +84,34 @@ const typeColor = (d) => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.analytics-tile {
+  background: var(--hm-bg-elevated);
+  border: 0.5px solid var(--hm-border-default);
+  border-radius: 8px;
+  padding: 16px 20px;
+}
+.analytics-tile__label {
+  font-size: 11px;
+  color: var(--hm-text-tertiary);
+  margin-bottom: 4px;
+}
+.analytics-tile__value {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--hm-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.analytics-panel {
+  background: var(--hm-bg-elevated);
+  border: 0.5px solid var(--hm-border-default);
+  border-radius: 8px;
+  padding: 20px;
+}
+.analytics-panel__title {
+  font-size: 12px;
+  color: var(--hm-text-secondary);
+  margin-bottom: 14px;
+}
+</style>
