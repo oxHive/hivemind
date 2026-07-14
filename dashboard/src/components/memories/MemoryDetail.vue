@@ -65,7 +65,11 @@ function pickMention(m) {
   const ta = contentEl.value
   const text = memories.draft.content
   const caret = ta.selectionStart
-  const insert = `[${m.title}](${m.id})`
+  // Strip brackets/parens from the link text: the backend's MENTION_RE is a plain
+  // regex (no backslash-escape awareness), so an unescaped `]`/`)` in the title
+  // would prematurely terminate the `[phrase](mem_id)` markdown link.
+  const safeTitle = m.title.replace(/[[\]()]/g, '')
+  const insert = `[${safeTitle}](${m.id})`
   const pos = mention.value.start + insert.length
   memories.draft.content = text.slice(0, mention.value.start) + insert + text.slice(caret)
   mention.value = null
