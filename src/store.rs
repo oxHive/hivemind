@@ -93,9 +93,8 @@ pub const VALID_RELATIONSHIPS: &[&str] = &[
     "mentions",
 ];
 
-static MENTION_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-    regex::Regex::new(r"\[([^\]]+)\]\((mem_[0-9a-f]{32})\)").unwrap()
-});
+static MENTION_RE: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| regex::Regex::new(r"\[([^\]]+)\]\((mem_[0-9a-f]{32})\)").unwrap());
 
 /// Extract `[phrase](mem_xxx)` mention links from memory content.
 /// Deduped by target (first phrase wins); links to `source_id` are dropped.
@@ -144,8 +143,7 @@ async fn sync_mention_edges(
         )
         .await?;
     } else {
-        let placeholders: Vec<String> =
-            (2..mentions.len() + 2).map(|i| format!("?{i}")).collect();
+        let placeholders: Vec<String> = (2..mentions.len() + 2).map(|i| format!("?{i}")).collect();
         let sql = format!(
             "DELETE FROM edges WHERE source_id = ?1 AND relationship = 'mentions' \
              AND target_id NOT IN ({})",
@@ -1437,8 +1435,14 @@ mod tests {
         assert_eq!(
             got,
             vec![
-                ("the auth notes".to_string(), "mem_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string()),
-                ("design".to_string(), "mem_cccccccccccccccccccccccccccccccc".to_string()),
+                (
+                    "the auth notes".to_string(),
+                    "mem_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string()
+                ),
+                (
+                    "design".to_string(),
+                    "mem_cccccccccccccccccccccccccccccccc".to_string()
+                ),
             ]
         );
     }
@@ -1456,7 +1460,10 @@ mod tests {
         let got = parse_mentions(id, content);
         assert_eq!(
             got,
-            vec![("first".to_string(), "mem_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string())]
+            vec![(
+                "first".to_string(),
+                "mem_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string()
+            )]
         );
     }
 
@@ -1466,12 +1473,19 @@ mod tests {
     #[tokio::test]
     async fn store_creates_active_mention_edges_with_link_text() {
         let (s, _dir) = make_store().await;
-        s.store(&test_row(T_B, "Target", "target body", &[])).await.unwrap();
+        s.store(&test_row(T_B, "Target", "target body", &[]))
+            .await
+            .unwrap();
         let content = format!("relates to [the target]({T_B})");
-        s.store(&test_row("mem_src", "Src", &content, &[])).await.unwrap();
+        s.store(&test_row("mem_src", "Src", &content, &[]))
+            .await
+            .unwrap();
 
         let edges = s.list_edges(Some("mem_src")).await.unwrap();
-        let m: Vec<_> = edges.iter().filter(|e| e.relationship == "mentions").collect();
+        let m: Vec<_> = edges
+            .iter()
+            .filter(|e| e.relationship == "mentions")
+            .collect();
         assert_eq!(m.len(), 1);
         assert_eq!(m[0].target_id, T_B);
         assert_eq!(m[0].status, "active");
@@ -1483,19 +1497,41 @@ mod tests {
         let (s, _dir) = make_store().await;
         s.store(&test_row(T_B, "B", "b", &[])).await.unwrap();
         s.store(&test_row(T_C, "C", "c", &[])).await.unwrap();
-        s.store(&test_row("mem_src", "Src", &format!("[one]({T_B}) [two]({T_C})"), &[]))
-            .await
-            .unwrap();
+        s.store(&test_row(
+            "mem_src",
+            "Src",
+            &format!("[one]({T_B}) [two]({T_C})"),
+            &[],
+        ))
+        .await
+        .unwrap();
 
-        let first: Vec<_> = s.list_edges(Some("mem_src")).await.unwrap()
-            .into_iter().filter(|e| e.relationship == "mentions").collect();
+        let first: Vec<_> = s
+            .list_edges(Some("mem_src"))
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.relationship == "mentions")
+            .collect();
         assert_eq!(first.len(), 2);
-        let b_edge_id = first.iter().find(|e| e.target_id == T_B).unwrap().id.clone();
+        let b_edge_id = first
+            .iter()
+            .find(|e| e.target_id == T_B)
+            .unwrap()
+            .id
+            .clone();
 
         // Rephrase the B link, drop the C link entirely.
-        s.update("mem_src", "Src", &format!("[renamed]({T_B})"), &[]).await.unwrap();
-        let second: Vec<_> = s.list_edges(Some("mem_src")).await.unwrap()
-            .into_iter().filter(|e| e.relationship == "mentions").collect();
+        s.update("mem_src", "Src", &format!("[renamed]({T_B})"), &[])
+            .await
+            .unwrap();
+        let second: Vec<_> = s
+            .list_edges(Some("mem_src"))
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.relationship == "mentions")
+            .collect();
         assert_eq!(second.len(), 1);
         assert_eq!(second[0].target_id, T_B);
         assert_eq!(second[0].link_text.as_deref(), Some("renamed"));
@@ -1505,8 +1541,12 @@ mod tests {
     #[tokio::test]
     async fn stale_pending_mention_edge_self_heals_to_active_on_save() {
         let (s, _dir) = make_store().await;
-        s.store(&test_row(T_B, "Target", "target body", &[])).await.unwrap();
-        s.store(&test_row("mem_src", "Src", "no links yet", &[])).await.unwrap();
+        s.store(&test_row(T_B, "Target", "target body", &[]))
+            .await
+            .unwrap();
+        s.store(&test_row("mem_src", "Src", "no links yet", &[]))
+            .await
+            .unwrap();
 
         // Simulate an import-created `mentions` edge stuck in 'pending' (e.g. from a
         // path that inserts mentions edges without activating them).
@@ -1525,7 +1565,10 @@ mod tests {
         s.update("mem_src", "Src", &content, &[]).await.unwrap();
 
         let edges = s.list_edges(Some("mem_src")).await.unwrap();
-        let m: Vec<_> = edges.iter().filter(|e| e.relationship == "mentions").collect();
+        let m: Vec<_> = edges
+            .iter()
+            .filter(|e| e.relationship == "mentions")
+            .collect();
         assert_eq!(m.len(), 1);
         assert_eq!(m[0].id, "edge_pending_test");
         assert_eq!(m[0].status, "active");
