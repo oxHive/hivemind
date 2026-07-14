@@ -663,6 +663,14 @@ impl HiveMind {
             .await
             .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
 
+        if let Err(e) = self
+            .store
+            .log_session_start(&canon.to_string_lossy(), &result)
+            .await
+        {
+            tracing::warn!("failed to write session_start_log entry: {e:#}");
+        }
+
         Ok(CallToolResult::structured(result.to_json()))
     }
 }
@@ -1230,6 +1238,28 @@ mod tests {
         assert_eq!(val["context_loaded"][0]["title"], "golang preferences");
         assert_eq!(val["budget"]["truncated"], false);
         assert!(val["budget"]["used_tokens"].as_u64().unwrap() > 0);
+    }
+
+    #[tokio::test]
+    async fn session_start_writes_a_log_entry() {
+        let (hm, _dir) = test_hivemind().await;
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join(".hivemind.toml"),
+            "[project]\nname=\"demo\"\n[hooks.on_session_start]\nmax_tokens=2000\nrecalls=[]\n",
+        )
+        .unwrap();
+
+        hm.do_session_start(SessionStartInput {
+            project_path: tmp.path().to_string_lossy().into_owned(),
+        })
+        .await
+        .unwrap();
+
+        let logs = hm.store.list_session_logs(10).await.unwrap();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].project_name, "demo");
+        assert_eq!(logs[0].project_path, tmp.path().to_string_lossy());
     }
 
     #[tokio::test]
