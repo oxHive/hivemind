@@ -8,16 +8,26 @@ const props = defineProps({ text: { type: String, default: '' } })
 const emit = defineEmits(['navigate'])
 const memories = useMemoriesStore()
 
-const MEM_ID_RE = /^mem_[0-9a-f]{32}$/
+const MEM_LINK_RE = /^(?:(parent|child|sibling):)?(mem_[0-9a-f]{32})$/
+
+const RELATIONSHIP_LINK_COLORS = {
+  parent: '#5b8fd9',
+  child: '#c2634a',
+  sibling: '#9a63d6',
+}
 
 const md = new Marked({ breaks: true })
 md.use({
   renderer: {
     link(token) {
-      if (MEM_ID_RE.test(token.href)) {
-        const exists = memories.all.some(m => m.id === token.href)
+      const match = MEM_LINK_RE.exec(token.href)
+      if (match) {
+        const kind = match[1] || 'sibling'
+        const id = match[2]
+        const exists = memories.all.some(m => m.id === id)
         if (exists) {
-          return `<a class="hm-mem-link" href="#" data-mem-id="${token.href}">${token.text}</a>`
+          const color = RELATIONSHIP_LINK_COLORS[kind]
+          return `<a class="hm-mem-link" href="#" data-mem-id="${id}" style="color:${color}">${token.text}</a>`
         }
         return `<span class="hm-mem-link hm-mem-link--dead" title="Memory not found">${token.text}</span>`
       }
@@ -92,9 +102,8 @@ function onClick(e) {
   color: var(--hm-accent);
 }
 .hm-markdown :deep(a.hm-mem-link) {
-  color: var(--hm-accent);
   text-decoration: none;
-  border-bottom: 1px dotted var(--hm-accent);
+  border-bottom: 1px dotted currentColor;
   cursor: pointer;
 }
 .hm-markdown :deep(.hm-mem-link--dead) {

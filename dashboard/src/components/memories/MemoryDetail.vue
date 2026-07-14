@@ -23,6 +23,10 @@ const contentView = ref('markdown') // 'markdown' | 'raw'
 const contentEl = ref(null)
 const mention = ref(null) // { start, query, top, left } | null
 const mentionIndex = ref(0)
+const mentionStage = ref('search') // 'search' | 'kind'
+const kindIndex = ref(0)
+const pendingTarget = ref(null)
+const KIND_OPTIONS = ['sibling', 'parent', 'child']
 
 const mentionResults = computed(() => {
   if (!mention.value) return []
@@ -45,6 +49,7 @@ function detectMention(ta) {
   const { top, left } = caretCoords(ta, at)
   mention.value = { start: at, query, top: top + 22, left }
   mentionIndex.value = 0
+  mentionStage.value = 'search'
 }
 
 function onContentInput(e) {
@@ -53,26 +58,49 @@ function onContentInput(e) {
 }
 
 function onContentKeydown(e) {
-  if (!mention.value || !mentionResults.value.length) return
+  if (!mention.value) return
+  if (mentionStage.value === 'kind') {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+      e.preventDefault()
+      kindIndex.value = (kindIndex.value + 1) % KIND_OPTIONS.length
+    } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+      e.preventDefault()
+      kindIndex.value = (kindIndex.value - 1 + KIND_OPTIONS.length) % KIND_OPTIONS.length
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      insertMention(pendingTarget.value, KIND_OPTIONS[kindIndex.value])
+    } else if (e.key === 'Escape') {
+      mention.value = null
+    }
+    return
+  }
+  if (!mentionResults.value.length) return
   const n = mentionResults.value.length
   if (e.key === 'ArrowDown') { e.preventDefault(); mentionIndex.value = (mentionIndex.value + 1) % n }
   else if (e.key === 'ArrowUp') { e.preventDefault(); mentionIndex.value = (mentionIndex.value - 1 + n) % n }
-  else if (e.key === 'Enter') { e.preventDefault(); pickMention(mentionResults.value[mentionIndex.value]) }
+  else if (e.key === 'Enter') { e.preventDefault(); chooseTarget(mentionResults.value[mentionIndex.value]) }
   else if (e.key === 'Escape') { mention.value = null }
 }
 
-function pickMention(m) {
+function chooseTarget(m) {
+  pendingTarget.value = m
+  mentionStage.value = 'kind'
+  kindIndex.value = 0
+}
+
+function insertMention(m, kind) {
   const ta = contentEl.value
   const text = memories.draft.content
   const caret = ta.selectionStart
-  // Strip brackets/parens from the link text: the backend's MENTION_RE is a plain
+  // Strip brackets/parens from the link text: the backend's regex is a plain
   // regex (no backslash-escape awareness), so an unescaped `]`/`)` in the title
-  // would prematurely terminate the `[phrase](mem_id)` markdown link.
+  // would prematurely terminate the `[phrase](kind:mem_id)` markdown link.
   const safeTitle = m.title.replace(/[[\]()]/g, '')
-  const insert = `[${safeTitle}](${m.id})`
+  const insert = kind === 'sibling' ? `[${safeTitle}](${m.id})` : `[${safeTitle}](${kind}:${m.id})`
   const pos = mention.value.start + insert.length
   memories.draft.content = text.slice(0, mention.value.start) + insert + text.slice(caret)
   mention.value = null
+  mentionStage.value = 'search'
   nextTick(() => { ta.focus(); ta.setSelectionRange(pos, pos) })
 }
 
@@ -173,14 +201,22 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
             :value="memories.draft?.content"
             @input="onContentInput"
             @keydown="onContentKeydown"
-            @blur="mention = null"
+            @blur="mention = null; mentionStage = 'search'"
           ></textarea>
-          <div v-if="mention && mentionResults.length" class="mention-menu"
+          <div v-if="mention && mentionStage === 'search' && mentionResults.length" class="mention-menu"
             :style="{ top: mention.top + 'px', left: mention.left + 'px' }">
             <button v-for="(m, i) in mentionResults" :key="m.id" type="button"
               class="mention-menu__item" :class="{ 'mention-menu__item--active': i === mentionIndex }"
-              @mousedown.prevent="pickMention(m)">
+              @mousedown.prevent="chooseTarget(m)">
               {{ m.title }}
+            </button>
+          </div>
+          <div v-if="mention && mentionStage === 'kind'" class="mention-menu"
+            :style="{ top: mention.top + 'px', left: mention.left + 'px' }">
+            <button v-for="(opt, i) in KIND_OPTIONS" :key="opt" type="button"
+              class="mention-menu__item" :class="{ 'mention-menu__item--active': i === kindIndex }"
+              @mousedown.prevent="insertMention(pendingTarget, opt)">
+              {{ opt }}
             </button>
           </div>
         </div>
