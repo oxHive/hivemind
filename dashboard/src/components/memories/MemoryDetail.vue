@@ -19,6 +19,11 @@ const showDeleteModal = ref(false)
 const flagOpen = ref(false)
 const contentView = ref('markdown') // 'markdown' | 'raw'
 
+function goToMemory(id) {
+  const target = memories.all.find(m => m.id === id)
+  if (target) memories.select(target)
+}
+
 async function flag(signal) {
   flagOpen.value = false
   await createFeedback({ memory_id: memories.selected.id, signal })
@@ -112,7 +117,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
         ></textarea>
         <div v-else id="mem-content" class="mb-6 overflow-y-auto"
           style="height:40vh; min-height:160px; padding:10px 12px; border-radius:6px; border:0.5px solid var(--hm-border-default); background:var(--hm-mono-bg)">
-          <MarkdownContent :text="memories.draft?.content" />
+          <MarkdownContent :text="memories.draft?.content" @navigate="goToMemory" />
         </div>
 
         <!-- Tags -->
