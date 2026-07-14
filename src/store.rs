@@ -92,6 +92,25 @@ pub const VALID_RELATIONSHIPS: &[&str] = &[
     "custom",
 ];
 
+static MENTION_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(r"\[([^\]]+)\]\((mem_[0-9a-f]{32})\)").unwrap()
+});
+
+/// Extract `[phrase](mem_xxx)` mention links from memory content.
+/// Deduped by target (first phrase wins); links to `source_id` are dropped.
+pub(crate) fn parse_mentions(source_id: &str, content: &str) -> Vec<(String, String)> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for cap in MENTION_RE.captures_iter(content) {
+        let target = cap[2].to_string();
+        if target == source_id || !seen.insert(target.clone()) {
+            continue;
+        }
+        out.push((cap[1].to_string(), target));
+    }
+    out
+}
+
 /// Quote a raw user query for FTS5 MATCH: every whitespace-separated term is
 /// wrapped in double quotes (FTS5 string syntax) with embedded quotes doubled,
 /// so characters like / + ' - can never be parsed as FTS5 operators.
@@ -1356,6 +1375,38 @@ mod tests {
         assert_eq!(fts_quote("c++ tips"), "\"c++\" \"tips\"");
         assert_eq!(fts_quote("say \"hi\""), "\"say\" \"\"\"hi\"\"\"");
         assert_eq!(fts_quote("   "), "");
+    }
+
+    #[test]
+    fn parse_mentions_extracts_valid_links() {
+        let id = "mem_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let content = "see [the auth notes](mem_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb) and \
+                       [design](mem_cccccccccccccccccccccccccccccccc)";
+        let got = parse_mentions(id, content);
+        assert_eq!(
+            got,
+            vec![
+                ("the auth notes".to_string(), "mem_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string()),
+                ("design".to_string(), "mem_cccccccccccccccccccccccccccccccc".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_mentions_dedupes_and_drops_self_and_malformed() {
+        let id = "mem_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let content = "\
+            [first](mem_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb) \
+            [second phrase](mem_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb) \
+            [self](mem_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) \
+            [not a mem link](https://example.com) \
+            [short id](mem_abc) \
+            [no target]() plain text";
+        let got = parse_mentions(id, content);
+        assert_eq!(
+            got,
+            vec![("first".to_string(), "mem_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string())]
+        );
     }
 
     #[tokio::test]
