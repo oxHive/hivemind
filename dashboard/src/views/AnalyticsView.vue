@@ -2,14 +2,16 @@
 import { computed } from 'vue'
 import { useMemoriesStore } from '../stores/memories.js'
 import { useAnalyticsStore } from '../stores/analytics.js'
+import { useUiStore } from '../stores/ui.js'
 import BarChart from '../components/analytics/BarChart.vue'
 import SessionLogRow from '../components/analytics/SessionLogRow.vue'
 import EmptyState from '../components/shared/EmptyState.vue'
 
 const memories = useMemoriesStore()
 const analytics = useAnalyticsStore()
+const ui = useUiStore()
 
-const totalMemories = computed(() => memories.all.length)
+const totalMemories = computed(() => ui.serverInfo?.memory_count ?? memories.all.length)
 const totalTags = computed(() => analytics.tagCounts.length)
 const totalProjects = computed(() => analytics.projectCounts.length)
 const addedThisWeek = computed(() => {
