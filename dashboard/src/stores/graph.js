@@ -8,9 +8,6 @@ export const useGraphStore = defineStore('graph', () => {
   const selectedNodeId = ref(null)
   const searchQuery = ref('')
   const layerFilter = ref('all') // 'all' | 'personal' | 'workspace'
-  const connectMode = ref(false)
-  const connectSourceId = ref(null)
-  const pendingConnect = ref(null) // { sourceId, targetId } when picker is open
 
   const pendingEdges = computed(() => edges.value.filter(e => e.status === 'pending'))
 
@@ -24,11 +21,6 @@ export const useGraphStore = defineStore('graph', () => {
   async function fetchEdges() {
     const data = await api.listEdges()
     edges.value = data.edges ?? []
-  }
-
-  async function storeEdge(sourceId, targetId, relationship) {
-    await api.createEdge({ source_id: sourceId, target_id: targetId, relationship })
-    await fetchEdges()
   }
 
   async function resolveEdge(id, status) {
@@ -45,20 +37,9 @@ export const useGraphStore = defineStore('graph', () => {
     await Promise.all(pendingEdges.value.map(e => resolveEdge(e.id, 'rejected')))
   }
 
-  function startConnect(sourceId) {
-    connectMode.value = true
-    connectSourceId.value = sourceId
-  }
-
-  function cancelConnect() {
-    connectMode.value = false
-    connectSourceId.value = null
-    pendingConnect.value = null
-  }
-
   return {
-    edges, zoom, selectedNodeId, searchQuery, layerFilter, connectMode, connectSourceId, pendingConnect,
-    pendingEdges, edgesFor, fetchEdges, storeEdge, resolveEdge,
-    acceptAllPending, rejectAllPending, startConnect, cancelConnect,
+    edges, zoom, selectedNodeId, searchQuery, layerFilter,
+    pendingEdges, edgesFor, fetchEdges, resolveEdge,
+    acceptAllPending, rejectAllPending,
   }
 })
