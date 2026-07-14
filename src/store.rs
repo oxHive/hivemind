@@ -353,13 +353,10 @@ impl SqliteStore {
                 .collect::<Vec<_>>()
         )
         .to_string();
-        // "truncated" means the token budget cut off recalls, not merely that
-        // a recall wasn't found — so it reflects BudgetExceeded skips only,
-        // deliberately narrower than `SessionStartResult::truncated()`.
-        let truncated = result
-            .skipped
-            .iter()
-            .any(|s| matches!(s.reason, crate::session::SkipReason::BudgetExceeded));
+        // Match `SessionStartResult::truncated()` semantics so the analytics
+        // page reports the same truncation status the MCP tool already
+        // returned for this identical session-start run.
+        let truncated = result.truncated();
 
         self.conn
             .execute(
@@ -1468,7 +1465,7 @@ mod tests {
         assert_eq!(logs[0].used_tokens, 120);
         assert_eq!(logs[0].max_tokens, 2000);
         assert_eq!(logs[0].memories_recalled, 0);
-        assert!(!logs[0].truncated);
+        assert!(logs[0].truncated);
         assert_eq!(logs[0].skipped[0]["query"], "missing pref");
         assert_eq!(logs[0].skipped[0]["reason"], "not_found");
     }
