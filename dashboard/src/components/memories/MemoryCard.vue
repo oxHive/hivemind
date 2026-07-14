@@ -3,8 +3,10 @@ import { computed, ref } from 'vue'
 import LayerBadge from '../shared/LayerBadge.vue'
 import TagChip from '../shared/TagChip.vue'
 import Tooltip from '../shared/Tooltip.vue'
+import { useMemoriesStore } from '../../stores/memories.js'
 import { fmtDate } from '../../lib/format.js'
 
+const memories = useMemoriesStore()
 const props = defineProps({ mem: Object, selected: Boolean })
 defineEmits(['select'])
 
@@ -49,6 +51,7 @@ const displayTags = computed(() => {
         style="font-size:13px; color:var(--hm-text-primary); overflow:hidden; display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical"
         @mouseenter="onTitleEnter"
         @mouseleave="onTitleLeave">
+        <span v-if="memories.isDraft(mem.id)" class="draft-label">DRAFT</span>
         {{ mem.title }}
       </span>
       <LayerBadge :layer="mem.layer" class="shrink-0 mt-0.5" />
@@ -109,5 +112,14 @@ const displayTags = computed(() => {
 .memory-card--selected-workspace:hover,
 .memory-card--selected-workspace:focus-visible {
   background: var(--hm-workspace-bg);
+}
+
+.draft-label {
+  font-family: var(--hm-font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--hm-warning);
+  margin-right: 5px;
 }
 </style>
