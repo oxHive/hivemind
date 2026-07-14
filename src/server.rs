@@ -122,8 +122,16 @@ pub struct MemoryStoreEdgeInput {
     pub source_id: String,
     /// Target memory ID (mem_xxx)
     pub target_id: String,
-    /// Relationship type: "shares_tag" | "applies_to" | "pairs_with" | "used_in" | "related_to" | "custom"
+    /// Relationship type: "parent" (target is a broader principle/context this
+    /// falls under) | "child" (target is a specific instance of this) |
+    /// "sibling" (a peer, no hierarchy implied)
     pub relationship: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct MemoryGetEdgesInput {
+    /// Memory ID (mem_xxx) to get connections for
+    pub memory_id: String,
 }
 
 #[derive(Clone)]
@@ -582,7 +590,10 @@ impl HiveMind {
              Analyze the memories above and identify meaningful connections not yet captured.\n\
              For each suggested connection, call the memory_store_edge tool with:\n\
                source_id, target_id, and relationship.\n\
-             Relationship types: shares_tag | applies_to | pairs_with | used_in | related_to | custom\n\
+             Relationship types:\n\
+             \x20\x20parent  — target is a broader principle/context source falls under\n\
+             \x20\x20child   — target is a specific instance of source\n\
+             \x20\x20sibling — a peer, no hierarchy\n\
              Suggest 3–7 connections. Focus on cross-domain insights.",
             memories.len(),
             edges.len(),
@@ -738,7 +749,7 @@ impl HiveMind {
     }
 
     #[tool(
-        description = "Store a confirmed connection between two memories. Use after the user or Claude explicitly decides two memories are related. Valid relationships: shares_tag, applies_to, pairs_with, used_in, related_to, custom."
+        description = "Store a confirmed connection between two memories. Use after the user or Claude explicitly decides two memories are related. Valid relationships: parent (target is a broader principle/context source falls under), child (target is a specific instance of source), sibling (a peer, no hierarchy)."
     )]
     async fn memory_store_edge(
         &self,
@@ -770,6 +781,21 @@ impl HiveMind {
                     crate::store::VALID_RELATIONSHIPS.join(", ")
                 ),
                 None,
+            )),
+            Err(e) => Err(ErrorData::internal_error(e.to_string(), None)),
+        }
+    }
+
+    #[tool(
+        description = "Get a memory's connections to other memories, grouped by relationship: parents (broader context this falls under), children (specific instances of this), and siblings (peers, no hierarchy). Call after memory_recall to see how a memory connects to the rest of what's stored."
+    )]
+    async fn memory_get_edges(
+        &self,
+        Parameters(p): Parameters<MemoryGetEdgesInput>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match self.store.get_edges_grouped(&p.memory_id).await {
+            Ok(grouped) => Ok(CallToolResult::structured(
+                serde_json::to_value(grouped).unwrap(),
             )),
             Err(e) => Err(ErrorData::internal_error(e.to_string(), None)),
         }
@@ -1711,6 +1737,74 @@ mod tests {
             );
         }
         assert_eq!(prompts.len(), 7, "exactly 7 prompts expected");
+    }
+
+    #[tokio::test]
+    async fn memory_get_edges_returns_grouped_connections() {
+        let (hm, _dir) = test_hivemind().await;
+
+        let parent = hm
+            .do_memory_store(MemoryStoreInput {
+                title: "Parent".to_string(),
+                content: "parent body".to_string(),
+                tags: vec![],
+                token_count: None,
+                layer: None,
+                memory_type: None,
+            })
+            .await
+            .unwrap();
+        let parent_id = parent.structured_content.unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let child = hm
+            .do_memory_store(MemoryStoreInput {
+                title: "Child".to_string(),
+                content: "child body".to_string(),
+                tags: vec![],
+                token_count: None,
+                layer: None,
+                memory_type: None,
+            })
+            .await
+            .unwrap();
+        let child_id = child.structured_content.unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        // Child asserts Parent is its parent.
+        hm.do_memory_update(MemoryUpdateInput {
+            id: child_id.clone(),
+            title: None,
+            content: Some(format!("[the rule](parent:{parent_id})")),
+            tags: None,
+        })
+        .await
+        .unwrap();
+
+        let from_child = hm
+            .memory_get_edges(Parameters(MemoryGetEdgesInput {
+                memory_id: child_id.clone(),
+            }))
+            .await
+            .unwrap();
+        let from_child = from_child.structured_content.unwrap();
+        assert_eq!(from_child["parents"][0]["id"], parent_id);
+        assert_eq!(from_child["parents"][0]["link_text"], "the rule");
+        assert!(from_child["children"].as_array().unwrap().is_empty());
+
+        let from_parent = hm
+            .memory_get_edges(Parameters(MemoryGetEdgesInput {
+                memory_id: parent_id.clone(),
+            }))
+            .await
+            .unwrap();
+        let from_parent = from_parent.structured_content.unwrap();
+        assert_eq!(from_parent["children"][0]["id"], child_id);
+        assert!(from_parent["parents"].as_array().unwrap().is_empty());
     }
 
     #[tokio::test]
