@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { useMemoriesStore } from '../stores/memories.js'
 import { useAnalyticsStore } from '../stores/analytics.js'
 import BarChart from '../components/analytics/BarChart.vue'
+import SessionLogRow from '../components/analytics/SessionLogRow.vue'
 import EmptyState from '../components/shared/EmptyState.vue'
 
 const memories = useMemoriesStore()
@@ -68,6 +69,16 @@ const typeColor = (d) => {
         <BarChart v-if="analytics.activityByDay.length" :data="analytics.activityByDay" labelKey="day" valueKey="count" />
         <EmptyState v-else message="No activity recorded yet" />
       </div>
+    </div>
+
+    <div>
+      <h3 class="mb-3" style="font-size:12px; color:var(--hm-text-secondary)">Recall sessions</h3>
+      <div v-if="analytics.sessionLogs.length">
+        <SessionLogRow v-for="log in analytics.sessionLogs" :key="log.id" :log="log" />
+      </div>
+      <EmptyState v-else
+        message="No session-start runs logged yet"
+        hint="This fills in once a Claude Code session with HiveMind configured runs its session-start hook." />
     </div>
   </div>
 </template>
