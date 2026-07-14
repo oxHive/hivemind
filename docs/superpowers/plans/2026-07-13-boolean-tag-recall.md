@@ -1,6 +1,6 @@
 # Boolean Tag-Based Recall Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Add a boolean tag-expression syntax (`&`/`|`/`!`/parens) usable in `.hivemind.toml` session-start `recalls` entries and as a new optional `tags` parameter on the `memory_search` MCP tool.
 
@@ -31,7 +31,7 @@
 **Interfaces:**
 - Produces: `pub enum TagExpr { Tag(String), And(Box<TagExpr>, Box<TagExpr>), Or(Box<TagExpr>, Box<TagExpr>), Not(Box<TagExpr>) }`; `pub fn looks_like_tag_expr(s: &str) -> bool`; `pub fn parse(s: &str) -> anyhow::Result<TagExpr>`; `TagExpr::eval(&self, tags: &[String]) -> bool`; `TagExpr::and_all(tags: &[String]) -> Option<TagExpr>`. Tasks 2, 3, and 4 all consume these exact names/signatures.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `src/tag_query.rs` with just the test module first:
 
@@ -134,12 +134,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cargo test --lib tag_query`
 Expected: FAIL to compile (`TagExpr`, `parse`, `looks_like_tag_expr` don't exist yet).
 
-- [ ] **Step 3: Implement the module**
+- [x] **Step 3: Implement the module**
 
 Add above the test module in `src/tag_query.rs`:
 
@@ -309,7 +309,7 @@ fn parse_atom(tokens: &[Token], pos: &mut usize) -> Result<TagExpr> {
 }
 ```
 
-- [ ] **Step 4: Register the module**
+- [x] **Step 4: Register the module**
 
 In `src/lib.rs`, find:
 
@@ -328,17 +328,17 @@ pub mod tag_query;
 
 (Keep this alphabetically-ish placed — check the surrounding lines in the actual file and slot it in sensibly; the exact surrounding context may differ slightly from this snippet since other modules may have been added since this plan was written.)
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `cargo test --lib tag_query`
 Expected: all tests PASS (13 new tests).
 
-- [ ] **Step 6: Run the full test suite to check for regressions**
+- [x] **Step 6: Run the full test suite to check for regressions**
 
 Run: `cargo test --lib`
 Expected: all pass (183 previous + 13 new = 196).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/tag_query.rs src/lib.rs
@@ -356,7 +356,7 @@ git commit -m "feat: add boolean tag expression parser (AND/OR/NOT, parens)"
 - Consumes: `crate::tag_query::TagExpr` (Task 1).
 - Produces: `SqliteStore::find_by_tag_expr(&self, expr: &crate::tag_query::TagExpr) -> anyhow::Result<Vec<MemoryEntry>>`. Tasks 3 and 4 both call this exact method.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 In `src/store.rs`, find the test module's `list_memories_returns_all_stored` test and add this test immediately after it:
 
@@ -403,12 +403,12 @@ In `src/store.rs`, find the test module's `list_memories_returns_all_stored` tes
     }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cargo test --lib find_by_tag_expr_returns_matching_memories`
 Expected: FAIL to compile (`find_by_tag_expr` doesn't exist yet).
 
-- [ ] **Step 3: Implement the method**
+- [x] **Step 3: Implement the method**
 
 In `src/store.rs`, find `list_memories` (the method ending near line 328):
 
@@ -446,17 +446,17 @@ Add a new method immediately after it:
     }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cargo test --lib find_by_tag_expr_returns_matching_memories`
 Expected: PASS.
 
-- [ ] **Step 5: Run the full test suite**
+- [x] **Step 5: Run the full test suite**
 
 Run: `cargo test --lib`
 Expected: all pass (196 previous + 1 new = 197).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/store.rs
@@ -474,7 +474,7 @@ git commit -m "feat: add SqliteStore::find_by_tag_expr for boolean tag queries"
 - Consumes: `crate::tag_query::{looks_like_tag_expr, parse}` (Task 1), `SqliteStore::find_by_tag_expr` (Task 2).
 - Produces: no new public API — `execute_session_start`'s existing signature and `SessionStartResult` shape are unchanged; only its internal per-recall resolution logic changes.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `src/session.rs`, find the `skips_over_budget_but_continues_to_smaller_entries` test (the last test in the file) and add these two tests immediately after it:
 
@@ -533,12 +533,12 @@ In `src/session.rs`, find the `skips_over_budget_but_continues_to_smaller_entrie
     }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cargo test --lib tag_expr_recall_loads_all_matching_memories malformed_tag_expr_recall_is_skipped_not_found_not_fts_searched`
 Expected: both FAIL — the first because only one entry loads today (current code takes `entries.into_iter().next().unwrap()` regardless of match count), the second either fails to compile-check the exact skip reason or currently would behave differently (verify what actually happens today by reading the existing code path — the point is these tests must fail before Step 3's change, confirming they exercise real new behavior).
 
-- [ ] **Step 3: Implement the restructured recall loop**
+- [x] **Step 3: Implement the restructured recall loop**
 
 In `src/session.rs`, find the full `execute_session_start` function body:
 
@@ -693,17 +693,17 @@ pub async fn execute_session_start(
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test --lib tag_expr_recall_loads_all_matching_memories malformed_tag_expr_recall_is_skipped_not_found_not_fts_searched`
 Expected: both PASS.
 
-- [ ] **Step 5: Run the full test suite to check for regressions**
+- [x] **Step 5: Run the full test suite to check for regressions**
 
 Run: `cargo test --lib`
 Expected: all pass, including the 4 pre-existing tests in this file (`loads_all_recalls_within_budget`, `records_not_found_recalls`, `to_json_matches_mcp_shape`, `skips_over_budget_but_continues_to_smaller_entries`) — these must still pass unchanged, confirming the restructuring preserved single-entry-recall behavior exactly. Total: 197 previous + 2 new = 199.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/session.rs
@@ -721,7 +721,7 @@ git commit -m "feat: support boolean tag expressions in .hivemind.toml session-s
 - Consumes: `crate::tag_query::TagExpr` (Task 1), `SqliteStore::find_by_tag_expr` (Task 2).
 - Produces: `MemorySearchInput` gains a `tags: Option<Vec<String>>` field; `query` changes from `String` to `Option<String>` (backward compatible — existing callers that always pass `query` are unaffected, since a present value still deserializes into `Some(...)`).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `src/server.rs`, find the `memory_search_empty_query_returns_zero` test and add these two tests immediately after it:
 
@@ -802,12 +802,12 @@ In `src/server.rs`, find the `memory_search_empty_query_returns_zero` test and a
     }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cargo test --lib memory_search_by_tags_only memory_search_query_and_tags_combined`
 Expected: FAIL to compile (`MemorySearchInput` has no `tags` field yet, and `query` isn't `Option<String>` yet).
 
-- [ ] **Step 3: Update `MemorySearchInput` and the two existing test call sites**
+- [x] **Step 3: Update `MemorySearchInput` and the two existing test call sites**
 
 Find:
 
@@ -899,7 +899,7 @@ Change the `MemorySearchInput` construction:
         assert_eq!(result.structured_content.unwrap()["count"], 0);
 ```
 
-- [ ] **Step 4: Restructure `do_memory_search`**
+- [x] **Step 4: Restructure `do_memory_search`**
 
 Find:
 
@@ -1012,17 +1012,17 @@ Replace it with:
     }
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `cargo test --lib memory_search_by_tags_only memory_search_query_and_tags_combined memory_search_empty_query_returns_zero`
 Expected: all PASS. Also re-run the pre-existing "pgx" search test by name (check its exact name in the file) to confirm it still passes after the `Some(...)` wrapping change.
 
-- [ ] **Step 6: Run the full test suite AND the integration suite**
+- [x] **Step 6: Run the full test suite AND the integration suite**
 
 Run: `cargo test --lib && cargo test --test api_integration`
 Expected: all pass. Lib count: 199 previous + 2 new = 201. Integration: 14 unaffected (this task doesn't touch `src/api.rs`).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/server.rs
@@ -1039,7 +1039,7 @@ git commit -m "feat: add tags param to memory_search MCP tool (AND-only boolean 
 **Interfaces:**
 - None (documentation only).
 
-- [ ] **Step 1: Extend the `.hivemind.toml` recalls section**
+- [x] **Step 1: Extend the `.hivemind.toml` recalls section**
 
 In `README.md`, find:
 
@@ -1065,7 +1065,7 @@ recalls = [
 Unlike a plain title recall (which loads at most one memory), a tag expression loads **every** matching memory, still subject to the overall `max_tokens` budget. An entry is only parsed as a tag expression if it starts with `tag:`, `!tag:`, or `(` — anything else is treated as a plain title/FTS query exactly as before.
 ```
 
-- [ ] **Step 2: Note the `memory_search` `tags` param**
+- [x] **Step 2: Note the `memory_search` `tags` param**
 
 Find:
 
@@ -1080,7 +1080,7 @@ Change it to:
 - **By tag**: ask Claude: *"find memories tagged lang:rust and project:hivemind"* → Claude calls `memory_search` with a `tags` array (AND-only; combine with a keyword `query` too if you like)
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add README.md
