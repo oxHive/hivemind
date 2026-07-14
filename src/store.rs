@@ -131,7 +131,7 @@ async fn sync_mention_edges(
              SELECT 'edge_' || lower(hex(randomblob(16))), ?1, ?2, 'mentions', 'active', ?3, ?4
              WHERE EXISTS (SELECT 1 FROM memories WHERE id = ?2)
              ON CONFLICT(source_id, target_id, relationship)
-             DO UPDATE SET link_text = excluded.link_text",
+             DO UPDATE SET link_text = excluded.link_text, status = 'active'",
             params![source_id, target.as_str(), now, phrase.as_str()],
         )
         .await?;
@@ -1500,6 +1500,36 @@ mod tests {
         assert_eq!(second[0].target_id, T_B);
         assert_eq!(second[0].link_text.as_deref(), Some("renamed"));
         assert_eq!(second[0].id, b_edge_id, "unchanged link keeps its edge id");
+    }
+
+    #[tokio::test]
+    async fn stale_pending_mention_edge_self_heals_to_active_on_save() {
+        let (s, _dir) = make_store().await;
+        s.store(&test_row(T_B, "Target", "target body", &[])).await.unwrap();
+        s.store(&test_row("mem_src", "Src", "no links yet", &[])).await.unwrap();
+
+        // Simulate an import-created `mentions` edge stuck in 'pending' (e.g. from a
+        // path that inserts mentions edges without activating them).
+        s.conn
+            .execute(
+                "INSERT INTO edges (id, source_id, target_id, relationship, status, created_at, link_text)
+                 VALUES ('edge_pending_test', 'mem_src', ?1, 'mentions', 'pending', ?2, 'old text')",
+                params![T_B, chrono_now()],
+            )
+            .await
+            .unwrap();
+
+        // Saving the source memory with a matching `[phrase](target_id)` link should
+        // upsert the existing edge and flip it back to 'active'.
+        let content = format!("relates to [the target]({T_B})");
+        s.update("mem_src", "Src", &content, &[]).await.unwrap();
+
+        let edges = s.list_edges(Some("mem_src")).await.unwrap();
+        let m: Vec<_> = edges.iter().filter(|e| e.relationship == "mentions").collect();
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].id, "edge_pending_test");
+        assert_eq!(m[0].status, "active");
+        assert_eq!(m[0].link_text.as_deref(), Some("the target"));
     }
 
     #[tokio::test]
