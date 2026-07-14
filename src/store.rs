@@ -571,33 +571,39 @@ impl SqliteStore {
 
         let parents = fetch(
             &self.conn,
-            "SELECT m.id, m.title, e.link_text FROM edges e JOIN memories m ON m.id = e.target_id \
-             WHERE e.source_id = ?1 AND e.relationship = 'parent' \
-             UNION ALL \
-             SELECT m.id, m.title, e.link_text FROM edges e JOIN memories m ON m.id = e.source_id \
-             WHERE e.target_id = ?1 AND e.relationship = 'child'",
+            "SELECT id, title, MIN(link_text) AS link_text FROM ( \
+                SELECT m.id, m.title, e.link_text FROM edges e JOIN memories m ON m.id = e.target_id \
+                 WHERE e.source_id = ?1 AND e.relationship = 'parent' \
+                 UNION ALL \
+                SELECT m.id, m.title, e.link_text FROM edges e JOIN memories m ON m.id = e.source_id \
+                 WHERE e.target_id = ?1 AND e.relationship = 'child' \
+             ) GROUP BY id, title",
             memory_id,
         )
         .await?;
 
         let children = fetch(
             &self.conn,
-            "SELECT m.id, m.title, e.link_text FROM edges e JOIN memories m ON m.id = e.target_id \
-             WHERE e.source_id = ?1 AND e.relationship = 'child' \
-             UNION ALL \
-             SELECT m.id, m.title, e.link_text FROM edges e JOIN memories m ON m.id = e.source_id \
-             WHERE e.target_id = ?1 AND e.relationship = 'parent'",
+            "SELECT id, title, MIN(link_text) AS link_text FROM ( \
+                SELECT m.id, m.title, e.link_text FROM edges e JOIN memories m ON m.id = e.target_id \
+                 WHERE e.source_id = ?1 AND e.relationship = 'child' \
+                 UNION ALL \
+                SELECT m.id, m.title, e.link_text FROM edges e JOIN memories m ON m.id = e.source_id \
+                 WHERE e.target_id = ?1 AND e.relationship = 'parent' \
+             ) GROUP BY id, title",
             memory_id,
         )
         .await?;
 
         let siblings = fetch(
             &self.conn,
-            "SELECT m.id, m.title, e.link_text FROM edges e JOIN memories m ON m.id = e.target_id \
-             WHERE e.source_id = ?1 AND e.relationship = 'sibling' \
-             UNION ALL \
-             SELECT m.id, m.title, e.link_text FROM edges e JOIN memories m ON m.id = e.source_id \
-             WHERE e.target_id = ?1 AND e.relationship = 'sibling'",
+            "SELECT id, title, MIN(link_text) AS link_text FROM ( \
+                SELECT m.id, m.title, e.link_text FROM edges e JOIN memories m ON m.id = e.target_id \
+                 WHERE e.source_id = ?1 AND e.relationship = 'sibling' \
+                 UNION ALL \
+                SELECT m.id, m.title, e.link_text FROM edges e JOIN memories m ON m.id = e.source_id \
+                 WHERE e.target_id = ?1 AND e.relationship = 'sibling' \
+             ) GROUP BY id, title",
             memory_id,
         )
         .await?;
@@ -1421,6 +1427,56 @@ mod tests {
         let from_b = s.get_edges_grouped(B).await.unwrap();
         assert_eq!(from_b.siblings.len(), 1);
         assert_eq!(from_b.siblings[0].id, A);
+    }
+
+    #[tokio::test]
+    async fn get_edges_grouped_dedupes_mutual_reciprocal_links() {
+        const A: &str = "mem_55555555555555555555555555555555";
+        const B: &str = "mem_66666666666666666666666666666666";
+        let (s, _dir) = make_store().await;
+        s.store(&test_row(A, "A", "a", &[])).await.unwrap();
+        s.store(&test_row(B, "B", "b", &[])).await.unwrap();
+        // Each side independently authors a reciprocal sibling link, producing
+        // two distinct edge rows: (A -> B, sibling) and (B -> A, sibling).
+        s.update(A, "A", &format!("[my sibling](sibling:{B})"), &[])
+            .await
+            .unwrap();
+        s.update(B, "B", &format!("[my sibling too](sibling:{A})"), &[])
+            .await
+            .unwrap();
+
+        let from_a = s.get_edges_grouped(A).await.unwrap();
+        assert_eq!(from_a.siblings.len(), 1, "expected exactly one sibling entry, got {:?}", from_a.siblings);
+        assert_eq!(from_a.siblings[0].id, B);
+
+        let from_b = s.get_edges_grouped(B).await.unwrap();
+        assert_eq!(from_b.siblings.len(), 1, "expected exactly one sibling entry, got {:?}", from_b.siblings);
+        assert_eq!(from_b.siblings[0].id, A);
+    }
+
+    #[tokio::test]
+    async fn get_edges_grouped_dedupes_mutual_parent_child_links() {
+        const A: &str = "mem_77777777777777777777777777777777";
+        const B: &str = "mem_88888888888888888888888888888888";
+        let (s, _dir) = make_store().await;
+        s.store(&test_row(A, "A", "a", &[])).await.unwrap();
+        s.store(&test_row(B, "B", "b", &[])).await.unwrap();
+        // A declares B as its parent, and B independently declares A as its child,
+        // producing two distinct edge rows: (A -> B, parent) and (B -> A, child).
+        s.update(A, "A", &format!("[my parent](parent:{B})"), &[])
+            .await
+            .unwrap();
+        s.update(B, "B", &format!("[my child](child:{A})"), &[])
+            .await
+            .unwrap();
+
+        let from_a = s.get_edges_grouped(A).await.unwrap();
+        assert_eq!(from_a.parents.len(), 1, "expected exactly one parent entry, got {:?}", from_a.parents);
+        assert_eq!(from_a.parents[0].id, B);
+
+        let from_b = s.get_edges_grouped(B).await.unwrap();
+        assert_eq!(from_b.children.len(), 1, "expected exactly one child entry, got {:?}", from_b.children);
+        assert_eq!(from_b.children[0].id, A);
     }
 
     fn test_row<'a>(
