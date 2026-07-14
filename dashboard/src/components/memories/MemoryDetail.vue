@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useMemoriesStore } from '../../stores/memories.js'
 import { useUiStore } from '../../stores/ui.js'
 import { useGraphStore } from '../../stores/graph.js'
@@ -10,6 +10,7 @@ import DeleteConfirmModal from './DeleteConfirmModal.vue'
 import MarkdownContent from '../shared/MarkdownContent.vue'
 import { fmtDate } from '../../lib/format.js'
 import { createFeedback } from '../../api/feedback.js'
+import { caretCoords } from '../../lib/caret.js'
 
 const memories = useMemoriesStore()
 const ui = useUiStore()
@@ -18,6 +19,58 @@ const graph = useGraphStore()
 const showDeleteModal = ref(false)
 const flagOpen = ref(false)
 const contentView = ref('markdown') // 'markdown' | 'raw'
+
+const contentEl = ref(null)
+const mention = ref(null) // { start, query, top, left } | null
+const mentionIndex = ref(0)
+
+const mentionResults = computed(() => {
+  if (!mention.value) return []
+  const q = mention.value.query.toLowerCase()
+  return memories.all
+    .filter(m => m.id !== memories.selected?.id && m.title.toLowerCase().includes(q))
+    .slice(0, 8)
+})
+
+function detectMention(ta) {
+  const before = ta.value.slice(0, ta.selectionStart)
+  const at = before.lastIndexOf('@')
+  if (at === -1) { mention.value = null; return }
+  const prev = at === 0 ? ' ' : before[at - 1]
+  const query = before.slice(at + 1)
+  if (!/\s/.test(prev) || /\s/.test(query) || query.length > 40) {
+    mention.value = null
+    return
+  }
+  const { top, left } = caretCoords(ta, at)
+  mention.value = { start: at, query, top: top + 22, left }
+  mentionIndex.value = 0
+}
+
+function onContentInput(e) {
+  memories.draft.content = e.target.value
+  detectMention(e.target)
+}
+
+function onContentKeydown(e) {
+  if (!mention.value || !mentionResults.value.length) return
+  const n = mentionResults.value.length
+  if (e.key === 'ArrowDown') { e.preventDefault(); mentionIndex.value = (mentionIndex.value + 1) % n }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); mentionIndex.value = (mentionIndex.value - 1 + n) % n }
+  else if (e.key === 'Enter') { e.preventDefault(); pickMention(mentionResults.value[mentionIndex.value]) }
+  else if (e.key === 'Escape') { mention.value = null }
+}
+
+function pickMention(m) {
+  const ta = contentEl.value
+  const text = memories.draft.content
+  const caret = ta.selectionStart
+  const insert = `[${m.title}](${m.id})`
+  const pos = mention.value.start + insert.length
+  memories.draft.content = text.slice(0, mention.value.start) + insert + text.slice(caret)
+  mention.value = null
+  nextTick(() => { ta.focus(); ta.setSelectionRange(pos, pos) })
+}
 
 function goToMemory(id) {
   const target = memories.all.find(m => m.id === id)
@@ -107,14 +160,26 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
               @click="contentView = 'raw'">Raw</button>
           </div>
         </div>
-        <textarea
-          v-if="contentView === 'raw'"
-          id="mem-content"
-          class="hm-input mb-6 resize-none"
-          style="height:40vh; min-height:160px; padding:10px 12px; font-family:var(--hm-font-mono); font-size:12px; line-height:1.6; background:var(--hm-mono-bg)"
-          :value="memories.draft?.content"
-          @input="memories.draft.content = $event.target.value"
-        ></textarea>
+        <div v-if="contentView === 'raw'" class="relative mb-6">
+          <textarea
+            id="mem-content"
+            ref="contentEl"
+            class="hm-input resize-none w-full"
+            style="height:40vh; min-height:160px; padding:10px 12px; font-family:var(--hm-font-mono); font-size:12px; line-height:1.6; background:var(--hm-mono-bg)"
+            :value="memories.draft?.content"
+            @input="onContentInput"
+            @keydown="onContentKeydown"
+            @blur="mention = null"
+          ></textarea>
+          <div v-if="mention && mentionResults.length" class="mention-menu"
+            :style="{ top: mention.top + 'px', left: mention.left + 'px' }">
+            <button v-for="(m, i) in mentionResults" :key="m.id" type="button"
+              class="mention-menu__item" :class="{ 'mention-menu__item--active': i === mentionIndex }"
+              @mousedown.prevent="pickMention(m)">
+              {{ m.title }}
+            </button>
+          </div>
+        </div>
         <div v-else id="mem-content" class="mb-6 overflow-y-auto"
           style="height:40vh; min-height:160px; padding:10px 12px; border-radius:6px; border:0.5px solid var(--hm-border-default); background:var(--hm-mono-bg)">
           <MarkdownContent :text="memories.draft?.content" @navigate="goToMemory" />
@@ -219,6 +284,37 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
 
 .content-toggle__btn--active {
   background: var(--hm-bg-overlay);
+  color: var(--hm-text-primary);
+}
+
+.mention-menu {
+  position: absolute;
+  z-index: 20;
+  min-width: 180px;
+  max-width: 320px;
+  padding: 4px 0;
+  border-radius: 6px;
+  background: var(--hm-bg-overlay);
+  border: 0.5px solid var(--hm-border-default);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+.mention-menu__item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 5px 10px;
+  font-size: 12px;
+  color: var(--hm-text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mention-menu__item--active,
+.mention-menu__item:hover {
+  background: var(--hm-bg-elevated);
   color: var(--hm-text-primary);
 }
 </style>
