@@ -2,6 +2,8 @@
 import { computed } from 'vue'
 import { useMemoriesStore } from '../stores/memories.js'
 import { useAnalyticsStore } from '../stores/analytics.js'
+import BarChart from '../components/analytics/BarChart.vue'
+import EmptyState from '../components/shared/EmptyState.vue'
 
 const memories = useMemoriesStore()
 const analytics = useAnalyticsStore()
@@ -13,6 +15,13 @@ const addedThisWeek = computed(() => {
   const weekAgo = Date.now() / 1000 - 7 * 24 * 60 * 60
   return memories.all.filter(m => m.created_at >= weekAgo).length
 })
+
+const topTags = computed(() => analytics.tagCounts.slice(0, 10))
+const typeColor = (d) => {
+  if (d.type === 'preference') return 'var(--hm-personal)'
+  if (d.type === 'project') return 'var(--hm-workspace)'
+  return 'var(--hm-accent)'
+}
 </script>
 
 <template>
@@ -35,6 +44,29 @@ const addedThisWeek = computed(() => {
       <div class="hm-card px-5 py-4" style="border:0.5px solid var(--hm-border-subtle); border-radius:8px">
         <div style="font-size:11px; color:var(--hm-text-tertiary)">Added last 7 days</div>
         <div style="font-size:22px; font-weight:600; color:var(--hm-text-primary)">{{ addedThisWeek }}</div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-2 gap-8 mb-10">
+      <div>
+        <h3 class="mb-3" style="font-size:12px; color:var(--hm-text-secondary)">Top tags</h3>
+        <BarChart v-if="topTags.length" :data="topTags" labelKey="tag" valueKey="count" />
+        <EmptyState v-else message="No tags yet" />
+      </div>
+      <div>
+        <h3 class="mb-3" style="font-size:12px; color:var(--hm-text-secondary)">Memory types</h3>
+        <BarChart v-if="analytics.typeCounts.length" :data="analytics.typeCounts" labelKey="type" valueKey="count" :color="typeColor" />
+        <EmptyState v-else message="No memories yet" />
+      </div>
+      <div>
+        <h3 class="mb-3" style="font-size:12px; color:var(--hm-text-secondary)">By project</h3>
+        <BarChart v-if="analytics.projectCounts.length" :data="analytics.projectCounts" labelKey="project" valueKey="count" />
+        <EmptyState v-else message="No project-tagged memories yet" hint="Add a project:* tag to a memory to see it here." />
+      </div>
+      <div>
+        <h3 class="mb-3" style="font-size:12px; color:var(--hm-text-secondary)">Activity by day</h3>
+        <BarChart v-if="analytics.activityByDay.length" :data="analytics.activityByDay" labelKey="day" valueKey="count" />
+        <EmptyState v-else message="No activity recorded yet" />
       </div>
     </div>
   </div>
