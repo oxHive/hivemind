@@ -38,6 +38,20 @@ pub struct EdgeEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RelatedMemory {
+    pub id: String,
+    pub title: String,
+    pub link_text: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroupedEdges {
+    pub parents: Vec<RelatedMemory>,
+    pub children: Vec<RelatedMemory>,
+    pub siblings: Vec<RelatedMemory>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FeedbackEntry {
     pub id: String,
     pub memory_id: String,
@@ -539,6 +553,56 @@ impl SqliteStore {
             });
         }
         Ok(results)
+    }
+
+    pub async fn get_edges_grouped(&self, memory_id: &str) -> Result<GroupedEdges> {
+        async fn fetch(conn: &Connection, sql: &str, memory_id: &str) -> Result<Vec<RelatedMemory>> {
+            let mut rows = conn.query(sql, params![memory_id]).await?;
+            let mut out = Vec::new();
+            while let Some(row) = rows.next().await? {
+                out.push(RelatedMemory {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    link_text: row.get(2)?,
+                });
+            }
+            Ok(out)
+        }
+
+        let parents = fetch(
+            &self.conn,
+            "SELECT m.id, m.title, e.link_text FROM edges e JOIN memories m ON m.id = e.target_id \
+             WHERE e.source_id = ?1 AND e.relationship = 'parent' \
+             UNION ALL \
+             SELECT m.id, m.title, e.link_text FROM edges e JOIN memories m ON m.id = e.source_id \
+             WHERE e.target_id = ?1 AND e.relationship = 'child'",
+            memory_id,
+        )
+        .await?;
+
+        let children = fetch(
+            &self.conn,
+            "SELECT m.id, m.title, e.link_text FROM edges e JOIN memories m ON m.id = e.target_id \
+             WHERE e.source_id = ?1 AND e.relationship = 'child' \
+             UNION ALL \
+             SELECT m.id, m.title, e.link_text FROM edges e JOIN memories m ON m.id = e.source_id \
+             WHERE e.target_id = ?1 AND e.relationship = 'parent'",
+            memory_id,
+        )
+        .await?;
+
+        let siblings = fetch(
+            &self.conn,
+            "SELECT m.id, m.title, e.link_text FROM edges e JOIN memories m ON m.id = e.target_id \
+             WHERE e.source_id = ?1 AND e.relationship = 'sibling' \
+             UNION ALL \
+             SELECT m.id, m.title, e.link_text FROM edges e JOIN memories m ON m.id = e.source_id \
+             WHERE e.target_id = ?1 AND e.relationship = 'sibling'",
+            memory_id,
+        )
+        .await?;
+
+        Ok(GroupedEdges { parents, children, siblings })
     }
 
     pub async fn create_edge(
@@ -1314,6 +1378,49 @@ mod tests {
         let (s, _dir) = make_store().await;
         let result = s.get_conflict_by_id("conflict_nonexistent").await.unwrap();
         assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn get_edges_grouped_reads_parent_and_child_from_both_directions() {
+        const PARENT: &str = "mem_11111111111111111111111111111111";
+        const CHILD: &str = "mem_22222222222222222222222222222222";
+        let (s, _dir) = make_store().await;
+        s.store(&test_row(CHILD, "Child", "child body", &[])).await.unwrap();
+        s.store(&test_row(PARENT, "Parent", "parent body", &[])).await.unwrap();
+        // CHILD asserts PARENT is its parent.
+        s.update(CHILD, "Child", &format!("[the rule](parent:{PARENT})"), &[])
+            .await
+            .unwrap();
+
+        let from_child = s.get_edges_grouped(CHILD).await.unwrap();
+        assert_eq!(from_child.parents.len(), 1);
+        assert_eq!(from_child.parents[0].id, PARENT);
+        assert_eq!(from_child.parents[0].link_text.as_deref(), Some("the rule"));
+        assert!(from_child.children.is_empty());
+
+        // From the parent's side, the same edge should surface CHILD as a child,
+        // even though PARENT never authored a `child:` link itself.
+        let from_parent = s.get_edges_grouped(PARENT).await.unwrap();
+        assert_eq!(from_parent.children.len(), 1);
+        assert_eq!(from_parent.children[0].id, CHILD);
+        assert!(from_parent.parents.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_edges_grouped_siblings_symmetric() {
+        const A: &str = "mem_33333333333333333333333333333333";
+        const B: &str = "mem_44444444444444444444444444444444";
+        let (s, _dir) = make_store().await;
+        s.store(&test_row(A, "A", "a", &[])).await.unwrap();
+        s.store(&test_row(B, "B", &format!("[peer](sibling:{A})"), &[])).await.unwrap();
+
+        let from_a = s.get_edges_grouped(A).await.unwrap();
+        assert_eq!(from_a.siblings.len(), 1);
+        assert_eq!(from_a.siblings[0].id, B);
+
+        let from_b = s.get_edges_grouped(B).await.unwrap();
+        assert_eq!(from_b.siblings.len(), 1);
+        assert_eq!(from_b.siblings[0].id, A);
     }
 
     fn test_row<'a>(
