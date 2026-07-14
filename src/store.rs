@@ -90,6 +90,7 @@ pub const VALID_RELATIONSHIPS: &[&str] = &[
     "used_in",
     "related_to",
     "custom",
+    "mentions",
 ];
 
 static MENTION_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
@@ -109,6 +110,52 @@ pub(crate) fn parse_mentions(source_id: &str, content: &str) -> Vec<(String, Str
         out.push((cap[1].to_string(), target));
     }
     out
+}
+
+/// Maintain `mentions` edges for `source_id` from its content's `[phrase](mem_xxx)`
+/// links: upserts an active edge (refreshing `link_text` on rephrase) per surviving
+/// mention, and deletes any stale `mentions` edges whose target is no longer linked.
+async fn sync_mention_edges(
+    tx: &libsql::Transaction,
+    source_id: &str,
+    content: &str,
+    now: i64,
+) -> Result<()> {
+    let mentions = parse_mentions(source_id, content);
+
+    for (phrase, target) in &mentions {
+        // WHERE EXISTS guard drops links to nonexistent memories; the SELECT
+        // form requires the WHERE for SQLite's upsert grammar anyway.
+        tx.execute(
+            "INSERT INTO edges (id, source_id, target_id, relationship, status, created_at, link_text)
+             SELECT 'edge_' || lower(hex(randomblob(16))), ?1, ?2, 'mentions', 'active', ?3, ?4
+             WHERE EXISTS (SELECT 1 FROM memories WHERE id = ?2)
+             ON CONFLICT(source_id, target_id, relationship)
+             DO UPDATE SET link_text = excluded.link_text",
+            params![source_id, target.as_str(), now, phrase.as_str()],
+        )
+        .await?;
+    }
+
+    if mentions.is_empty() {
+        tx.execute(
+            "DELETE FROM edges WHERE source_id = ?1 AND relationship = 'mentions'",
+            params![source_id],
+        )
+        .await?;
+    } else {
+        let placeholders: Vec<String> =
+            (2..mentions.len() + 2).map(|i| format!("?{i}")).collect();
+        let sql = format!(
+            "DELETE FROM edges WHERE source_id = ?1 AND relationship = 'mentions' \
+             AND target_id NOT IN ({})",
+            placeholders.join(", ")
+        );
+        let mut p: Vec<libsql::Value> = vec![libsql::Value::Text(source_id.to_string())];
+        p.extend(mentions.iter().map(|(_, t)| libsql::Value::Text(t.clone())));
+        tx.execute(&sql, p).await?;
+    }
+    Ok(())
 }
 
 /// Quote a raw user query for FTS5 MATCH: every whitespace-separated term is
@@ -195,6 +242,8 @@ impl SqliteStore {
             )
             .await?;
         }
+
+        sync_mention_edges(&tx, m.id, m.content, now).await?;
 
         // Journal the write
         tx.execute(
@@ -300,6 +349,8 @@ impl SqliteStore {
             )
             .await?;
         }
+
+        sync_mention_edges(&tx, id, content, now).await?;
 
         // Journal the write
         tx.execute(
@@ -1407,6 +1458,58 @@ mod tests {
             got,
             vec![("first".to_string(), "mem_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string())]
         );
+    }
+
+    const T_B: &str = "mem_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const T_C: &str = "mem_cccccccccccccccccccccccccccccccc";
+
+    #[tokio::test]
+    async fn store_creates_active_mention_edges_with_link_text() {
+        let (s, _dir) = make_store().await;
+        s.store(&test_row(T_B, "Target", "target body", &[])).await.unwrap();
+        let content = format!("relates to [the target]({T_B})");
+        s.store(&test_row("mem_src", "Src", &content, &[])).await.unwrap();
+
+        let edges = s.list_edges(Some("mem_src")).await.unwrap();
+        let m: Vec<_> = edges.iter().filter(|e| e.relationship == "mentions").collect();
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].target_id, T_B);
+        assert_eq!(m[0].status, "active");
+        assert_eq!(m[0].link_text.as_deref(), Some("the target"));
+    }
+
+    #[tokio::test]
+    async fn update_upserts_phrase_and_deletes_stale_mentions() {
+        let (s, _dir) = make_store().await;
+        s.store(&test_row(T_B, "B", "b", &[])).await.unwrap();
+        s.store(&test_row(T_C, "C", "c", &[])).await.unwrap();
+        s.store(&test_row("mem_src", "Src", &format!("[one]({T_B}) [two]({T_C})"), &[]))
+            .await
+            .unwrap();
+
+        let first: Vec<_> = s.list_edges(Some("mem_src")).await.unwrap()
+            .into_iter().filter(|e| e.relationship == "mentions").collect();
+        assert_eq!(first.len(), 2);
+        let b_edge_id = first.iter().find(|e| e.target_id == T_B).unwrap().id.clone();
+
+        // Rephrase the B link, drop the C link entirely.
+        s.update("mem_src", "Src", &format!("[renamed]({T_B})"), &[]).await.unwrap();
+        let second: Vec<_> = s.list_edges(Some("mem_src")).await.unwrap()
+            .into_iter().filter(|e| e.relationship == "mentions").collect();
+        assert_eq!(second.len(), 1);
+        assert_eq!(second[0].target_id, T_B);
+        assert_eq!(second[0].link_text.as_deref(), Some("renamed"));
+        assert_eq!(second[0].id, b_edge_id, "unchanged link keeps its edge id");
+    }
+
+    #[tokio::test]
+    async fn mention_to_nonexistent_target_creates_no_edge() {
+        let (s, _dir) = make_store().await;
+        s.store(&test_row("mem_src", "Src", &format!("[ghost]({T_B})"), &[]))
+            .await
+            .unwrap();
+        let edges = s.list_edges(Some("mem_src")).await.unwrap();
+        assert!(edges.iter().all(|e| e.relationship != "mentions"));
     }
 
     #[tokio::test]
