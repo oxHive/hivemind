@@ -1029,6 +1029,12 @@ pub fn cmd_session_start(json: bool) -> Result<()> {
             let store = crate::store::SqliteStore::new(conn);
             let config = crate::config::load_config(&cwd)?;
             let result = crate::session::execute_session_start(&config, &store).await?;
+            if let Err(e) = store
+                .log_session_start(&cwd.to_string_lossy(), &result)
+                .await
+            {
+                tracing::warn!("failed to write session_start_log entry: {e:#}");
+            }
             Ok::<_, anyhow::Error>(render_session_start(&result, json))
         })?;
     if !out.is_empty() {
