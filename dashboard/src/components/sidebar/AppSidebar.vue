@@ -12,6 +12,7 @@ const feedbackCount = computed(() =>
 )
 
 const navItems = [
+  { id: 'analytics', label: 'Analytics' },
   { id: 'memories', label: 'Memories' },
   { id: 'graph', label: 'Graph' },
   { id: 'feedback', label: 'Feedback' },

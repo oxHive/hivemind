@@ -6,9 +6,11 @@ import { useGraphStore } from './stores/graph.js'
 import { useFeedbackStore } from './stores/feedback.js'
 import { useTagSettingsStore } from './stores/tagSettings.js'
 import { useThemeStore } from './stores/theme.js'
+import { useAnalyticsStore } from './stores/analytics.js'
 import { BASE } from './api/client.js'
 import AppSidebar from './components/sidebar/AppSidebar.vue'
 import Toast from './components/shared/Toast.vue'
+import AnalyticsView from './views/AnalyticsView.vue'
 import MemoriesView from './views/MemoriesView.vue'
 import GraphView from './views/GraphView.vue'
 import FeedbackView from './views/FeedbackView.vue'
@@ -19,9 +21,10 @@ const memories = useMemoriesStore()
 const graph = useGraphStore()
 const fb = useFeedbackStore()
 const tagSettings = useTagSettingsStore()
+const analytics = useAnalyticsStore()
 useThemeStore() // applies data-theme to <html> as soon as the store is created
 
-const VIEWS = ['memories', 'graph', 'feedback', 'settings']
+const VIEWS = ['analytics', 'memories', 'graph', 'feedback', 'settings']
 const apiBase = window.HIVEMIND_API || 'http://localhost:3456'
 let pollInterval
 let eventSource
@@ -46,6 +49,7 @@ onMounted(async () => {
       fb.fetchConflicts(),
       fb.fetchFeedback(),
       tagSettings.fetchNamespaces(),
+      analytics.fetchSessionLogs(),
     ])
   }
 
@@ -96,6 +100,7 @@ onBeforeUnmount(() => {
     <template v-else>
       <AppSidebar />
       <main class="flex flex-1 overflow-hidden">
+        <AnalyticsView v-show="ui.activeView === 'analytics'" />
         <MemoriesView v-show="ui.activeView === 'memories'" />
         <GraphView v-show="ui.activeView === 'graph'" />
         <FeedbackView v-show="ui.activeView === 'feedback'" />
