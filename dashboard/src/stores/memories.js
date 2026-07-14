@@ -39,7 +39,7 @@ export const useMemoriesStore = defineStore('memories', () => {
   async function fetchAll() {
     loading.value = true
     try {
-      const data = await api.listMemories()
+      const data = await api.listMemories(1000)
       all.value = data.memories ?? []
     } finally {
       loading.value = false
@@ -50,7 +50,7 @@ export const useMemoriesStore = defineStore('memories', () => {
   // currently open item's unsaved edits or the list's scroll position —
   // used to reflect memories changed elsewhere (e.g. via MCP) in the background.
   async function refreshSilently() {
-    const data = await api.listMemories()
+    const data = await api.listMemories(1000)
     all.value = data.memories ?? []
     if (!selected.value) return
     const match = all.value.find(m => m.id === selected.value.id)

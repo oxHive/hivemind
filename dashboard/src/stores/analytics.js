@@ -60,8 +60,12 @@ export const useAnalyticsStore = defineStore('analytics', () => {
       const day = new Date(m.created_at * 1000).toISOString().slice(0, 10)
       counts[day] = (counts[day] || 0) + 1
     }
+    const cutoff = new Date()
+    cutoff.setDate(cutoff.getDate() - 90)
+    const cutoffDay = cutoff.toISOString().slice(0, 10)
     return Object.entries(counts)
       .map(([day, count]) => ({ day, count }))
+      .filter(d => d.day >= cutoffDay)
       .sort((a, b) => a.day.localeCompare(b.day))
   })
 

@@ -4,7 +4,10 @@ import { ref, computed } from 'vue'
 const props = defineProps({ log: { type: Object, required: true } })
 const expanded = ref(false)
 
-const pct = computed(() => Math.min(100, Math.round((props.log.used_tokens / props.log.max_tokens) * 100)))
+const pct = computed(() => {
+  if (!props.log.max_tokens || props.log.max_tokens <= 0) return 0
+  return Math.min(100, Math.round((props.log.used_tokens / props.log.max_tokens) * 100))
+})
 const barColor = computed(() => props.log.truncated ? 'var(--hm-warning)' : 'var(--hm-accent)')
 const relativeTime = computed(() => {
   const diffSec = Math.floor(Date.now() / 1000) - props.log.created_at
