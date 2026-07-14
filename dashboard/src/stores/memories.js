@@ -1,11 +1,36 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import * as api from '../api/memories.js'
+
+const DRAFTS_KEY = 'hivemind.memories.drafts'
+
+function loadStashedDrafts() {
+  try {
+    const raw = localStorage.getItem(DRAFTS_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch {
+    return {}
+  }
+}
 
 export const useMemoriesStore = defineStore('memories', () => {
   const all = ref([])
   const selected = ref(null)
   const draft = ref(null)
+  // Unsaved edits per memory id, stashed when switching away so re-selecting
+  // the same memory restores them instead of silently discarding — switching
+  // views (e.g. to Settings) never touches this store, so drafts survive
+  // there for free; switching memories used to always wipe the draft, which
+  // read as an inconsistency between the two navigation paths. Persisted to
+  // localStorage (loaded here, written by persistDrafts) so a page reload
+  // doesn't silently discard unsaved edits either.
+  const stashedDrafts = ref(loadStashedDrafts())
+  // Set when the selected memory is changed elsewhere (e.g. by an agent via
+  // MCP) while a dirty draft is open here — holds the incoming server
+  // version so it isn't silently lost. `selected` is frozen at the version
+  // the draft was diffing against until the user resolves it, so `dirty`/
+  // Save keep comparing against a baseline that still makes sense.
+  const conflict = ref(null)
   const searchQuery = ref('')
   const layerFilter = ref('all')
   const loading = ref(false)
@@ -36,6 +61,47 @@ export const useMemoriesStore = defineStore('memories', () => {
     )
   })
 
+  // Whether a memory has unsaved edits — either it's the currently selected
+  // one and dirty, or it has a stash from being switched away from earlier.
+  function isDraft(id) {
+    if (selected.value?.id === id) return dirty.value
+    return Object.prototype.hasOwnProperty.call(stashedDrafts.value, id)
+  }
+
+  function persistDrafts() {
+    localStorage.setItem(DRAFTS_KEY, JSON.stringify(stashedDrafts.value))
+  }
+
+  // Keeps the currently-open draft in the persisted stash live, not just at
+  // switch-away time, so a page reload while still editing (never having
+  // switched to another memory) doesn't lose the edit either.
+  watch(
+    [draft, selected],
+    () => {
+      if (!selected.value) return
+      if (dirty.value) {
+        stashedDrafts.value[selected.value.id] = draft.value
+      } else {
+        delete stashedDrafts.value[selected.value.id]
+      }
+      persistDrafts()
+    },
+    { deep: true }
+  )
+
+  // Discards the current draft's unsaved edits, reverting to the last-saved
+  // content, and clears any stash so switching away/back won't resurrect it.
+  function resetDraft() {
+    if (!selected.value) return
+    draft.value = {
+      title: selected.value.title,
+      content: selected.value.content,
+      tags: [...(selected.value.tags || [])],
+    }
+    delete stashedDrafts.value[selected.value.id]
+    persistDrafts()
+  }
+
   async function fetchAll() {
     loading.value = true
     try {
@@ -54,24 +120,77 @@ export const useMemoriesStore = defineStore('memories', () => {
     all.value = data.memories ?? []
     if (!selected.value) return
     const match = all.value.find(m => m.id === selected.value.id)
-    const wasDirty = dirty.value
-    selected.value = match || null
-    if (match && !wasDirty) {
-      draft.value = { title: match.title, content: match.content, tags: [...(match.tags || [])] }
-    } else if (!match) {
+
+    if (!match) {
+      // Memory was deleted elsewhere.
+      selected.value = null
       draft.value = null
+      conflict.value = null
+      return
+    }
+
+    if (!dirty.value) {
+      selected.value = match
+      draft.value = { title: match.title, content: match.content, tags: [...(match.tags || [])] }
+      conflict.value = null
+      return
+    }
+
+    // Dirty: only flag a conflict if the server version actually changed
+    // underneath us (not just an unrelated field/other memory refreshing).
+    // Leave `selected`/`draft` untouched so the diff the user is looking at
+    // stays coherent until they explicitly resolve it.
+    const changed =
+      match.title !== selected.value.title ||
+      match.content !== selected.value.content ||
+      JSON.stringify(match.tags || []) !== JSON.stringify(selected.value.tags || [])
+    if (changed) {
+      conflict.value = match
     }
   }
 
+  // User chose to discard their local draft and adopt the version that
+  // changed elsewhere while they were editing.
+  function resolveConflictLoadLatest() {
+    if (!conflict.value) return
+    selected.value = conflict.value
+    draft.value = {
+      title: conflict.value.title,
+      content: conflict.value.content,
+      tags: [...(conflict.value.tags || [])],
+    }
+    delete stashedDrafts.value[selected.value.id]
+    persistDrafts()
+    conflict.value = null
+  }
+
+  // User chose to keep editing their own draft — the baseline moves forward
+  // to the external version (so `dirty`/Save reflect it correctly), but the
+  // draft's actual text is untouched. Saving after this will overwrite the
+  // external change, which is now an informed, explicit choice.
+  function resolveConflictKeepMine() {
+    if (!conflict.value) return
+    selected.value = conflict.value
+    conflict.value = null
+  }
+
   function select(entry) {
+    if (selected.value && dirty.value) {
+      stashedDrafts.value[selected.value.id] = draft.value
+      persistDrafts()
+    }
+    conflict.value = null
     selected.value = entry
-    draft.value = entry
-      ? { title: entry.title, content: entry.content, tags: [...(entry.tags || [])] }
-      : null
+    if (!entry) {
+      draft.value = null
+      return
+    }
+    draft.value = stashedDrafts.value[entry.id]
+      ?? { title: entry.title, content: entry.content, tags: [...(entry.tags || [])] }
   }
 
   async function save() {
-    if (!selected.value || !dirty.value) return
+    if (!selected.value || !dirty.value || conflict.value) return false
     saving.value = true
     try {
       const updated = await api.patchMemory(selected.value.id, {
@@ -83,6 +202,10 @@ export const useMemoriesStore = defineStore('memories', () => {
       if (idx !== -1) all.value[idx] = updated
       selected.value = updated
       draft.value = { title: updated.title, content: updated.content, tags: [...(updated.tags || [])] }
+      delete stashedDrafts.value[updated.id]
+      persistDrafts()
+      conflict.value = null
+      return true
     } finally {
       saving.value = false
     }
@@ -100,13 +223,21 @@ export const useMemoriesStore = defineStore('memories', () => {
     await api.deleteMemory(id)
     all.value = all.value.filter(m => m.id !== id)
     if (selected.value?.id === id) select(null)
+    delete stashedDrafts.value[id]
+    persistDrafts()
   }
 
   async function clearAll() {
     await api.deleteAllMemories()
     all.value = []
+    stashedDrafts.value = {}
+    persistDrafts()
     select(null)
   }
 
-  return { all, selected, draft, searchQuery, layerFilter, loading, saving, filtered, dirty, fetchAll, refreshSilently, select, save, create, remove, clearAll }
+  return {
+    all, selected, draft, conflict, searchQuery, layerFilter, loading, saving, filtered, dirty,
+    isDraft, resetDraft, resolveConflictLoadLatest, resolveConflictKeepMine,
+    fetchAll, refreshSilently, select, save, create, remove, clearAll,
+  }
 })
