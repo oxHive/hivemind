@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { useUiStore } from '../../stores/ui.js'
 import { useFeedbackStore } from '../../stores/feedback.js'
 import StatusRow from './StatusRow.vue'
+import oxhiveMark from '../../assets/oxhive-mark.png'
 
 const ui = useUiStore()
 const feedback = useFeedbackStore()
@@ -107,6 +108,12 @@ const syncDot = computed(() => {
       <StatusRow :dot="statusDot" :text="statusText" :class="{ 'mt-1': syncStatusText || (syncInfo?.conflict_count ?? 0) > 0 }" />
       <StatusRow dot="gray" :text="`${memoryCount} memories`" class="mt-1" />
     </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <img class="footer__mark" :src="oxhiveMark" alt="" aria-hidden="true" width="18" height="18" />
+      <span class="footer__word">OxHive</span>
+    </div>
   </nav>
 </template>
 
@@ -143,5 +150,30 @@ const syncDot = computed(() => {
   color: var(--hm-text-primary);
   font-weight: 500;
   box-shadow: inset 2px 0 0 var(--hm-accent);
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 20px 16px;
+}
+
+.footer__mark {
+  display: block;
+  filter: brightness(0) invert(1);
+}
+
+:root[data-theme="light"] .footer__mark {
+  filter: none;
+}
+
+.footer__word {
+  font-family: "Hanken Grotesk", var(--hm-font-sans);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--hm-text-primary);
 }
 </style>
