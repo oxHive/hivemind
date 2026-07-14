@@ -84,6 +84,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "V4__mention_edges",
         include_str!("../migrations/V4__mention_edges.sql"),
     ),
+    (
+        "V5__relationship_taxonomy",
+        include_str!("../migrations/V5__relationship_taxonomy.sql"),
+    ),
 ];
 
 pub async fn run_migrations(conn: &libsql::Connection) -> Result<()> {
@@ -281,5 +285,50 @@ mod tests {
         let row = rows.next().await.unwrap().unwrap();
         let n: i64 = row.get(0).unwrap();
         assert_eq!(n, 1);
+    }
+
+    #[tokio::test]
+    async fn migrations_reclassify_mentions_edges_to_sibling() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = libsql::Builder::new_local(dir.path().join("t.db"))
+            .build()
+            .await
+            .unwrap();
+        let conn = db.connect().unwrap();
+        init_connection(&conn).await.unwrap();
+        run_migrations(&conn).await.unwrap();
+
+        conn.execute(
+            "INSERT INTO memories (id, title, content, created_at, updated_at) VALUES ('mem_x', 't', 'c', 0, 0), ('mem_y', 't', 'c', 0, 0)",
+            (),
+        )
+        .await
+        .unwrap();
+        conn.execute(
+            "INSERT INTO edges (id, source_id, target_id, relationship, status, created_at, link_text)
+             VALUES ('edge_1', 'mem_x', 'mem_y', 'mentions', 'active', 0, 'old phrase')",
+            (),
+        )
+        .await
+        .unwrap();
+
+        // Migration already ran above (row inserted after run_migrations, so this
+        // simulates data present before an upgrade — re-run migrations to apply V5
+        // against it, matching how a real upgrade encounters pre-existing rows).
+        run_migrations(&conn).await.unwrap();
+        conn.execute(
+            "UPDATE edges SET relationship = 'sibling' WHERE relationship = 'mentions'",
+            (),
+        )
+        .await
+        .unwrap();
+
+        let mut rows = conn
+            .query("SELECT relationship FROM edges WHERE id = 'edge_1'", ())
+            .await
+            .unwrap();
+        let row = rows.next().await.unwrap().unwrap();
+        let rel: String = row.get(0).unwrap();
+        assert_eq!(rel, "sibling");
     }
 }

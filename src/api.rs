@@ -948,7 +948,7 @@ mod tests {
             app.clone(),
             "POST",
             "/api/v1/edges",
-            Some(serde_json::json!({"source_id": id_a, "target_id": id_b, "relationship": "related_to"})),
+            Some(serde_json::json!({"source_id": id_a, "target_id": id_b, "relationship": "sibling"})),
         )
         .await;
         assert_eq!(st, StatusCode::CREATED);
@@ -1080,7 +1080,7 @@ mod tests {
             .await
             .unwrap();
         let crate::model::EdgeCreate::Created(edge_id) = store
-            .create_edge("mem_a", "mem_b", "related_to")
+            .create_edge("mem_a", "mem_b", "sibling")
             .await
             .unwrap()
         else {
