@@ -34,6 +34,7 @@ pub struct EdgeEntry {
     pub relationship: String,
     pub status: String,
     pub created_at: i64,
+    pub link_text: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -446,7 +447,7 @@ impl SqliteStore {
         let mut rows = if let Some(mid) = memory_id {
             self.conn
                 .query(
-                    "SELECT id, source_id, target_id, relationship, status, created_at
+                    "SELECT id, source_id, target_id, relationship, status, created_at, link_text
                      FROM edges WHERE source_id = ?1 OR target_id = ?1 ORDER BY created_at DESC",
                     params![mid],
                 )
@@ -454,7 +455,7 @@ impl SqliteStore {
         } else {
             self.conn
                 .query(
-                    "SELECT id, source_id, target_id, relationship, status, created_at
+                    "SELECT id, source_id, target_id, relationship, status, created_at, link_text
                      FROM edges ORDER BY created_at DESC",
                     (),
                 )
@@ -469,6 +470,7 @@ impl SqliteStore {
                 relationship: row.get(3)?,
                 status: row.get(4)?,
                 created_at: row.get(5)?,
+                link_text: row.get(6)?,
             });
         }
         Ok(results)
