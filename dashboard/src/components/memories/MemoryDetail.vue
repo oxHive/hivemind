@@ -7,6 +7,7 @@ import LayerBadge from '../shared/LayerBadge.vue'
 import TagInput from '../shared/TagInput.vue'
 import EmptyState from '../shared/EmptyState.vue'
 import DeleteConfirmModal from './DeleteConfirmModal.vue'
+import MarkdownContent from '../shared/MarkdownContent.vue'
 import { fmtDate } from '../../lib/format.js'
 import { createFeedback } from '../../api/feedback.js'
 
@@ -16,6 +17,7 @@ const graph = useGraphStore()
 
 const showDeleteModal = ref(false)
 const flagOpen = ref(false)
+const contentView = ref('markdown') // 'markdown' | 'raw'
 
 async function flag(signal) {
   flagOpen.value = false
@@ -89,14 +91,29 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
         />
 
         <!-- Content -->
-        <label class="hm-label" for="mem-content">CONTENT</label>
+        <div class="flex items-center justify-between mb-1.5">
+          <label class="hm-label" style="margin-bottom:0" for="mem-content">CONTENT</label>
+          <div class="content-toggle" role="tablist" aria-label="Content view">
+            <button type="button" role="tab" :aria-selected="contentView === 'markdown'"
+              class="content-toggle__btn" :class="{ 'content-toggle__btn--active': contentView === 'markdown' }"
+              @click="contentView = 'markdown'">Markdown</button>
+            <button type="button" role="tab" :aria-selected="contentView === 'raw'"
+              class="content-toggle__btn" :class="{ 'content-toggle__btn--active': contentView === 'raw' }"
+              @click="contentView = 'raw'">Raw</button>
+          </div>
+        </div>
         <textarea
+          v-if="contentView === 'raw'"
           id="mem-content"
           class="hm-input mb-6 resize-none"
           style="height:40vh; min-height:160px; padding:10px 12px; font-family:var(--hm-font-mono); font-size:12px; line-height:1.6; background:var(--hm-mono-bg)"
           :value="memories.draft?.content"
           @input="memories.draft.content = $event.target.value"
         ></textarea>
+        <div v-else id="mem-content" class="mb-6 overflow-y-auto"
+          style="height:40vh; min-height:160px; padding:10px 12px; border-radius:6px; border:0.5px solid var(--hm-border-default); background:var(--hm-mono-bg)">
+          <MarkdownContent :text="memories.draft?.content" />
+        </div>
 
         <!-- Tags -->
         <label class="hm-label" id="mem-tags-label">TAGS</label>
@@ -164,5 +181,39 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
   background: var(--hm-bg-elevated);
   color: var(--hm-text-primary);
   outline: none;
+}
+
+.content-toggle {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 6px;
+  background: var(--hm-bg-elevated);
+}
+
+.content-toggle__btn {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--hm-text-tertiary);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.content-toggle__btn:hover {
+  color: var(--hm-text-primary);
+}
+
+.content-toggle__btn:focus-visible {
+  outline: 2px solid var(--hm-accent);
+  outline-offset: -2px;
+}
+
+.content-toggle__btn--active {
+  background: var(--hm-bg-overlay);
+  color: var(--hm-text-primary);
 }
 </style>
