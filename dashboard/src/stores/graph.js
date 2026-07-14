@@ -6,6 +6,8 @@ export const useGraphStore = defineStore('graph', () => {
   const edges = ref([])
   const zoom = ref(2)            // 1|2|3
   const selectedNodeId = ref(null)
+  const searchQuery = ref('')
+  const layerFilter = ref('all') // 'all' | 'personal' | 'workspace'
   const connectMode = ref(false)
   const connectSourceId = ref(null)
   const pendingConnect = ref(null) // { sourceId, targetId } when picker is open
@@ -55,7 +57,7 @@ export const useGraphStore = defineStore('graph', () => {
   }
 
   return {
-    edges, zoom, selectedNodeId, connectMode, connectSourceId, pendingConnect,
+    edges, zoom, selectedNodeId, searchQuery, layerFilter, connectMode, connectSourceId, pendingConnect,
     pendingEdges, edgesFor, fetchEdges, storeEdge, resolveEdge,
     acceptAllPending, rejectAllPending, startConnect, cancelConnect,
   }
