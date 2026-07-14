@@ -12,6 +12,15 @@ const inputValue = ref('')
 const showSuggestions = ref(false)
 const pendingReplace = ref(null)
 
+// project:* is the single-value namespace that identifies what the memory
+// belongs to — surface it first regardless of storage order, same as MemoryCard.
+const displayTags = computed(() => {
+  const tags = props.modelValue
+  const projectTag = tags.find(t => t.toLowerCase().startsWith('project:'))
+  if (!projectTag) return tags
+  return [projectTag, ...tags.filter(t => t !== projectTag)]
+})
+
 const suggestions = computed(() => {
   const raw = inputValue.value.trim()
   if (!raw) return []
@@ -95,7 +104,7 @@ function handleBlur() {
 <template>
   <div class="relative">
     <div class="flex flex-wrap gap-1.5 p-2.5 rounded-md" style="border:0.5px solid var(--hm-border-subtle); min-height:40px">
-      <TagChip v-for="tag in modelValue" :key="tag" :tag="tag" removable editable @remove="removeTag(tag)" @edit="handleEdit" />
+      <TagChip v-for="tag in displayTags" :key="tag" :tag="tag" removable editable @remove="removeTag(tag)" @edit="handleEdit" />
       <input class="hm-input" style="width:120px; height:22px; font-size:10px; padding:0 6px"
         v-model="inputValue"
         placeholder="add tag…"
