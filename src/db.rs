@@ -76,6 +76,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "V2__layers_conflicts_meta",
         include_str!("../migrations/V2__layers_conflicts_meta.sql"),
     ),
+    (
+        "V3__session_start_log",
+        include_str!("../migrations/V3__session_start_log.sql"),
+    ),
 ];
 
 pub async fn run_migrations(conn: &libsql::Connection) -> Result<()> {
