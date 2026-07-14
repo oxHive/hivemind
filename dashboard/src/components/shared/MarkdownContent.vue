@@ -75,6 +75,14 @@ function onClick(e) {
 .hm-markdown :deep(ol) { list-style: decimal; margin: 0 0 10px; padding-left: 20px; }
 .hm-markdown :deep(li) { display: list-item; margin: 2px 0; }
 .hm-markdown :deep(li)::marker { color: var(--hm-text-tertiary); }
+.hm-markdown :deep(li:has(input[type="checkbox"])) {
+  list-style: none;
+  margin-left: -20px;
+}
+.hm-markdown :deep(input[type="checkbox"]) {
+  margin-right: 6px;
+  accent-color: var(--hm-accent);
+}
 .hm-markdown :deep(code) {
   font-family: var(--hm-font-mono);
   font-size: 11px;
@@ -116,5 +124,21 @@ function onClick(e) {
   padding-left: 10px;
   border-left: 2px solid var(--hm-border-default);
   color: var(--hm-text-secondary);
+}
+.hm-markdown :deep(table) {
+  border-collapse: collapse;
+  margin: 0 0 10px;
+  font-size: 11px;
+}
+.hm-markdown :deep(th),
+.hm-markdown :deep(td) {
+  border: 0.5px solid var(--hm-border-default);
+  padding: 4px 8px;
+  text-align: left;
+}
+.hm-markdown :deep(th) {
+  background: var(--hm-bg-elevated);
+  color: var(--hm-text-secondary);
+  font-weight: 600;
 }
 </style>
