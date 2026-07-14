@@ -556,7 +556,11 @@ impl SqliteStore {
     }
 
     pub async fn get_edges_grouped(&self, memory_id: &str) -> Result<GroupedEdges> {
-        async fn fetch(conn: &Connection, sql: &str, memory_id: &str) -> Result<Vec<RelatedMemory>> {
+        async fn fetch(
+            conn: &Connection,
+            sql: &str,
+            memory_id: &str,
+        ) -> Result<Vec<RelatedMemory>> {
             let mut rows = conn.query(sql, params![memory_id]).await?;
             let mut out = Vec::new();
             while let Some(row) = rows.next().await? {
@@ -608,7 +612,11 @@ impl SqliteStore {
         )
         .await?;
 
-        Ok(GroupedEdges { parents, children, siblings })
+        Ok(GroupedEdges {
+            parents,
+            children,
+            siblings,
+        })
     }
 
     pub async fn create_edge(
@@ -1391,8 +1399,12 @@ mod tests {
         const PARENT: &str = "mem_11111111111111111111111111111111";
         const CHILD: &str = "mem_22222222222222222222222222222222";
         let (s, _dir) = make_store().await;
-        s.store(&test_row(CHILD, "Child", "child body", &[])).await.unwrap();
-        s.store(&test_row(PARENT, "Parent", "parent body", &[])).await.unwrap();
+        s.store(&test_row(CHILD, "Child", "child body", &[]))
+            .await
+            .unwrap();
+        s.store(&test_row(PARENT, "Parent", "parent body", &[]))
+            .await
+            .unwrap();
         // CHILD asserts PARENT is its parent.
         s.update(CHILD, "Child", &format!("[the rule](parent:{PARENT})"), &[])
             .await
@@ -1418,7 +1430,9 @@ mod tests {
         const B: &str = "mem_44444444444444444444444444444444";
         let (s, _dir) = make_store().await;
         s.store(&test_row(A, "A", "a", &[])).await.unwrap();
-        s.store(&test_row(B, "B", &format!("[peer](sibling:{A})"), &[])).await.unwrap();
+        s.store(&test_row(B, "B", &format!("[peer](sibling:{A})"), &[]))
+            .await
+            .unwrap();
 
         let from_a = s.get_edges_grouped(A).await.unwrap();
         assert_eq!(from_a.siblings.len(), 1);
@@ -1446,11 +1460,21 @@ mod tests {
             .unwrap();
 
         let from_a = s.get_edges_grouped(A).await.unwrap();
-        assert_eq!(from_a.siblings.len(), 1, "expected exactly one sibling entry, got {:?}", from_a.siblings);
+        assert_eq!(
+            from_a.siblings.len(),
+            1,
+            "expected exactly one sibling entry, got {:?}",
+            from_a.siblings
+        );
         assert_eq!(from_a.siblings[0].id, B);
 
         let from_b = s.get_edges_grouped(B).await.unwrap();
-        assert_eq!(from_b.siblings.len(), 1, "expected exactly one sibling entry, got {:?}", from_b.siblings);
+        assert_eq!(
+            from_b.siblings.len(),
+            1,
+            "expected exactly one sibling entry, got {:?}",
+            from_b.siblings
+        );
         assert_eq!(from_b.siblings[0].id, A);
     }
 
@@ -1471,11 +1495,21 @@ mod tests {
             .unwrap();
 
         let from_a = s.get_edges_grouped(A).await.unwrap();
-        assert_eq!(from_a.parents.len(), 1, "expected exactly one parent entry, got {:?}", from_a.parents);
+        assert_eq!(
+            from_a.parents.len(),
+            1,
+            "expected exactly one parent entry, got {:?}",
+            from_a.parents
+        );
         assert_eq!(from_a.parents[0].id, B);
 
         let from_b = s.get_edges_grouped(B).await.unwrap();
-        assert_eq!(from_b.children.len(), 1, "expected exactly one child entry, got {:?}", from_b.children);
+        assert_eq!(
+            from_b.children.len(),
+            1,
+            "expected exactly one child entry, got {:?}",
+            from_b.children
+        );
         assert_eq!(from_b.children[0].id, A);
     }
 
