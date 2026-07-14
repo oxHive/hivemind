@@ -2,14 +2,12 @@
 import { computed } from 'vue'
 import { useGraphStore } from '../../stores/graph.js'
 import { useMemoriesStore } from '../../stores/memories.js'
-import { useUiStore } from '../../stores/ui.js'
 import LayerBadge from '../shared/LayerBadge.vue'
 import TagChip from '../shared/TagChip.vue'
 import CopyButton from '../shared/CopyButton.vue'
 
 const graph = useGraphStore()
 const memories = useMemoriesStore()
-const ui = useUiStore()
 
 const node = computed(() => memories.all.find(m => m.id === graph.selectedNodeId))
 </script>
