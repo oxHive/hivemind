@@ -212,7 +212,7 @@ async fn edge_create_and_list() {
         app.clone(),
         "POST",
         "/api/v1/edges",
-        Some(json!({ "source_id": aid, "target_id": bid, "relationship": "pairs_with" })),
+        Some(json!({ "source_id": aid, "target_id": bid, "relationship": "sibling" })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED);
@@ -330,7 +330,7 @@ async fn patch_edge_status_validates_and_updates() {
         app.clone(),
         "POST",
         "/api/v1/edges",
-        Some(json!({ "source_id": aid, "target_id": bid, "relationship": "related_to" })),
+        Some(json!({ "source_id": aid, "target_id": bid, "relationship": "sibling" })),
     )
     .await;
     let edge_id = edge["id"].as_str().unwrap().to_string();

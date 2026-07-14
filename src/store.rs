@@ -83,74 +83,90 @@ pub struct SqliteStore {
     pub(crate) conn: Connection,
 }
 
-pub const VALID_RELATIONSHIPS: &[&str] = &[
-    "shares_tag",
-    "applies_to",
-    "pairs_with",
-    "used_in",
-    "related_to",
-    "custom",
-    "mentions",
-];
+pub const VALID_RELATIONSHIPS: &[&str] = &["parent", "child", "sibling"];
 
-static MENTION_RE: std::sync::LazyLock<regex::Regex> =
-    std::sync::LazyLock::new(|| regex::Regex::new(r"\[([^\]]+)\]\((mem_[0-9a-f]{32})\)").unwrap());
+static RELATIONSHIP_LINK_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(r"\[([^\]]+)\]\((?:(parent|child|sibling):)?(mem_[0-9a-f]{32})\)").unwrap()
+});
 
-/// Extract `[phrase](mem_xxx)` mention links from memory content.
-/// Deduped by target (first phrase wins); links to `source_id` are dropped.
-pub(crate) fn parse_mentions(source_id: &str, content: &str) -> Vec<(String, String)> {
+/// Extract `[phrase](kind:mem_xxx)` relationship links from memory content
+/// (bare `[phrase](mem_xxx)` defaults to "sibling"). Deduped by (kind, target)
+/// pair — the same target under two different kinds both survive, first
+/// phrase wins for an exact repeat. Links to `source_id` are dropped.
+pub(crate) fn parse_relationship_links(
+    source_id: &str,
+    content: &str,
+) -> Vec<(String, String, String)> {
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
-    for cap in MENTION_RE.captures_iter(content) {
-        let target = cap[2].to_string();
-        if target == source_id || !seen.insert(target.clone()) {
+    for cap in RELATIONSHIP_LINK_RE.captures_iter(content) {
+        let target = cap[3].to_string();
+        if target == source_id {
             continue;
         }
-        out.push((cap[1].to_string(), target));
+        let kind = cap
+            .get(2)
+            .map(|m| m.as_str().to_string())
+            .unwrap_or_else(|| "sibling".to_string());
+        if !seen.insert((kind.clone(), target.clone())) {
+            continue;
+        }
+        out.push((cap[1].to_string(), kind, target));
     }
     out
 }
 
-/// Maintain `mentions` edges for `source_id` from its content's `[phrase](mem_xxx)`
-/// links: upserts an active edge (refreshing `link_text` on rephrase) per surviving
-/// mention, and deletes any stale `mentions` edges whose target is no longer linked.
-async fn sync_mention_edges(
+/// Maintain parent/child/sibling edges for `source_id` from its content's
+/// `[phrase](kind:mem_xxx)` links (bare `[phrase](mem_xxx)` defaults to
+/// "sibling"): upserts an active edge per surviving (kind, target) pair
+/// (refreshing `link_text` and resetting `status` to 'active' on rephrase),
+/// and deletes any (kind, target) pair no longer present in the content.
+async fn sync_relationship_edges(
     tx: &libsql::Transaction,
     source_id: &str,
     content: &str,
     now: i64,
 ) -> Result<()> {
-    let mentions = parse_mentions(source_id, content);
+    let links = parse_relationship_links(source_id, content);
 
-    for (phrase, target) in &mentions {
-        // WHERE EXISTS guard drops links to nonexistent memories; the SELECT
-        // form requires the WHERE for SQLite's upsert grammar anyway.
+    for (phrase, kind, target) in &links {
         tx.execute(
             "INSERT INTO edges (id, source_id, target_id, relationship, status, created_at, link_text)
-             SELECT 'edge_' || lower(hex(randomblob(16))), ?1, ?2, 'mentions', 'active', ?3, ?4
+             SELECT 'edge_' || lower(hex(randomblob(16))), ?1, ?2, ?3, 'active', ?4, ?5
              WHERE EXISTS (SELECT 1 FROM memories WHERE id = ?2)
              ON CONFLICT(source_id, target_id, relationship)
              DO UPDATE SET link_text = excluded.link_text, status = 'active'",
-            params![source_id, target.as_str(), now, phrase.as_str()],
+            params![source_id, target.as_str(), kind.as_str(), now, phrase.as_str()],
         )
         .await?;
     }
 
-    if mentions.is_empty() {
+    if links.is_empty() {
         tx.execute(
-            "DELETE FROM edges WHERE source_id = ?1 AND relationship = 'mentions'",
+            "DELETE FROM edges WHERE source_id = ?1 AND relationship IN ('parent', 'child', 'sibling')",
             params![source_id],
         )
         .await?;
     } else {
-        let placeholders: Vec<String> = (2..mentions.len() + 2).map(|i| format!("?{i}")).collect();
+        let conditions: Vec<String> = (0..links.len())
+            .map(|i| {
+                format!(
+                    "(relationship = ?{} AND target_id = ?{})",
+                    i * 2 + 2,
+                    i * 2 + 3
+                )
+            })
+            .collect();
         let sql = format!(
-            "DELETE FROM edges WHERE source_id = ?1 AND relationship = 'mentions' \
-             AND target_id NOT IN ({})",
-            placeholders.join(", ")
+            "DELETE FROM edges WHERE source_id = ?1 AND relationship IN ('parent', 'child', 'sibling') \
+             AND NOT ({})",
+            conditions.join(" OR ")
         );
         let mut p: Vec<libsql::Value> = vec![libsql::Value::Text(source_id.to_string())];
-        p.extend(mentions.iter().map(|(_, t)| libsql::Value::Text(t.clone())));
+        for (_, kind, target) in &links {
+            p.push(libsql::Value::Text(kind.clone()));
+            p.push(libsql::Value::Text(target.clone()));
+        }
         tx.execute(&sql, p).await?;
     }
     Ok(())
@@ -222,26 +238,7 @@ impl SqliteStore {
             .await?;
         }
 
-        // Auto-connect memories sharing a tag: one statement per tag, skipping
-        // pairs already linked in either direction.
-        for tag in m.tags {
-            let tag_lower = tag.to_lowercase();
-            tx.execute(
-                "INSERT INTO edges (id, source_id, target_id, relationship, status, created_at)
-                 SELECT 'edge_' || lower(hex(randomblob(16))), ?1, mt.memory_id, 'shares_tag', 'active', ?2
-                 FROM memory_tags mt
-                 WHERE mt.tag = ?3 AND mt.memory_id != ?1
-                   AND NOT EXISTS (
-                       SELECT 1 FROM edges e
-                       WHERE e.relationship = 'shares_tag'
-                         AND ((e.source_id = ?1 AND e.target_id = mt.memory_id)
-                           OR (e.source_id = mt.memory_id AND e.target_id = ?1)))",
-                params![m.id, now, tag_lower.as_str()],
-            )
-            .await?;
-        }
-
-        sync_mention_edges(&tx, m.id, m.content, now).await?;
+        sync_relationship_edges(&tx, m.id, m.content, now).await?;
 
         // Journal the write
         tx.execute(
@@ -348,7 +345,7 @@ impl SqliteStore {
             .await?;
         }
 
-        sync_mention_edges(&tx, id, content, now).await?;
+        sync_relationship_edges(&tx, id, content, now).await?;
 
         // Journal the write
         tx.execute(
@@ -1029,19 +1026,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn store_auto_connects_memories_sharing_a_tag() {
-        let (s, _dir) = make_store().await;
-        s.store(&test_row("mem_a", "A", "body a", &["shared".into()]))
-            .await
-            .unwrap();
-        s.store(&test_row("mem_b", "B", "body b", &["shared".into()]))
-            .await
-            .unwrap();
-        let edges = s.list_edges(None).await.unwrap();
-        assert!(!edges.is_empty(), "expected auto-edge from shared tag");
-    }
-
-    #[tokio::test]
     async fn delete_removes_memory_tags_and_fts() {
         let (s, _dir) = make_store().await;
         s.store(&test_row(
@@ -1195,7 +1179,7 @@ mod tests {
         s.store(&test_row("mem_z", "Z", "body", &["other_tag".into()]))
             .await
             .unwrap();
-        s.create_edge("mem_x", "mem_z", "related_to").await.unwrap();
+        s.create_edge("mem_x", "mem_z", "sibling").await.unwrap();
 
         let all = s.list_edges(None).await.unwrap();
         let filtered = s.list_edges(Some("mem_x")).await.unwrap();
@@ -1213,7 +1197,7 @@ mod tests {
         let (s, _dir) = make_store().await;
         s.store(&test_row("mem_p", "P", "body", &[])).await.unwrap();
         s.store(&test_row("mem_q", "Q", "body", &[])).await.unwrap();
-        let edge = s.create_edge("mem_p", "mem_q", "pairs_with").await.unwrap();
+        let edge = s.create_edge("mem_p", "mem_q", "sibling").await.unwrap();
         let crate::model::EdgeCreate::Created(edge_id) = edge else {
             panic!("expected EdgeCreate::Created");
         };
@@ -1242,15 +1226,15 @@ mod tests {
         s.store(&test_row("mem_1", "A", "a", &tags)).await.unwrap();
         s.store(&test_row("mem_2", "B", "b", &tags)).await.unwrap();
 
-        let first = s.create_edge("mem_1", "mem_2", "related_to").await.unwrap();
+        let first = s.create_edge("mem_1", "mem_2", "sibling").await.unwrap();
         assert!(matches!(first, EdgeCreate::Created(_)));
         // duplicate, even reversed
         assert_eq!(
-            s.create_edge("mem_2", "mem_1", "related_to").await.unwrap(),
+            s.create_edge("mem_2", "mem_1", "sibling").await.unwrap(),
             EdgeCreate::Duplicate
         );
         assert_eq!(
-            s.create_edge("mem_1", "mem_ghost", "related_to")
+            s.create_edge("mem_1", "mem_ghost", "sibling")
                 .await
                 .unwrap(),
             EdgeCreate::MissingEndpoint
@@ -1385,24 +1369,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn auto_edges_are_not_duplicated_in_reverse() {
-        let (s, _dir) = make_store().await;
-        let tags = vec!["shared".to_string()];
-        s.store(&test_row("mem_r1", "A", "a", &tags)).await.unwrap();
-        s.store(&test_row("mem_r2", "B", "b", &tags)).await.unwrap();
-        // re-storing the first must not create a reverse duplicate edge
-        s.store(&test_row("mem_r1", "A", "a2", &tags))
-            .await
-            .unwrap();
-        let edges = s.list_edges(None).await.unwrap();
-        assert_eq!(
-            edges.len(),
-            1,
-            "one shares_tag edge between the pair, either direction"
-        );
-    }
-
-    #[tokio::test]
     async fn update_changes_title_and_recounts_tokens() {
         let (s, _dir) = make_store().await;
         let tags: Vec<String> = vec![];
@@ -1427,115 +1393,175 @@ mod tests {
     }
 
     #[test]
-    fn parse_mentions_extracts_valid_links() {
+    fn parse_relationship_links_defaults_bare_link_to_sibling() {
         let id = "mem_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-        let content = "see [the auth notes](mem_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb) and \
-                       [design](mem_cccccccccccccccccccccccccccccccc)";
-        let got = parse_mentions(id, content);
+        let content = "see [plain link](mem_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)";
+        let got = parse_relationship_links(id, content);
+        assert_eq!(
+            got,
+            vec![(
+                "plain link".to_string(),
+                "sibling".to_string(),
+                "mem_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string()
+            )]
+        );
+    }
+
+    #[test]
+    fn parse_relationship_links_reads_explicit_kind_prefix() {
+        let id = "mem_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let content = "\
+            [the rule](parent:mem_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb) \
+            [an instance](child:mem_cccccccccccccccccccccccccccccccc) \
+            [a peer](sibling:mem_dddddddddddddddddddddddddddddddd)";
+        let got = parse_relationship_links(id, content);
         assert_eq!(
             got,
             vec![
                 (
-                    "the auth notes".to_string(),
+                    "the rule".to_string(),
+                    "parent".to_string(),
                     "mem_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string()
                 ),
                 (
-                    "design".to_string(),
+                    "an instance".to_string(),
+                    "child".to_string(),
                     "mem_cccccccccccccccccccccccccccccccc".to_string()
+                ),
+                (
+                    "a peer".to_string(),
+                    "sibling".to_string(),
+                    "mem_dddddddddddddddddddddddddddddddd".to_string()
                 ),
             ]
         );
     }
 
     #[test]
-    fn parse_mentions_dedupes_and_drops_self_and_malformed() {
+    fn parse_relationship_links_same_target_different_kinds_both_survive() {
         let id = "mem_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         let content = "\
-            [first](mem_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb) \
-            [second phrase](mem_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb) \
-            [self](mem_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) \
-            [not a mem link](https://example.com) \
-            [short id](mem_abc) \
-            [no target]() plain text";
-        let got = parse_mentions(id, content);
-        assert_eq!(
-            got,
-            vec![(
-                "first".to_string(),
-                "mem_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string()
-            )]
-        );
+            [as parent](parent:mem_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb) \
+            [as sibling too](sibling:mem_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)";
+        let got = parse_relationship_links(id, content);
+        assert_eq!(got.len(), 2);
+        assert!(got.iter().any(|(_, k, _)| k == "parent"));
+        assert!(got.iter().any(|(_, k, _)| k == "sibling"));
+    }
+
+    #[test]
+    fn parse_relationship_links_drops_self_link_and_unknown_kind_word() {
+        let id = "mem_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let content = "\
+            [self](parent:mem_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) \
+            [bogus kind](notakind:mem_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb) \
+            [real one](sibling:mem_ccccccccccccccccccccccccccccccc)";
+        let got = parse_relationship_links(id, content);
+        // "bogus kind" fails the fixed parent|child|sibling alternation entirely,
+        // so it doesn't match at all (not even as a bare/default link) — this is
+        // the same "malformed mention falls through as inert text" behavior the
+        // prior feature already had for e.g. a too-short mem_ id.
+        assert_eq!(got.len(), 0);
     }
 
     const T_B: &str = "mem_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
     const T_C: &str = "mem_cccccccccccccccccccccccccccccccc";
 
     #[tokio::test]
-    async fn store_creates_active_mention_edges_with_link_text() {
+    async fn store_creates_edges_with_parsed_kind_and_link_text() {
         let (s, _dir) = make_store().await;
         s.store(&test_row(T_B, "Target", "target body", &[]))
             .await
             .unwrap();
-        let content = format!("relates to [the target]({T_B})");
+        let content = format!("[the rule]({T_B})");
         s.store(&test_row("mem_src", "Src", &content, &[]))
             .await
             .unwrap();
 
         let edges = s.list_edges(Some("mem_src")).await.unwrap();
-        let m: Vec<_> = edges
-            .iter()
-            .filter(|e| e.relationship == "mentions")
-            .collect();
-        assert_eq!(m.len(), 1);
-        assert_eq!(m[0].target_id, T_B);
-        assert_eq!(m[0].status, "active");
-        assert_eq!(m[0].link_text.as_deref(), Some("the target"));
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].relationship, "sibling");
+        assert_eq!(edges[0].status, "active");
+        assert_eq!(edges[0].link_text.as_deref(), Some("the rule"));
     }
 
     #[tokio::test]
-    async fn update_upserts_phrase_and_deletes_stale_mentions() {
+    async fn store_creates_explicit_kind_edge() {
+        let (s, _dir) = make_store().await;
+        s.store(&test_row(T_B, "Target", "target body", &[]))
+            .await
+            .unwrap();
+        let content = format!("[the rule](parent:{T_B})");
+        s.store(&test_row("mem_src", "Src", &content, &[]))
+            .await
+            .unwrap();
+
+        let edges = s.list_edges(Some("mem_src")).await.unwrap();
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].relationship, "parent");
+    }
+
+    #[tokio::test]
+    async fn update_switching_kind_deletes_old_kind_edge_and_creates_new() {
         let (s, _dir) = make_store().await;
         s.store(&test_row(T_B, "B", "b", &[])).await.unwrap();
-        s.store(&test_row(T_C, "C", "c", &[])).await.unwrap();
         s.store(&test_row(
             "mem_src",
             "Src",
-            &format!("[one]({T_B}) [two]({T_C})"),
+            &format!("[x](parent:{T_B})"),
             &[],
         ))
         .await
         .unwrap();
 
-        let first: Vec<_> = s
-            .list_edges(Some("mem_src"))
-            .await
-            .unwrap()
-            .into_iter()
-            .filter(|e| e.relationship == "mentions")
-            .collect();
-        assert_eq!(first.len(), 2);
-        let b_edge_id = first
-            .iter()
-            .find(|e| e.target_id == T_B)
-            .unwrap()
-            .id
-            .clone();
+        let first = s.list_edges(Some("mem_src")).await.unwrap();
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].relationship, "parent");
 
-        // Rephrase the B link, drop the C link entirely.
-        s.update("mem_src", "Src", &format!("[renamed]({T_B})"), &[])
+        s.update("mem_src", "Src", &format!("[x](child:{T_B})"), &[])
             .await
             .unwrap();
-        let second: Vec<_> = s
-            .list_edges(Some("mem_src"))
+        let second = s.list_edges(Some("mem_src")).await.unwrap();
+        assert_eq!(
+            second.len(),
+            1,
+            "old parent-kind edge should be gone, replaced by a child-kind one"
+        );
+        assert_eq!(second[0].relationship, "child");
+    }
+
+    #[tokio::test]
+    async fn update_same_target_two_kinds_keeps_both_and_only_removes_dropped_one() {
+        let (s, _dir) = make_store().await;
+        s.store(&test_row(T_B, "B", "b", &[])).await.unwrap();
+        s.store(&test_row(
+            "mem_src",
+            "Src",
+            &format!("[as parent](parent:{T_B}) [as sibling](sibling:{T_B})"),
+            &[],
+        ))
+        .await
+        .unwrap();
+        let first = s.list_edges(Some("mem_src")).await.unwrap();
+        assert_eq!(first.len(), 2);
+
+        // Drop the sibling-kind link, keep the parent-kind one.
+        s.update("mem_src", "Src", &format!("[as parent](parent:{T_B})"), &[])
             .await
-            .unwrap()
-            .into_iter()
-            .filter(|e| e.relationship == "mentions")
-            .collect();
+            .unwrap();
+        let second = s.list_edges(Some("mem_src")).await.unwrap();
         assert_eq!(second.len(), 1);
-        assert_eq!(second[0].target_id, T_B);
-        assert_eq!(second[0].link_text.as_deref(), Some("renamed"));
-        assert_eq!(second[0].id, b_edge_id, "unchanged link keeps its edge id");
+        assert_eq!(second[0].relationship, "parent");
+    }
+
+    #[tokio::test]
+    async fn relationship_link_to_nonexistent_target_creates_no_edge() {
+        let (s, _dir) = make_store().await;
+        s.store(&test_row("mem_src", "Src", &format!("[ghost]({T_B})"), &[]))
+            .await
+            .unwrap();
+        let edges = s.list_edges(Some("mem_src")).await.unwrap();
+        assert!(edges.is_empty());
     }
 
     #[tokio::test]
@@ -1548,12 +1574,12 @@ mod tests {
             .await
             .unwrap();
 
-        // Simulate an import-created `mentions` edge stuck in 'pending' (e.g. from a
-        // path that inserts mentions edges without activating them).
+        // Simulate an import-created `sibling` edge stuck in 'pending' (e.g. from a
+        // path that inserts relationship edges without activating them).
         s.conn
             .execute(
                 "INSERT INTO edges (id, source_id, target_id, relationship, status, created_at, link_text)
-                 VALUES ('edge_pending_test', 'mem_src', ?1, 'mentions', 'pending', ?2, 'old text')",
+                 VALUES ('edge_pending_test', 'mem_src', ?1, 'sibling', 'pending', ?2, 'old text')",
                 params![T_B, chrono_now()],
             )
             .await
@@ -1567,22 +1593,12 @@ mod tests {
         let edges = s.list_edges(Some("mem_src")).await.unwrap();
         let m: Vec<_> = edges
             .iter()
-            .filter(|e| e.relationship == "mentions")
+            .filter(|e| e.relationship == "sibling")
             .collect();
         assert_eq!(m.len(), 1);
         assert_eq!(m[0].id, "edge_pending_test");
         assert_eq!(m[0].status, "active");
         assert_eq!(m[0].link_text.as_deref(), Some("the target"));
-    }
-
-    #[tokio::test]
-    async fn mention_to_nonexistent_target_creates_no_edge() {
-        let (s, _dir) = make_store().await;
-        s.store(&test_row("mem_src", "Src", &format!("[ghost]({T_B})"), &[]))
-            .await
-            .unwrap();
-        let edges = s.list_edges(Some("mem_src")).await.unwrap();
-        assert!(edges.iter().all(|e| e.relationship != "mentions"));
     }
 
     #[tokio::test]
