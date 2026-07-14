@@ -50,7 +50,13 @@ function cancelEdit() {
     @dblclick="startEdit">
     {{ tag }}
     <button v-if="removable" @click.stop="$emit('remove')"
-      class="leading-none hover:text-white"
+      class="leading-none tag-remove-btn"
       :style="color ? `color:${color}` : 'color:var(--hm-text-tertiary)'">×</button>
   </span>
 </template>
+
+<style scoped>
+.tag-remove-btn:hover {
+  color: var(--hm-text-primary) !important;
+}
+</style>
