@@ -1,10 +1,20 @@
 <script setup>
+import { computed } from 'vue'
 import LayerBadge from '../shared/LayerBadge.vue'
 import TagChip from '../shared/TagChip.vue'
 import { fmtDate } from '../../lib/format.js'
 
 const props = defineProps({ mem: Object, selected: Boolean })
 defineEmits(['select'])
+
+// project:* is the single-value namespace that identifies what the memory
+// belongs to — surface it first regardless of storage order.
+const displayTags = computed(() => {
+  const tags = props.mem.tags || []
+  const projectTag = tags.find(t => t.toLowerCase().startsWith('project:'))
+  if (!projectTag) return tags.slice(0, 3)
+  return [projectTag, ...tags.filter(t => t !== projectTag)].slice(0, 3)
+})
 </script>
 
 <template>
@@ -35,7 +45,7 @@ defineEmits(['select'])
     <!-- Row 3: tags + date -->
     <div class="flex items-center gap-1 justify-between">
       <div class="flex items-center gap-1 overflow-hidden">
-        <TagChip v-for="tag in (mem.tags || []).slice(0,3)" :key="tag" :tag="tag" />
+        <TagChip v-for="tag in displayTags" :key="tag" :tag="tag" />
       </div>
       <span class="font-mono shrink-0" style="font-size:11px; color:var(--hm-text-tertiary)">
         {{ fmtDate(mem.updated_at || mem.created_at) }}
