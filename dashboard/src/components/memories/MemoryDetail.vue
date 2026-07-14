@@ -8,6 +8,7 @@ import TagInput from '../shared/TagInput.vue'
 import EmptyState from '../shared/EmptyState.vue'
 import DeleteConfirmModal from './DeleteConfirmModal.vue'
 import MarkdownContent from '../shared/MarkdownContent.vue'
+import ConfirmModal from '../shared/ConfirmModal.vue'
 import { fmtDate } from '../../lib/format.js'
 import { createFeedback } from '../../api/feedback.js'
 import { caretCoords } from '../../lib/caret.js'
@@ -17,6 +18,7 @@ const ui = useUiStore()
 const graph = useGraphStore()
 
 const showDeleteModal = ref(false)
+const showResetModal = ref(false)
 const flagOpen = ref(false)
 const contentView = ref('markdown') // 'markdown' | 'raw'
 
@@ -116,8 +118,8 @@ async function flag(signal) {
 }
 
 async function handleSave() {
-  await memories.save()
-  ui.showToast('Changes saved')
+  const saved = await memories.save()
+  if (saved) ui.showToast('Changes saved')
 }
 
 async function handleDelete() {
@@ -125,6 +127,12 @@ async function handleDelete() {
   showDeleteModal.value = false
   await memories.remove(id)
   ui.showToast('Memory deleted')
+}
+
+function handleReset() {
+  showResetModal.value = false
+  memories.resetDraft()
+  ui.showToast('Changes reset')
 }
 
 function handleKeydown(e) {
@@ -166,6 +174,22 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
             </div>
           </div>
           <button class="hm-btn hm-btn-danger hm-btn-sm" @click="showDeleteModal = true">Delete</button>
+        </div>
+      </div>
+
+      <!-- Conflict: updated elsewhere while this draft was open -->
+      <div v-if="memories.conflict" class="conflict-banner">
+        <p class="conflict-banner__title">This memory was updated elsewhere while you were editing.</p>
+        <p class="conflict-banner__body">
+          Someone (or an agent) saved a different version of "{{ memories.conflict.title }}" while your changes here were unsaved. Choose which version to keep.
+        </p>
+        <div class="flex items-center gap-2 mt-2">
+          <button class="hm-btn hm-btn-primary hm-btn-sm" @click="memories.resolveConflictLoadLatest()">
+            Load latest version
+          </button>
+          <button class="hm-btn hm-btn-default hm-btn-sm" @click="memories.resolveConflictKeepMine()">
+            Keep my draft
+          </button>
         </div>
       </div>
 
@@ -260,11 +284,19 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
           updated {{ fmtDate(memories.selected.updated_at) }}
           <LayerBadge :layer="memories.selected.layer" />
         </span>
-        <button class="hm-btn hm-btn-primary hm-btn-sm"
-          :disabled="!memories.dirty || memories.saving"
-          @click="handleSave">
-          {{ memories.saving ? 'Saving…' : 'Save' }}
-        </button>
+        <div class="flex items-center gap-2">
+          <button v-if="memories.dirty" class="hm-btn hm-btn-default hm-btn-sm"
+            :disabled="memories.saving"
+            @click="showResetModal = true">
+            Reset
+          </button>
+          <button class="hm-btn hm-btn-primary hm-btn-sm"
+            :disabled="!memories.dirty || memories.saving || !!memories.conflict"
+            :title="memories.conflict ? 'Resolve the conflict above before saving' : undefined"
+            @click="handleSave">
+            {{ memories.saving ? 'Saving…' : 'Save' }}
+          </button>
+        </div>
       </div>
     </template>
 
@@ -273,6 +305,16 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
       :mem="memories.selected"
       @confirm="handleDelete"
       @cancel="showDeleteModal = false"
+    />
+
+    <ConfirmModal
+      v-if="showResetModal"
+      title="Reset changes?"
+      body="Unsaved edits to this memory will be discarded and reverted to the last saved version. This cannot be undone."
+      confirmLabel="Reset"
+      :dangerous="true"
+      @confirm="handleReset"
+      @cancel="showResetModal = false"
     />
   </div>
 </template>
@@ -356,5 +398,25 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
 .mention-menu__item:hover {
   background: var(--hm-bg-elevated);
   color: var(--hm-text-primary);
+}
+
+.conflict-banner {
+  margin: 12px 20px 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--hm-warning-bg);
+  border: 0.5px solid var(--hm-warning-border);
+}
+
+.conflict-banner__title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--hm-warning);
+  margin-bottom: 4px;
+}
+
+.conflict-banner__body {
+  font-size: 11px;
+  color: var(--hm-text-secondary);
 }
 </style>
