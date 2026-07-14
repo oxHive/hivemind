@@ -1,11 +1,25 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import LayerBadge from '../shared/LayerBadge.vue'
 import TagChip from '../shared/TagChip.vue'
+import Tooltip from '../shared/Tooltip.vue'
 import { fmtDate } from '../../lib/format.js'
 
 const props = defineProps({ mem: Object, selected: Boolean })
 defineEmits(['select'])
+
+const titleTooltip = ref({ visible: false, x: 0, y: 0 })
+
+function onTitleEnter(e) {
+  const el = e.currentTarget
+  if (el.scrollWidth <= el.clientWidth) return
+  const rect = el.getBoundingClientRect()
+  titleTooltip.value = { visible: true, x: rect.left + rect.width / 2, y: rect.top }
+}
+
+function onTitleLeave() {
+  titleTooltip.value.visible = false
+}
 
 // project:* is the single-value namespace that identifies what the memory
 // belongs to — surface it first regardless of storage order.
@@ -32,7 +46,9 @@ const displayTags = computed(() => {
     <!-- Row 1: title + layer badge -->
     <div class="flex items-start justify-between gap-2 mb-1.5">
       <span class="font-medium leading-snug"
-        style="font-size:13px; color:var(--hm-text-primary); overflow:hidden; display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical">
+        style="font-size:13px; color:var(--hm-text-primary); overflow:hidden; display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical"
+        @mouseenter="onTitleEnter"
+        @mouseleave="onTitleLeave">
         {{ mem.title }}
       </span>
       <LayerBadge :layer="mem.layer" class="shrink-0 mt-0.5" />
@@ -52,6 +68,7 @@ const displayTags = computed(() => {
       </span>
     </div>
   </div>
+  <Tooltip :visible="titleTooltip.visible" :text="mem.title" :x="titleTooltip.x" :y="titleTooltip.y" />
 </template>
 
 <style scoped>

@@ -1,15 +1,19 @@
 <script setup>
-import { ref } from 'vue'
 import { useGraphStore } from '../../stores/graph.js'
 import { useUiStore } from '../../stores/ui.js'
+import { useMemoriesStore } from '../../stores/memories.js'
 import FilterChip from '../shared/FilterChip.vue'
 
 const graph = useGraphStore()
 const ui = useUiStore()
+const memories = useMemoriesStore()
 
-const searchQuery = ref('')
-const layerFilter = ref('all')
-const emit = defineEmits(['filter-change', 'search-change'])
+function jumpToMatch() {
+  const q = graph.searchQuery.trim().toLowerCase()
+  if (!q) return
+  const match = memories.all.find(m => m.title.toLowerCase().includes(q))
+  if (match) graph.selectedNodeId = match.id
+}
 </script>
 
 <template>
@@ -17,14 +21,14 @@ const emit = defineEmits(['filter-change', 'search-change'])
     style="border-bottom:0.5px solid var(--hm-border-subtle); background:var(--hm-bg-surface)">
 
     <input class="hm-input" style="width:180px" placeholder="Find node…"
-      v-model="searchQuery" @input="emit('search-change', searchQuery)" />
+      v-model="graph.searchQuery" @keyup.enter="jumpToMatch" />
 
     <div class="flex gap-1.5">
       <FilterChip
         v-for="f in [{label:'all',value:'all'},{label:'personal',value:'personal',layer:'personal'},{label:'workspace',value:'workspace',layer:'workspace'}]"
         :key="f.value" :label="f.label" :value="f.value"
-        :active="layerFilter === f.value" :layer="f.layer"
-        @select="layerFilter = $event; emit('filter-change', $event)"
+        :active="graph.layerFilter === f.value" :layer="f.layer"
+        @select="graph.layerFilter = $event"
       />
     </div>
 

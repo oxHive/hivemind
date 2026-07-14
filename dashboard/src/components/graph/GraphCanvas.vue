@@ -159,9 +159,13 @@ function draw() {
   }
 
   // Draw nodes
+  const query = graph.searchQuery.trim().toLowerCase()
   for (const node of nodes) {
     const r = nodeRadius(node)
     const isSelected = graph.selectedNodeId === node.id
+    const matchesSearch = !query || node.title.toLowerCase().includes(query)
+    const matchesLayer = graph.layerFilter === 'all' || node.layer === graph.layerFilter
+    const isMatch = matchesSearch && matchesLayer
     const color = COLORS[node.layer] || COLORS.personal
 
     // Ring for selected
@@ -176,12 +180,12 @@ function draw() {
 
     traceHex(ctx, node.x, node.y, r)
     ctx.fillStyle = color
-    ctx.globalAlpha = isSelected ? 1 : 0.72
+    ctx.globalAlpha = !isMatch ? 0.15 : isSelected ? 1 : 0.72
     ctx.fill()
     ctx.globalAlpha = 1
 
     // Label at zoom >= 2, always for the selected node
-    if (graph.zoom >= 2 || isSelected) {
+    if ((graph.zoom >= 2 && isMatch) || isSelected) {
       ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--hm-text-primary').trim()
       ctx.font = '10px "IBM Plex Mono", monospace'
       ctx.textAlign = 'center'
@@ -360,6 +364,7 @@ onUnmounted(() => {
 })
 
 watch([nodeData, linkData, () => graph.zoom], startSimulation)
+watch([() => graph.searchQuery, () => graph.layerFilter], () => { if (rafId) cancelAnimationFrame(rafId); rafId = requestAnimationFrame(draw) })
 </script>
 
 <template>
