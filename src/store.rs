@@ -1,6 +1,7 @@
 use anyhow::{Result, anyhow};
 use libsql::{Connection, params};
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryEntry {
@@ -55,6 +56,20 @@ pub struct ConflictEntry {
     pub local_updated_at: i64,
     pub status: String,
     pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionStartLogRow {
+    pub id: String,
+    pub project_name: String,
+    pub project_path: String,
+    pub created_at: i64,
+    pub max_tokens: i64,
+    pub used_tokens: i64,
+    pub memories_recalled: i64,
+    pub truncated: bool,
+    pub loaded: Value,
+    pub skipped: Value,
 }
 
 pub struct JournalRow {
@@ -307,6 +322,96 @@ impl SqliteStore {
         let mut rows = self.conn.query("SELECT COUNT(*) FROM memories", ()).await?;
         let row = rows.next().await?.ok_or_else(|| anyhow!("no count row"))?;
         Ok(row.get(0)?)
+    }
+
+    pub async fn log_session_start(
+        &self,
+        project_path: &str,
+        result: &crate::session::SessionStartResult,
+    ) -> Result<()> {
+        let id = format!("ssl_{}", uuid::Uuid::new_v4().simple());
+        let now = chrono_now();
+        let loaded_json = json!(
+            result
+                .loaded
+                .iter()
+                .map(|l| json!({
+                    "id": l.entry.id,
+                    "title": l.entry.title,
+                    "tags": l.entry.tags,
+                    "layer": l.entry.layer,
+                    "tokens": l.tokens,
+                }))
+                .collect::<Vec<_>>()
+        )
+        .to_string();
+        let skipped_json = json!(
+            result
+                .skipped
+                .iter()
+                .map(|s| json!({ "query": s.query, "reason": s.reason.as_str() }))
+                .collect::<Vec<_>>()
+        )
+        .to_string();
+        // "truncated" means the token budget cut off recalls, not merely that
+        // a recall wasn't found — so it reflects BudgetExceeded skips only,
+        // deliberately narrower than `SessionStartResult::truncated()`.
+        let truncated = result
+            .skipped
+            .iter()
+            .any(|s| matches!(s.reason, crate::session::SkipReason::BudgetExceeded));
+
+        self.conn
+            .execute(
+                "INSERT INTO session_start_log
+                    (id, project_name, project_path, created_at, max_tokens, used_tokens,
+                     memories_recalled, truncated, loaded_json, skipped_json)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![
+                    id,
+                    result.project.clone(),
+                    project_path,
+                    now,
+                    result.max_tokens as i64,
+                    result.used_tokens as i64,
+                    result.memories_recalled as i64,
+                    truncated as i64,
+                    loaded_json,
+                    skipped_json,
+                ],
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub async fn list_session_logs(&self, limit: i64) -> Result<Vec<SessionStartLogRow>> {
+        let mut rows = self
+            .conn
+            .query(
+                "SELECT id, project_name, project_path, created_at, max_tokens, used_tokens,
+                        memories_recalled, truncated, loaded_json, skipped_json
+                 FROM session_start_log ORDER BY created_at DESC LIMIT ?1",
+                params![limit],
+            )
+            .await?;
+        let mut results = Vec::new();
+        while let Some(row) = rows.next().await? {
+            let loaded_json: String = row.get(8)?;
+            let skipped_json: String = row.get(9)?;
+            results.push(SessionStartLogRow {
+                id: row.get(0)?,
+                project_name: row.get(1)?,
+                project_path: row.get(2)?,
+                created_at: row.get(3)?,
+                max_tokens: row.get(4)?,
+                used_tokens: row.get(5)?,
+                memories_recalled: row.get(6)?,
+                truncated: row.get::<i64>(7)? != 0,
+                loaded: serde_json::from_str(&loaded_json)?,
+                skipped: serde_json::from_str(&skipped_json)?,
+            });
+        }
+        Ok(results)
     }
 
     pub async fn list_memories(&self, limit: i64, offset: i64) -> Result<Vec<MemoryEntry>> {
@@ -1335,5 +1440,57 @@ mod tests {
         assert!(s.get_meta("last_synced_at").await.unwrap().is_none());
         s.set_meta("last_synced_at", "1234").await.unwrap();
         assert_eq!(s.get_meta("last_synced_at").await.unwrap().unwrap(), "1234");
+    }
+
+    #[tokio::test]
+    async fn log_and_list_session_start_round_trip() {
+        let (store, _dir) = make_store().await;
+        let result = crate::session::SessionStartResult {
+            project: "demo".to_string(),
+            loaded: vec![],
+            skipped: vec![crate::session::SkippedEntry {
+                query: "missing pref".to_string(),
+                reason: crate::session::SkipReason::NotFound,
+            }],
+            used_tokens: 120,
+            max_tokens: 2000,
+            memories_recalled: 0,
+        };
+        store
+            .log_session_start("/tmp/demo-project", &result)
+            .await
+            .unwrap();
+
+        let logs = store.list_session_logs(10).await.unwrap();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].project_name, "demo");
+        assert_eq!(logs[0].project_path, "/tmp/demo-project");
+        assert_eq!(logs[0].used_tokens, 120);
+        assert_eq!(logs[0].max_tokens, 2000);
+        assert_eq!(logs[0].memories_recalled, 0);
+        assert!(!logs[0].truncated);
+        assert_eq!(logs[0].skipped[0]["query"], "missing pref");
+        assert_eq!(logs[0].skipped[0]["reason"], "not_found");
+    }
+
+    #[tokio::test]
+    async fn list_session_logs_orders_newest_first() {
+        let (store, _dir) = make_store().await;
+        for (project, used) in [("first", 10usize), ("second", 20usize)] {
+            let result = crate::session::SessionStartResult {
+                project: project.to_string(),
+                loaded: vec![],
+                skipped: vec![],
+                used_tokens: used,
+                max_tokens: 2000,
+                memories_recalled: 0,
+            };
+            store.log_session_start("/tmp/p", &result).await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+        }
+        let logs = store.list_session_logs(10).await.unwrap();
+        assert_eq!(logs.len(), 2);
+        assert_eq!(logs[0].project_name, "second", "newest first");
+        assert_eq!(logs[1].project_name, "first");
     }
 }
