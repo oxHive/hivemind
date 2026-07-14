@@ -87,6 +87,15 @@ const COLORS = {
   pending: '#ba7517',
 }
 
+const RELATIONSHIP_COLORS = {
+  parent: '#5b8fd9',
+  child: '#c2634a',
+  sibling: '#9a63d6',
+}
+// Pre-existing edges whose relationship predates this taxonomy (shares_tag,
+// applies_to, etc.) are left in the DB unmigrated — this is their fallback color.
+const DEFAULT_EDGE_COLOR = '#67625a'
+
 function nodeRadius(n) {
   const connections = links.filter(l => l.source?.id === n.id || l.target?.id === n.id).length
   return Math.max(10, 10 + connections * 1.5)
@@ -147,7 +156,7 @@ function draw() {
       ctx.lineWidth = 1.2
     } else {
       ctx.setLineDash([])
-      ctx.strokeStyle = COLORS.personal
+      ctx.strokeStyle = RELATIONSHIP_COLORS[link.relationship] || DEFAULT_EDGE_COLOR
       ctx.globalAlpha = 0.25
       ctx.lineWidth = 1
     }
