@@ -11,9 +11,9 @@ const memories = useMemoriesStore()
 const MEM_LINK_RE = /^(?:(parent|child|sibling):)?(mem_[0-9a-f]{32})$/
 
 const RELATIONSHIP_LINK_COLORS = {
-  parent: '#5b8fd9',
-  child: '#c2634a',
-  sibling: '#9a63d6',
+  parent: '#4d9bff',
+  child: '#ff7a45',
+  sibling: '#c084fc',
 }
 
 const md = new Marked({ breaks: true })

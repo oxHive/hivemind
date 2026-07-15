@@ -2,22 +2,22 @@
   <div class="flex items-center gap-5 px-4 py-2 shrink-0 font-mono"
     style="border-top:0.5px solid var(--hm-border-subtle); font-size:10px; color:var(--hm-text-tertiary)">
     <span class="flex items-center gap-1.5">
-      <span class="hm-hex" style="width:10px; height:11px; background:#1d9e75; opacity:0.72"></span>personal
+      <span class="hm-hex" style="width:10px; height:11px; background:#1d9e75"></span>personal
     </span>
     <span class="flex items-center gap-1.5">
-      <span class="hm-hex" style="width:10px; height:11px; background:#7f77dd; opacity:0.72"></span>workspace
+      <span class="hm-hex" style="width:10px; height:11px; background:#7f77dd"></span>workspace
     </span>
     <span class="flex items-center gap-1.5">
-      <span class="inline-block w-4 h-0 border-t border-dashed" style="border-color:#ba7517; opacity:0.7"></span>pending
+      <span class="inline-block w-5 h-0 border-t-2 border-dashed" style="border-color:#ba7517"></span>pending
     </span>
     <span class="flex items-center gap-1.5">
-      <span class="inline-block w-4 h-0 border-t" style="border-color:#5b8fd9; opacity:0.7"></span>parent
+      <span class="inline-block w-5 h-0 border-t-2" style="border-color:#4d9bff"></span>parent
     </span>
     <span class="flex items-center gap-1.5">
-      <span class="inline-block w-4 h-0 border-t" style="border-color:#c2634a; opacity:0.7"></span>child
+      <span class="inline-block w-5 h-0 border-t-2" style="border-color:#ff7a45"></span>child
     </span>
     <span class="flex items-center gap-1.5">
-      <span class="inline-block w-4 h-0 border-t" style="border-color:#9a63d6; opacity:0.7"></span>sibling
+      <span class="inline-block w-5 h-0 border-t-2" style="border-color:#c084fc"></span>sibling
     </span>
   </div>
 </template>
