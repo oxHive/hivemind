@@ -88,6 +88,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "V5__relationship_taxonomy",
         include_str!("../migrations/V5__relationship_taxonomy.sql"),
     ),
+    (
+        "V6__legacy_relationship_cleanup",
+        include_str!("../migrations/V6__legacy_relationship_cleanup.sql"),
+    ),
 ];
 
 pub async fn run_migrations(conn: &libsql::Connection) -> Result<()> {
@@ -330,5 +334,62 @@ mod tests {
         let row = rows.next().await.unwrap().unwrap();
         let rel: String = row.get(0).unwrap();
         assert_eq!(rel, "sibling");
+    }
+
+    #[tokio::test]
+    async fn migrations_reclassify_legacy_relationships_and_drop_dupes() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = libsql::Builder::new_local(dir.path().join("t.db"))
+            .build()
+            .await
+            .unwrap();
+        let conn = db.connect().unwrap();
+        init_connection(&conn).await.unwrap();
+        run_migrations(&conn).await.unwrap();
+
+        conn.execute(
+            "INSERT INTO memories (id, title, content, created_at, updated_at) VALUES ('mem_x', 't', 'c', 0, 0), ('mem_y', 't', 'c', 0, 0)",
+            (),
+        )
+        .await
+        .unwrap();
+        // shares_tag + related_to between the same pair: both map to sibling,
+        // so one must convert and the other must be dropped as a duplicate.
+        // applies_to maps to parent.
+        conn.execute(
+            "INSERT INTO edges (id, source_id, target_id, relationship, status, created_at)
+             VALUES ('edge_1', 'mem_x', 'mem_y', 'shares_tag', 'active', 0),
+                    ('edge_2', 'mem_x', 'mem_y', 'related_to', 'active', 0),
+                    ('edge_3', 'mem_x', 'mem_y', 'applies_to', 'active', 0)",
+            (),
+        )
+        .await
+        .unwrap();
+
+        // Rows were inserted after run_migrations, so re-apply the V6 SQL the
+        // way a real upgrade would encounter pre-existing legacy rows.
+        conn.execute_batch(include_str!(
+            "../migrations/V6__legacy_relationship_cleanup.sql"
+        ))
+        .await
+        .unwrap();
+
+        let mut rows = conn
+            .query(
+                "SELECT relationship, COUNT(*) FROM edges GROUP BY relationship ORDER BY relationship",
+                (),
+            )
+            .await
+            .unwrap();
+        let mut got = Vec::new();
+        while let Some(row) = rows.next().await.unwrap() {
+            let rel: String = row.get(0).unwrap();
+            let n: i64 = row.get(1).unwrap();
+            got.push((rel, n));
+        }
+        assert_eq!(
+            got,
+            vec![("parent".to_string(), 1), ("sibling".to_string(), 1)]
+        );
     }
 }
