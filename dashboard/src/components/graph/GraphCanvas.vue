@@ -264,9 +264,9 @@ function drawClusterBlob(ctx, members, hue) {
       const nx = -dy / len, ny = dx / len
       ctx.moveTo(ax + nx * r, ay + ny * r)
       ctx.lineTo(bx + nx * r, by + ny * r)
-      ctx.arc(bx, by, r, Math.atan2(ny, nx), Math.atan2(-ny, -nx))
+      ctx.arc(bx, by, r, Math.atan2(ny, nx), Math.atan2(-ny, -nx), true)
       ctx.lineTo(ax - nx * r, ay - ny * r)
-      ctx.arc(ax, ay, r, Math.atan2(-ny, -nx), Math.atan2(ny, nx))
+      ctx.arc(ax, ay, r, Math.atan2(-ny, -nx), Math.atan2(ny, nx), true)
     }
     ctx.closePath()
   } else {
