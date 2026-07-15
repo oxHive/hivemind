@@ -625,6 +625,23 @@ impl SqliteStore {
         target_id: &str,
         relationship: &str,
     ) -> Result<crate::model::EdgeCreate> {
+        self.create_edge_with_status(source_id, target_id, relationship, "active", None)
+            .await
+    }
+
+    /// Like `create_edge`, but lets the caller set `status`/`link_text`
+    /// directly instead of always defaulting to a freshly-accepted edge —
+    /// used by import so a restored backup preserves pending/rejected edges
+    /// and mention anchor text instead of silently promoting everything to
+    /// 'active' and dropping link_text.
+    pub async fn create_edge_with_status(
+        &self,
+        source_id: &str,
+        target_id: &str,
+        relationship: &str,
+        status: &str,
+        link_text: Option<&str>,
+    ) -> Result<crate::model::EdgeCreate> {
         use crate::model::EdgeCreate;
         if !VALID_RELATIONSHIPS.contains(&relationship) || source_id == target_id {
             return Ok(EdgeCreate::InvalidRelationship);
@@ -659,14 +676,16 @@ impl SqliteStore {
         let id = format!("edge_{}", uuid::Uuid::new_v4().simple());
         self.conn
             .execute(
-                "INSERT INTO edges (id, source_id, target_id, relationship, status, created_at)
-                 VALUES (?1, ?2, ?3, ?4, 'active', ?5)",
+                "INSERT INTO edges (id, source_id, target_id, relationship, status, created_at, link_text)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![
                     id.as_str(),
                     source_id,
                     target_id,
                     relationship,
-                    chrono_now()
+                    status,
+                    chrono_now(),
+                    link_text
                 ],
             )
             .await?;

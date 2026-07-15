@@ -332,6 +332,14 @@ struct ImportEdge {
     source_id: String,
     target_id: String,
     relationship: String,
+    #[serde(default = "default_edge_status")]
+    status: String,
+    #[serde(default)]
+    link_text: Option<String>,
+}
+
+fn default_edge_status() -> String {
+    "active".into()
 }
 
 async fn import(
@@ -355,9 +363,18 @@ async fn import(
     }
     let mut edge_count = 0usize;
     for e in &b.edges {
+        if !["active", "pending", "rejected"].contains(&e.status.as_str()) {
+            continue;
+        }
         if matches!(
             store
-                .create_edge(&e.source_id, &e.target_id, &e.relationship)
+                .create_edge_with_status(
+                    &e.source_id,
+                    &e.target_id,
+                    &e.relationship,
+                    &e.status,
+                    e.link_text.as_deref(),
+                )
                 .await?,
             crate::model::EdgeCreate::Created(_)
         ) {
@@ -1049,6 +1066,54 @@ mod tests {
         assert_eq!(res["imported_memories"], 1);
         let (_, list) = req(app2, "GET", "/api/v1/memories", None).await;
         assert_eq!(list["memories"][0]["title"], "m1");
+    }
+
+    #[tokio::test]
+    async fn export_import_roundtrip_preserves_edge_status_and_link_text() {
+        let (app, store, _dir) = test_router_with_store().await;
+        let tags: Vec<String> = vec![];
+        store
+            .store(&crate::store::NewMemoryRow {
+                id: "mem_a",
+                title: "A",
+                content: "a",
+                tags: &tags,
+                token_count: None,
+                layer: "workspace",
+                memory_type: "project",
+            })
+            .await
+            .unwrap();
+        store
+            .store(&crate::store::NewMemoryRow {
+                id: "mem_b",
+                title: "B",
+                content: "b",
+                tags: &tags,
+                token_count: None,
+                layer: "workspace",
+                memory_type: "project",
+            })
+            .await
+            .unwrap();
+        store
+            .create_edge_with_status("mem_a", "mem_b", "sibling", "pending", Some("the phrase"))
+            .await
+            .unwrap();
+
+        let (st, dump) = req(app, "GET", "/api/v1/export", None).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(dump["edges"][0]["status"], "pending");
+        assert_eq!(dump["edges"][0]["link_text"], "the phrase");
+
+        let (app2, _dir2) = test_router().await;
+        let (st, res) = req(app2.clone(), "POST", "/api/v1/import", Some(dump)).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(res["imported_edges"], 1);
+
+        let (_, edges) = req(app2, "GET", "/api/v1/edges", None).await;
+        assert_eq!(edges["edges"][0]["status"], "pending");
+        assert_eq!(edges["edges"][0]["link_text"], "the phrase");
     }
 
     #[tokio::test]
