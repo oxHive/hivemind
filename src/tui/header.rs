@@ -13,7 +13,11 @@ const DIM: Color = Color::Rgb(0x8a, 0x8a, 0x9a);
 const CYAN: Color = Color::Rgb(0x67, 0xe8, 0xf9);
 
 fn dim(no_color: bool) -> Style {
-    if no_color { Style::default() } else { Style::default().fg(DIM) }
+    if no_color {
+        Style::default()
+    } else {
+        Style::default().fg(DIM)
+    }
 }
 
 /// Pure render function: same inputs always produce the same cells. Shared
@@ -45,7 +49,11 @@ pub fn render_header(data: &StatusData, no_color: bool, area: Rect, buf: &mut Bu
 
     let project_line = Line::from(vec![
         Span::styled("Project  ", dim(no_color)),
-        Span::raw(data.project_label.clone().unwrap_or_else(|| "(none)".to_string())),
+        Span::raw(
+            data.project_label
+                .clone()
+                .unwrap_or_else(|| "(none)".to_string()),
+        ),
     ]);
     Paragraph::new(project_line).render(rows[0], buf);
 

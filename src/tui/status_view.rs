@@ -99,8 +99,12 @@ async fn poll_key_event() -> Option<event::KeyEvent> {
 
 fn draw(data: &StatusData, no_color: bool, frame: &mut ratatui::Frame) {
     let area = frame.area();
-    let layout = Layout::vertical([Constraint::Length(6), Constraint::Min(1), Constraint::Length(1)])
-        .split(area);
+    let layout = Layout::vertical([
+        Constraint::Length(6),
+        Constraint::Min(1),
+        Constraint::Length(1),
+    ])
+    .split(area);
 
     render_header(data, no_color, layout[0], frame.buffer_mut());
 
@@ -112,7 +116,10 @@ fn draw(data: &StatusData, no_color: bool, frame: &mut ratatui::Frame) {
         Line::from(format!(
             "Server     {}",
             if data.server_up {
-                format!("running at http://{}:{}", data.server_host, data.server_port)
+                format!(
+                    "running at http://{}:{}",
+                    data.server_host, data.server_port
+                )
             } else {
                 "not running".to_string()
             }
@@ -137,11 +144,17 @@ fn draw(data: &StatusData, no_color: bool, frame: &mut ratatui::Frame) {
     ];
     if data.project.is_none() {
         lines.push(Line::from(""));
-        lines.push(Line::from("No .hivemind.toml found in this directory tree."));
+        lines.push(Line::from(
+            "No .hivemind.toml found in this directory tree.",
+        ));
     }
     frame.render_widget(Paragraph::new(lines), inner);
 
-    let footer_style = if no_color { Style::default() } else { Style::default().fg(DIM) };
+    let footer_style = if no_color {
+        Style::default()
+    } else {
+        Style::default().fg(DIM)
+    };
     frame.render_widget(
         Paragraph::new(Line::from("q quit   r refresh").style(footer_style)),
         layout[2],
