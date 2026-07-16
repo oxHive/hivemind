@@ -64,6 +64,7 @@ async fn run_server() -> Result<()> {
                 api_url: "http://127.0.0.1:3456".into(),
                 cors_origin: "http://127.0.0.1:3457".into(),
                 sync: config::SyncSettings::default(),
+                agent: config::AgentSettings::default(),
             }
         });
     let (store, database) = open_store(&settings.sync).await?;

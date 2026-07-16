@@ -113,6 +113,12 @@ struct RawSync {
     sync_on_startup: Option<bool>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct RawAgent {
+    command: Option<String>,
+    args: Option<Vec<String>>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyncSettings {
     pub enabled: bool,
@@ -136,6 +142,18 @@ impl Default for SyncSettings {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentSettings {
+    pub command: String,
+    pub args: Vec<String>,
+}
+
+impl Default for AgentSettings {
+    fn default() -> Self {
+        AgentSettings { command: "claude".into(), args: Vec::new() }
+    }
+}
+
 #[derive(Debug, Default, Deserialize)]
 struct RawGlobal {
     #[serde(default)]
@@ -146,6 +164,8 @@ struct RawGlobal {
     dashboard: RawDashboard,
     #[serde(default)]
     sync: RawSync,
+    #[serde(default)]
+    agent: RawAgent,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -269,6 +289,7 @@ pub struct ServerSettings {
     /// via a custom hostname (e.g. `http://pi.local:3457`).
     pub cors_origin: String,
     pub sync: SyncSettings,
+    pub agent: AgentSettings,
 }
 
 pub fn load_server_settings(global_path: &std::path::Path) -> anyhow::Result<ServerSettings> {
@@ -303,6 +324,10 @@ pub fn load_server_settings(global_path: &std::path::Path) -> anyhow::Result<Ser
         sync_on_store: raw.sync.sync_on_store.unwrap_or(true),
         sync_on_startup: raw.sync.sync_on_startup.unwrap_or(true),
     };
+    let agent = AgentSettings {
+        command: raw.agent.command.unwrap_or_else(|| "claude".into()),
+        args: raw.agent.args.unwrap_or_default(),
+    };
     Ok(ServerSettings {
         host,
         port,
@@ -310,6 +335,7 @@ pub fn load_server_settings(global_path: &std::path::Path) -> anyhow::Result<Ser
         api_url,
         cors_origin,
         sync,
+        agent,
     })
 }
 
@@ -533,5 +559,26 @@ mod tests {
         fs::write(&global_path, "[defaults]\nmax_inject_tokens=4000\n").unwrap();
         let cfg = load_config_with_global(tmp.path(), &global_path).unwrap();
         assert_eq!(cfg.max_tokens, 4000);
+    }
+
+    #[test]
+    fn agent_settings_default_to_claude() {
+        let tmp = tempfile::tempdir().unwrap();
+        let s = load_server_settings(&tmp.path().join("no-global.toml")).unwrap();
+        assert_eq!(s.agent.command, "claude");
+        assert!(s.agent.args.is_empty());
+    }
+
+    #[test]
+    fn agent_settings_read_from_global_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "config.toml",
+            "[agent]\ncommand=\"/usr/local/bin/claude\"\nargs=[\"--model\",\"opus\"]\n",
+        );
+        let s = load_server_settings(&tmp.path().join("config.toml")).unwrap();
+        assert_eq!(s.agent.command, "/usr/local/bin/claude");
+        assert_eq!(s.agent.args, vec!["--model", "opus"]);
     }
 }
