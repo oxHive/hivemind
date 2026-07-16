@@ -143,6 +143,7 @@ pub async fn run_up(
     store: Arc<SqliteStore>,
     settings: &ServerSettings,
     headless: bool,
+    plain: bool,
     notify_on_store: Option<Arc<tokio::sync::Notify>>,
 ) -> Result<()> {
     let (events_tx, _) = tokio::sync::broadcast::channel::<serde_json::Value>(16);
@@ -161,9 +162,9 @@ pub async fn run_up(
         settings.sync.clone(),
         notify_on_store,
         &settings.cors_origin,
-        events_tx,
+        events_tx.clone(),
         settings.agent.clone(),
-        mcp_url,
+        mcp_url.clone(),
     );
 
     if !matches!(settings.host.as_str(), "127.0.0.1" | "localhost" | "::1") {
@@ -189,37 +190,60 @@ pub async fn run_up(
     if settings.sync.enabled {
         tracing::info!("Sync:          enabled → {}", settings.sync.remote_url);
     }
-    if headless {
-        axum::serve(listener, app).await?;
-        return Ok(());
-    }
-    if !dashboard_is_bundled() {
-        tracing::warn!(
-            "dashboard assets are not bundled in this build (source install). \
-             The dashboard page will show setup instructions. \
-             Use a prebuilt release binary, or run `bun install && bun run build` in dashboard/ and rebuild."
+
+    let mut dashboard_url = None;
+    let api_handle = tokio::spawn(async move { axum::serve(listener, app).await });
+
+    let dash_handle = if headless {
+        None
+    } else {
+        if !dashboard_is_bundled() {
+            tracing::warn!(
+                "dashboard assets are not bundled in this build (source install). \
+                 The dashboard page will show setup instructions. \
+                 Use a prebuilt release binary, or run `bun install && bun run build` in dashboard/ and rebuild."
+            );
+        }
+        let dash = dashboard_router(&settings.api_url);
+        let dash_listener =
+            tokio::net::TcpListener::bind((settings.host.as_str(), settings.dashboard_port))
+                .await?;
+        tracing::info!(
+            "Dashboard:     http://{}:{}",
+            settings.host,
+            settings.dashboard_port
         );
+        dashboard_url = Some(format!(
+            "http://{}:{}",
+            settings.host, settings.dashboard_port
+        ));
+        Some(tokio::spawn(async move {
+            axum::serve(dash_listener, dash).await
+        }))
+    };
+
+    let run_tui = !headless && crate::tui::is_interactive(plain);
+    if run_tui {
+        let data = crate::cli::build_status_data(
+            &std::env::current_dir()?,
+            &crate::config::global_config_path(),
+            &store,
+            &crate::db::resolve_db_path(),
+            &[],
+            settings,
+            true,
+        )
+        .await?;
+        crate::tui::up_view::run(data, dashboard_url, mcp_url, events_tx).await?;
+        // `q` returns here: terminal is already restored by up_view's TerminalGuard.
+        // Fall through to logging mode so the server keeps running under Ctrl+C,
+        // matching the spec's "q exits the view only" behavior.
     }
-    let dash = dashboard_router(&settings.api_url);
-    let dash_listener =
-        tokio::net::TcpListener::bind((settings.host.as_str(), settings.dashboard_port)).await?;
-    tracing::info!(
-        "Dashboard:     http://{}:{}",
-        settings.host,
-        settings.dashboard_port
-    );
-    tokio::try_join!(
-        async {
-            axum::serve(listener, app)
-                .await
-                .map_err(anyhow::Error::from)
-        },
-        async {
-            axum::serve(dash_listener, dash)
-                .await
-                .map_err(anyhow::Error::from)
-        },
-    )?;
+
+    api_handle.await??;
+    if let Some(h) = dash_handle {
+        h.await??;
+    }
     Ok(())
 }
 

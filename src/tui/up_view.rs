@@ -1,0 +1,154 @@
+use crate::cli::StatusData;
+use crate::tui::{TerminalGuard, header::render_header};
+use anyhow::Result;
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use ratatui::{
+    layout::{Constraint, Layout},
+    style::{Color, Style},
+    text::Line,
+    widgets::{Block, Borders, Paragraph},
+};
+use std::collections::VecDeque;
+use std::time::Duration;
+use tokio::sync::broadcast;
+
+const MAX_FEED_LINES: usize = 200;
+const DIM: Color = Color::Rgb(0x8a, 0x8a, 0x9a);
+const CYAN: Color = Color::Rgb(0x67, 0xe8, 0xf9);
+
+/// Runs the interactive `hivemind up` view: header + a live activity feed fed
+/// by the existing SSE broadcast channel. Returns on `q` (server keeps
+/// running) or exits the process directly on Ctrl+C, since raw mode swallows
+/// the OS SIGINT that would normally stop the process.
+pub async fn run(
+    mut data: StatusData,
+    dashboard_url: Option<String>,
+    mcp_url: String,
+    events: broadcast::Sender<serde_json::Value>,
+) -> Result<()> {
+    let guard = TerminalGuard::enter()?;
+    let mut terminal = guard.terminal()?;
+    let mut rx = events.subscribe();
+    let mut feed: VecDeque<String> = VecDeque::with_capacity(MAX_FEED_LINES);
+    let no_color = crate::tui::no_color();
+
+    loop {
+        terminal.draw(|frame| draw(&data, no_color, &dashboard_url, &mcp_url, &feed, frame))?;
+
+        tokio::select! {
+            event = rx.recv() => {
+                if let Ok(value) = event {
+                    if value.get("type").and_then(|t| t.as_str()) == Some("changed") {
+                        data.memory_count += 1;
+                    }
+                    let ts = chrono_now_hms();
+                    let kind = value
+                        .get("type")
+                        .and_then(|t| t.as_str())
+                        .unwrap_or("event");
+                    feed.push_front(format!("{ts}  {kind}"));
+                    feed.truncate(MAX_FEED_LINES);
+                }
+            }
+            key = poll_key_event() => {
+                if let Some(key) = key {
+                    match key.code {
+                        KeyCode::Char('q') => break,
+                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            drop(guard);
+                            std::process::exit(0);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Polls for a key-press event on a blocking thread (crossterm's `poll`/`read`
+/// are synchronous) without blocking the tokio runtime. Returns `None` on a
+/// 100ms timeout with no event, or a non-press event (e.g. key release).
+async fn poll_key_event() -> Option<event::KeyEvent> {
+    tokio::task::spawn_blocking(|| {
+        if event::poll(Duration::from_millis(100)).unwrap_or(false) {
+            if let Ok(Event::Key(key)) = event::read() {
+                if key.kind == KeyEventKind::Press {
+                    return Some(key);
+                }
+            }
+        }
+        None
+    })
+    .await
+    .unwrap_or(None)
+}
+
+fn chrono_now_hms() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = now.as_secs() % 86400;
+    format!(
+        "{:02}:{:02}:{:02}",
+        secs / 3600,
+        (secs % 3600) / 60,
+        secs % 60
+    )
+}
+
+fn draw(
+    data: &StatusData,
+    no_color: bool,
+    dashboard_url: &Option<String>,
+    mcp_url: &str,
+    feed: &VecDeque<String>,
+    frame: &mut ratatui::Frame,
+) {
+    let area = frame.area();
+    let layout = Layout::vertical([
+        Constraint::Length(6),
+        Constraint::Min(1),
+        Constraint::Length(1),
+    ])
+    .split(area);
+
+    render_header(data, no_color, layout[0], frame.buffer_mut());
+
+    let body = Block::default().borders(Borders::ALL).title(" Activity ");
+    let inner = body.inner(layout[1]);
+    frame.render_widget(body, layout[1]);
+
+    let mut lines = vec![
+        Line::from(format!(
+            "Server     running at http://{}:{}",
+            data.server_host, data.server_port
+        )),
+        Line::from(format!("MCP        {mcp_url}")),
+    ];
+    if let Some(url) = dashboard_url {
+        lines.push(Line::from(format!("Dashboard  {url}")));
+    }
+    lines.push(Line::from(""));
+    let feed_style = if no_color {
+        Style::default()
+    } else {
+        Style::default().fg(CYAN)
+    };
+    for entry in feed.iter().take(20) {
+        lines.push(Line::from(entry.as_str()).style(feed_style));
+    }
+    frame.render_widget(Paragraph::new(lines), inner);
+
+    let footer_style = if no_color {
+        Style::default()
+    } else {
+        Style::default().fg(DIM)
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from("q quit   ctrl+c stop server").style(footer_style)),
+        layout[2],
+    );
+}

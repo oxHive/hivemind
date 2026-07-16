@@ -33,6 +33,9 @@ pub enum Command {
         /// Serve only MCP + REST API — no dashboard
         #[arg(long)]
         headless: bool,
+        /// Force plain log output even on a real terminal
+        #[arg(long)]
+        plain: bool,
     },
     /// Serve the dashboard only, attached to an already-running server
     Dashboard {
@@ -1422,6 +1425,18 @@ mod tests {
         match cli.command {
             Some(Command::Status { plain }) => assert!(plain),
             _ => panic!("expected Status command"),
+        }
+    }
+
+    #[test]
+    fn up_plain_flag_parses() {
+        let cli = Cli::try_parse_from(["hivemind", "up", "--plain"]).unwrap();
+        match cli.command {
+            Some(Command::Up { headless, plain }) => {
+                assert!(!headless);
+                assert!(plain);
+            }
+            _ => panic!("expected Up command"),
         }
     }
 
