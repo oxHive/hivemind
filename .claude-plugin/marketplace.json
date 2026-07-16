@@ -4,7 +4,7 @@
   "description": "Persistent memory for AI coding agents. Keeps context, preferences, and project knowledge alive across sessions.",
   "owner": {
     "name": "oxHive",
-    "email": "gatra@oxhive.com"
+    "email": "gatra@oxhive.dev"
   },
   "plugins": [
     {
