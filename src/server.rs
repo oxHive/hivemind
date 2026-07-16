@@ -136,6 +136,21 @@ pub struct MemoryStoreEdgeInput {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct MemoryUpdateEdgeInput {
+    /// Edge ID to update (edge_xxx)
+    pub id: String,
+    /// New relationship: "parent" | "child" | "sibling". Omit to keep current.
+    #[serde(default)]
+    pub relationship: Option<String>,
+    /// New rationale shown during review. Omit to keep current.
+    #[serde(default)]
+    pub reason: Option<String>,
+    /// New mention anchor text. Omit to keep current.
+    #[serde(default)]
+    pub link_text: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct MemoryGetEdgesInput {
     /// Memory ID (mem_xxx) to get connections for
     pub memory_id: String,
@@ -746,6 +761,34 @@ impl HiveMind {
             )),
             Err(e) => Err(ErrorData::internal_error(e.to_string(), None)),
         }
+    }
+
+    pub async fn do_memory_update_edge(
+        &self,
+        p: MemoryUpdateEdgeInput,
+    ) -> Result<CallToolResult, ErrorData> {
+        match self
+            .store
+            .update_edge(&p.id, p.relationship.as_deref(), p.reason.as_deref(), p.link_text.as_deref())
+            .await
+        {
+            Ok(true) => {
+                self.notify_change();
+                Ok(CallToolResult::structured(json!({ "updated": true, "id": p.id })))
+            }
+            Ok(false) => Ok(CallToolResult::structured(json!({ "updated": false, "id": p.id }))),
+            Err(e) => Err(ErrorData::invalid_params(e.to_string(), None)),
+        }
+    }
+
+    #[tool(
+        description = "Update an existing connection between memories: change its relationship, reason, or link text. Use when revising a suggested connection after user feedback. Does not change status; the user approves or rejects in the dashboard."
+    )]
+    async fn memory_update_edge(
+        &self,
+        Parameters(p): Parameters<MemoryUpdateEdgeInput>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.do_memory_update_edge(p).await
     }
 
     #[tool(
@@ -1954,5 +1997,66 @@ mod tests {
             .unwrap()["found"],
             false
         );
+    }
+
+    #[tokio::test]
+    async fn memory_update_edge_patches_pending_edge() {
+        let (hm, _dir) = test_hivemind().await;
+        let (a, b) = seed_two(&hm).await;
+        hm.do_memory_store_edge(MemoryStoreEdgeInput {
+            source_id: a, target_id: b, relationship: "sibling".into(),
+            status: Some("pending".into()), reason: Some("first take".into()),
+        })
+        .await
+        .unwrap();
+        let edge_id = hm.store.list_edges(None).await.unwrap()[0].id.clone();
+
+        hm.do_memory_update_edge(MemoryUpdateEdgeInput {
+            id: edge_id.clone(),
+            relationship: Some("parent".into()),
+            reason: Some("a is the general rule".into()),
+            link_text: None,
+        })
+        .await
+        .unwrap();
+
+        let e = hm.store.get_edge(&edge_id).await.unwrap().unwrap();
+        assert_eq!(e.relationship, "parent");
+        assert_eq!(e.reason.as_deref(), Some("a is the general rule"));
+        assert_eq!(e.status, "pending");
+    }
+
+    #[tokio::test]
+    async fn memory_update_edge_missing_id_reports_updated_false() {
+        let (hm, _dir) = test_hivemind().await;
+        let res = hm
+            .do_memory_update_edge(MemoryUpdateEdgeInput {
+                id: "edge_missing".into(), relationship: None,
+                reason: Some("x".into()), link_text: None,
+            })
+            .await
+            .unwrap();
+        let v = res.structured_content.unwrap();
+        assert_eq!(v["updated"], false);
+    }
+
+    #[tokio::test]
+    async fn memory_update_edge_invalid_relationship_errors() {
+        let (hm, _dir) = test_hivemind().await;
+        let (a, b) = seed_two(&hm).await;
+        hm.do_memory_store_edge(MemoryStoreEdgeInput {
+            source_id: a, target_id: b, relationship: "sibling".into(),
+            status: Some("pending".into()), reason: None,
+        })
+        .await
+        .unwrap();
+        let edge_id = hm.store.list_edges(None).await.unwrap()[0].id.clone();
+        let res = hm
+            .do_memory_update_edge(MemoryUpdateEdgeInput {
+                id: edge_id, relationship: Some("related_to".into()),
+                reason: None, link_text: None,
+            })
+            .await;
+        assert!(res.is_err());
     }
 }
