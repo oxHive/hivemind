@@ -114,4 +114,33 @@ mod tests {
         assert!(content.contains("oxhive-hivemind"));
         assert!(content.contains("128"));
     }
+
+    #[test]
+    fn header_no_color_skips_foreground_styling_but_keeps_text() {
+        let backend = TestBackend::new(80, 12);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let data = sample_data();
+
+        terminal
+            .draw(|frame| render_header(&data, true, frame.area(), frame.buffer_mut()))
+            .unwrap();
+
+        let buffer = terminal.backend().buffer().clone();
+        let content: String = buffer.content.iter().map(|c| c.symbol()).collect();
+
+        // Text content is unchanged regardless of no_color.
+        assert!(content.contains("HiveMind"));
+        assert!(content.contains("oxhive-hivemind"));
+        assert!(content.contains("128"));
+
+        // No cell in the rendered buffer carries a foreground color when no_color is set.
+        for cell in buffer.content.iter() {
+            assert_eq!(
+                cell.fg,
+                Color::Reset,
+                "cell {:?} should have no foreground color set when no_color=true",
+                cell.symbol()
+            );
+        }
+    }
 }
