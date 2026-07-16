@@ -35,6 +35,7 @@ pub struct EdgeEntry {
     pub status: String,
     pub created_at: i64,
     pub link_text: Option<String>,
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -526,7 +527,7 @@ impl SqliteStore {
         let mut rows = if let Some(mid) = memory_id {
             self.conn
                 .query(
-                    "SELECT id, source_id, target_id, relationship, status, created_at, link_text
+                    "SELECT id, source_id, target_id, relationship, status, created_at, link_text, reason
                      FROM edges WHERE source_id = ?1 OR target_id = ?1 ORDER BY created_at DESC",
                     params![mid],
                 )
@@ -534,7 +535,7 @@ impl SqliteStore {
         } else {
             self.conn
                 .query(
-                    "SELECT id, source_id, target_id, relationship, status, created_at, link_text
+                    "SELECT id, source_id, target_id, relationship, status, created_at, link_text, reason
                      FROM edges ORDER BY created_at DESC",
                     (),
                 )
@@ -550,6 +551,7 @@ impl SqliteStore {
                 status: row.get(4)?,
                 created_at: row.get(5)?,
                 link_text: row.get(6)?,
+                reason: row.get(7)?,
             });
         }
         Ok(results)
@@ -625,7 +627,7 @@ impl SqliteStore {
         target_id: &str,
         relationship: &str,
     ) -> Result<crate::model::EdgeCreate> {
-        self.create_edge_with_status(source_id, target_id, relationship, "active", None)
+        self.create_edge_with_status(source_id, target_id, relationship, "active", None, None)
             .await
     }
 
@@ -641,6 +643,7 @@ impl SqliteStore {
         relationship: &str,
         status: &str,
         link_text: Option<&str>,
+        reason: Option<&str>,
     ) -> Result<crate::model::EdgeCreate> {
         use crate::model::EdgeCreate;
         if !VALID_RELATIONSHIPS.contains(&relationship) || source_id == target_id {
@@ -676,8 +679,8 @@ impl SqliteStore {
         let id = format!("edge_{}", uuid::Uuid::new_v4().simple());
         self.conn
             .execute(
-                "INSERT INTO edges (id, source_id, target_id, relationship, status, created_at, link_text)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT INTO edges (id, source_id, target_id, relationship, status, created_at, link_text, reason)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 params![
                     id.as_str(),
                     source_id,
@@ -685,7 +688,8 @@ impl SqliteStore {
                     relationship,
                     status,
                     chrono_now(),
-                    link_text
+                    link_text,
+                    reason
                 ],
             )
             .await?;
@@ -1303,6 +1307,21 @@ mod tests {
         let edges = s.list_edges(None).await.unwrap();
         let updated = edges.iter().find(|e| e.id == edge_id).unwrap();
         assert_eq!(updated.status, "inactive");
+    }
+
+    #[tokio::test]
+    async fn create_edge_with_reason_roundtrips() {
+        let (s, _dir) = make_store().await;
+        s.store(&test_row("mem_a", "A", "a", &[])).await.unwrap();
+        s.store(&test_row("mem_b", "B", "b", &[])).await.unwrap();
+        let created = s
+            .create_edge_with_status("mem_a", "mem_b", "sibling", "pending", None, Some("both cover auth"))
+            .await
+            .unwrap();
+        assert!(matches!(created, crate::model::EdgeCreate::Created(_)));
+        let edges = s.list_edges(None).await.unwrap();
+        assert_eq!(edges[0].reason.as_deref(), Some("both cover auth"));
+        assert_eq!(edges[0].status, "pending");
     }
 
     #[tokio::test]
