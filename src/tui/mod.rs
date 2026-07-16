@@ -9,6 +9,8 @@ use std::io::IsTerminal as _;
 use std::io::{Stdout, stdout};
 use std::sync::Once;
 
+pub mod header;
+
 pub type Term = Terminal<CrosstermBackend<Stdout>>;
 
 /// True when stdout is a real terminal and the caller did not pass `--plain`.
