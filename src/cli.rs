@@ -1306,7 +1306,12 @@ pub fn format_status_text(data: &StatusData) -> String {
         )
         .unwrap();
     }
-    writeln!(out, "Storage:    {} ({} memories)", data.db_path, data.memory_count).unwrap();
+    writeln!(
+        out,
+        "Storage:    {} ({} memories)",
+        data.db_path, data.memory_count
+    )
+    .unwrap();
     if data.sync_enabled {
         writeln!(out, "Sync:       enabled \u{2192} {}", data.sync_remote_url).unwrap();
     } else {
@@ -1871,7 +1876,10 @@ mod tests {
         assert_eq!(data.memory_count, 1);
         assert_eq!(data.project.as_ref().unwrap().project_name, "test-proj");
         assert_eq!(data.project.as_ref().unwrap().loaded.len(), 1);
-        assert_eq!(data.project.as_ref().unwrap().loaded[0].title, "golang preferences");
+        assert_eq!(
+            data.project.as_ref().unwrap().loaded[0].title,
+            "golang preferences"
+        );
 
         // Pin down the actual rendered format so a regression in
         // format_status_text is caught, not just disagreement between
