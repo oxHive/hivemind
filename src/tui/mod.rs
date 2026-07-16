@@ -50,7 +50,10 @@ impl TerminalGuard {
     pub fn enter() -> Result<Self> {
         install_panic_hook();
         enable_raw_mode()?;
-        execute!(stdout(), EnterAlternateScreen, EnableMouseCapture)?;
+        if let Err(e) = execute!(stdout(), EnterAlternateScreen, EnableMouseCapture) {
+            let _ = disable_raw_mode();
+            return Err(e.into());
+        }
         Ok(TerminalGuard)
     }
 
