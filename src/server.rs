@@ -126,6 +126,13 @@ pub struct MemoryStoreEdgeInput {
     /// falls under) | "child" (target is a specific instance of this) |
     /// "sibling" (a peer, no hierarchy implied)
     pub relationship: String,
+    /// Optional lifecycle status: "active" (default, confirmed) or "pending"
+    /// (a suggestion awaiting user review in the dashboard).
+    #[serde(default)]
+    pub status: Option<String>,
+    /// Short rationale for the connection, shown to the user during review.
+    #[serde(default)]
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -530,76 +537,9 @@ impl HiveMind {
     }
 
     async fn do_suggest_connections_prompt(&self) -> Result<Vec<PromptMessage>, ErrorData> {
-        let memories = self
-            .store
-            .list_memories(100, 0)
+        let body = build_suggest_prompt(&self.store)
             .await
             .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
-        let edges = self
-            .store
-            .list_edges(None)
-            .await
-            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
-
-        if memories.is_empty() {
-            return Ok(vec![PromptMessage::new_text(
-                Role::User,
-                "No memories stored yet. Add some memories first with memory_store.".to_string(),
-            )]);
-        }
-
-        let mem_lines: Vec<String> = memories
-            .iter()
-            .map(|m| {
-                let tags = if m.tags.is_empty() {
-                    String::new()
-                } else {
-                    format!(" [{}]", m.tags.join(", "))
-                };
-                let snippet: String = m.content.chars().take(80).collect();
-                let ellipsis = if m.content.len() > 80 { "…" } else { "" };
-                format!("{} | {} | {}{}", m.id, m.title, snippet, ellipsis) + &tags
-            })
-            .collect();
-
-        let edge_lines: Vec<String> = edges
-            .iter()
-            .map(|e| {
-                format!(
-                    "{} --[{}]--> {} ({})",
-                    e.source_id, e.relationship, e.target_id, e.status
-                )
-            })
-            .collect();
-
-        let edge_section = if edge_lines.is_empty() {
-            "  (none yet)".to_string()
-        } else {
-            edge_lines.join("\n")
-        };
-
-        let body = format!(
-            "HiveMind — Suggest Connections\n\
-             ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\
-             You have {} memories and {} existing connections.\n\n\
-             MEMORIES:\n\
-             {}\n\n\
-             EXISTING CONNECTIONS:\n\
-             {}\n\n\
-             ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\
-             Analyze the memories above and identify meaningful connections not yet captured.\n\
-             For each suggested connection, call the memory_store_edge tool with:\n\
-               source_id, target_id, and relationship.\n\
-             Relationship types:\n\
-             \x20\x20parent  — target is a broader principle/context source falls under\n\
-             \x20\x20child   — target is a specific instance of source\n\
-             \x20\x20sibling — a peer, no hierarchy\n\
-             Suggest 3–7 connections. Focus on cross-domain insights.",
-            memories.len(),
-            edges.len(),
-            mem_lines.join("\n"),
-            edge_section,
-        );
         Ok(vec![PromptMessage::new_text(Role::User, body)])
     }
 
@@ -755,10 +695,31 @@ impl HiveMind {
         &self,
         Parameters(p): Parameters<MemoryStoreEdgeInput>,
     ) -> Result<CallToolResult, ErrorData> {
+        self.do_memory_store_edge(p).await
+    }
+
+    pub async fn do_memory_store_edge(
+        &self,
+        p: MemoryStoreEdgeInput,
+    ) -> Result<CallToolResult, ErrorData> {
         use crate::model::EdgeCreate;
+        let status = p.status.as_deref().unwrap_or("active");
+        if !["active", "pending"].contains(&status) {
+            return Err(ErrorData::invalid_params(
+                "status must be \"active\" or \"pending\"",
+                None,
+            ));
+        }
         match self
             .store
-            .create_edge(&p.source_id, &p.target_id, &p.relationship)
+            .create_edge_with_status(
+                &p.source_id,
+                &p.target_id,
+                &p.relationship,
+                status,
+                None,
+                p.reason.as_deref(),
+            )
             .await
         {
             Ok(EdgeCreate::Created(id)) => {
@@ -766,6 +727,7 @@ impl HiveMind {
                 Ok(CallToolResult::structured(json!({
                     "created": true, "id": id,
                     "source_id": p.source_id, "target_id": p.target_id, "relationship": p.relationship,
+                    "status": status,
                 })))
             }
             Ok(EdgeCreate::Duplicate) => Ok(CallToolResult::structured(json!({
@@ -877,6 +839,71 @@ impl HiveMind {
     }
 }
 
+pub(crate) async fn build_suggest_prompt(store: &SqliteStore) -> anyhow::Result<String> {
+    let memories = store.list_memories(100, 0).await?;
+    let edges = store.list_edges(None).await?;
+
+    if memories.is_empty() {
+        return Ok(
+            "No memories stored yet. Add some memories first with memory_store.".to_string(),
+        );
+    }
+
+    let mem_lines: Vec<String> = memories
+        .iter()
+        .map(|m| {
+            let tags = if m.tags.is_empty() {
+                String::new()
+            } else {
+                format!(" [{}]", m.tags.join(", "))
+            };
+            let snippet: String = m.content.chars().take(80).collect();
+            let ellipsis = if m.content.len() > 80 { "…" } else { "" };
+            format!("{} | {} | {}{}", m.id, m.title, snippet, ellipsis) + &tags
+        })
+        .collect();
+
+    let edge_lines: Vec<String> = edges
+        .iter()
+        .map(|e| {
+            format!(
+                "{} --[{}]--> {} ({})",
+                e.source_id, e.relationship, e.target_id, e.status
+            )
+        })
+        .collect();
+
+    let edge_section = if edge_lines.is_empty() {
+        "  (none yet)".to_string()
+    } else {
+        edge_lines.join("\n")
+    };
+
+    Ok(format!(
+        "HiveMind — Suggest Connections\n\
+         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\
+         You have {} memories and {} existing connections.\n\n\
+         MEMORIES:\n\
+         {}\n\n\
+         EXISTING CONNECTIONS:\n\
+         {}\n\n\
+         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\
+         Analyze the memories above and identify meaningful connections not yet captured.\n\
+         For each suggested connection, call the memory_store_edge tool with:\n\
+         \x20\x20source_id, target_id, relationship, status: \"pending\",\n\
+         \x20\x20and a one-sentence reason explaining the connection.\n\
+         Relationship types:\n\
+         \x20\x20parent  - target is a broader principle/context source falls under\n\
+         \x20\x20child   - target is a specific instance of source\n\
+         \x20\x20sibling - a peer, no hierarchy\n\
+         Suggest 3-7 connections. Focus on cross-domain insights.",
+        memories.len(),
+        edges.len(),
+        mem_lines.join("\n"),
+        edge_section,
+    ))
+}
+
 #[tool_handler]
 #[prompt_handler]
 impl rmcp::ServerHandler for HiveMind {
@@ -911,6 +938,69 @@ mod tests {
         let conn = database.connect().unwrap();
         db::run_migrations(&conn).await.unwrap();
         (HiveMind::new(SqliteStore::new(conn)), dir)
+    }
+
+    async fn seed_two(hm: &HiveMind) -> (String, String) {
+        for (t, c) in [("alpha", "a"), ("beta", "b")] {
+            hm.do_memory_store(MemoryStoreInput {
+                title: t.to_string(),
+                content: c.to_string(),
+                tags: vec![],
+                token_count: None,
+                layer: None,
+                memory_type: None,
+            })
+            .await
+            .unwrap();
+        }
+        let mems = hm.store.list_memories(10, 0).await.unwrap();
+        let a = mems.iter().find(|m| m.title == "alpha").unwrap().id.clone();
+        let b = mems.iter().find(|m| m.title == "beta").unwrap().id.clone();
+        (a, b)
+    }
+
+    #[tokio::test]
+    async fn memory_store_edge_accepts_pending_status_and_reason() {
+        let (hm, _dir) = test_hivemind().await;
+        let (a, b) = seed_two(&hm).await;
+        hm.do_memory_store_edge(MemoryStoreEdgeInput {
+            source_id: a,
+            target_id: b,
+            relationship: "sibling".into(),
+            status: Some("pending".into()),
+            reason: Some("both about testing".into()),
+        })
+        .await
+        .unwrap();
+        let edges = hm.store.list_edges(None).await.unwrap();
+        assert_eq!(edges[0].status, "pending");
+        assert_eq!(edges[0].reason.as_deref(), Some("both about testing"));
+    }
+
+    #[tokio::test]
+    async fn memory_store_edge_rejects_bogus_status() {
+        let (hm, _dir) = test_hivemind().await;
+        let (a, b) = seed_two(&hm).await;
+        let err = hm
+            .do_memory_store_edge(MemoryStoreEdgeInput {
+                source_id: a,
+                target_id: b,
+                relationship: "sibling".into(),
+                status: Some("rejected".into()),
+                reason: None,
+            })
+            .await;
+        assert!(err.is_err(), "storing directly as rejected makes no sense");
+    }
+
+    #[tokio::test]
+    async fn suggest_prompt_instructs_pending_status() {
+        let (hm, _dir) = test_hivemind().await;
+        let (_a, _b) = seed_two(&hm).await;
+        let msgs = hm.do_suggest_connections_prompt().await.unwrap();
+        let text = prompt_text(&msgs[0]);
+        assert!(text.contains("status: \"pending\""));
+        assert!(text.contains("reason"));
     }
 
     #[tokio::test]
