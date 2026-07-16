@@ -23,7 +23,11 @@ pub enum Command {
     /// Scaffold .hivemind.toml + CLAUDE.md integration for this project
     Init,
     /// Show config and preview what session start will inject
-    Status,
+    Status {
+        /// Force plain-text output even on a real terminal
+        #[arg(long)]
+        plain: bool,
+    },
     /// Start the HTTP server: MCP at /mcp, REST at /api/v1, plus the dashboard
     Up {
         /// Serve only MCP + REST API — no dashboard
@@ -959,10 +963,52 @@ pub fn warn_if_not_initialized() {
     }
 }
 
-pub fn cmd_status() -> Result<()> {
+pub fn cmd_status(plain: bool) -> Result<()> {
     let home = home_dir();
     let cwd = std::env::current_dir()?;
     let db_path = crate::db::resolve_db_path();
+
+    if crate::tui::is_interactive(plain) {
+        return tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?
+            .block_on(async {
+                let clients = detect_registered_clients(&home);
+                let settings =
+                    crate::config::load_server_settings(&crate::config::global_config_path())?;
+                let probe_host = match settings.host.as_str() {
+                    "0.0.0.0" | "::" => "127.0.0.1",
+                    h => h,
+                };
+                let server_up = format!("{probe_host}:{}", settings.port)
+                    .parse::<std::net::SocketAddr>()
+                    .ok()
+                    .map(|addr| {
+                        std::net::TcpStream::connect_timeout(
+                            &addr,
+                            std::time::Duration::from_millis(300),
+                        )
+                        .is_ok()
+                    })
+                    .unwrap_or(false);
+                let sync = crate::config::SyncSettings::default();
+                let database = crate::db::open_database(&sync, &db_path).await?;
+                let conn = database.connect()?;
+                crate::db::run_migrations(&conn).await?;
+                let store = crate::store::SqliteStore::new(conn);
+                crate::tui::status_view::run(
+                    &cwd,
+                    &crate::config::global_config_path(),
+                    &store,
+                    &db_path,
+                    &clients,
+                    &settings,
+                    server_up,
+                )
+                .await
+            });
+    }
+
     let (out, clients) = with_spinner("checking status...", || {
         let clients = detect_registered_clients(&home);
         let settings = crate::config::load_server_settings(&crate::config::global_config_path())?;
@@ -1364,6 +1410,15 @@ pub async fn render_status(
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn status_plain_flag_parses() {
+        let cli = Cli::try_parse_from(["hivemind", "status", "--plain"]).unwrap();
+        match cli.command {
+            Some(Command::Status { plain }) => assert!(plain),
+            _ => panic!("expected Status command"),
+        }
+    }
 
     /// Default server settings, built the same way `hivemind status` does when
     /// no global config exists.

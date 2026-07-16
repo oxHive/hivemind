@@ -10,6 +10,7 @@ use std::io::{Stdout, stdout};
 use std::sync::Once;
 
 pub mod header;
+pub mod status_view;
 
 pub type Term = Terminal<CrosstermBackend<Stdout>>;
 

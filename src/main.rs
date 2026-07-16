@@ -13,7 +13,7 @@ fn main() -> Result<()> {
     match cli.command {
         None => run_server(),
         Some(Command::Init) => cli::cmd_init(),
-        Some(Command::Status) => cli::cmd_status(),
+        Some(Command::Status { plain }) => cli::cmd_status(plain),
         Some(Command::Up { headless }) => run_up(headless),
         Some(Command::Dashboard { open }) => run_dashboard(open),
         Some(Command::Mcp { action }) => match action {
