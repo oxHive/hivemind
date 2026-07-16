@@ -7,6 +7,7 @@ import { useFeedbackStore } from './stores/feedback.js'
 import { useTagSettingsStore } from './stores/tagSettings.js'
 import { useThemeStore } from './stores/theme.js'
 import { useAnalyticsStore } from './stores/analytics.js'
+import { useSuggestStore } from './stores/suggest.js'
 import { BASE } from './api/client.js'
 import AppSidebar from './components/sidebar/AppSidebar.vue'
 import Toast from './components/shared/Toast.vue'
@@ -22,6 +23,7 @@ const graph = useGraphStore()
 const fb = useFeedbackStore()
 const tagSettings = useTagSettingsStore()
 const analytics = useAnalyticsStore()
+const suggest = useSuggestStore()
 useThemeStore() // applies data-theme to <html> as soon as the store is created
 
 const VIEWS = ['analytics', 'memories', 'graph', 'feedback', 'settings']
@@ -50,6 +52,7 @@ onMounted(async () => {
       fb.fetchFeedback(),
       tagSettings.fetchNamespaces(),
       analytics.fetchSessionLogs(),
+      suggest.hydrate(),
     ])
   }
 
@@ -63,6 +66,7 @@ onMounted(async () => {
     eventSource.onmessage = (e) => {
       let data
       try { data = JSON.parse(e.data) } catch { data = { type: 'changed' } }
+      if (data.type === 'suggest_session') suggest.handleEvent(data)
       if (data.type === 'changed' || data.type === 'suggest_session') {
         memories.refreshSilently()
         graph.fetchEdges()
