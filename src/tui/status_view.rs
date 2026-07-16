@@ -14,6 +14,7 @@ use std::time::Duration;
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 const DIM: Color = Color::Rgb(0x8a, 0x8a, 0x9a);
+const WARNING: Color = Color::Rgb(0xf5, 0xa5, 0x24);
 
 /// Runs the interactive `hivemind status` view: header + a key-value panel
 /// that auto-refreshes every 5s, with `r` for an immediate manual refresh.
@@ -45,17 +46,53 @@ pub async fn run(
     let mut ticker = tokio::time::interval(REFRESH_INTERVAL);
     ticker.tick().await; // first tick fires immediately; consume it, we already fetched above
     let no_color = crate::tui::no_color();
+    let mut last_error: Option<String> = None;
+
+    // Refreshes `data` in place. On success, clears `last_error`; on failure,
+    // leaves `data` untouched (stale but valid) and records the error so it
+    // can be shown inline. Never aborts the loop over a failed refresh.
+    async fn refresh(
+        cwd: &Path,
+        global_path: &Path,
+        store: &SqliteStore,
+        db_path: &str,
+        registered_clients: &[&str],
+        settings: &crate::config::ServerSettings,
+        server_up: bool,
+        data: &mut StatusData,
+        last_error: &mut Option<String>,
+    ) {
+        match build_status_data(
+            cwd,
+            global_path,
+            store,
+            db_path,
+            registered_clients,
+            settings,
+            server_up,
+        )
+        .await
+        {
+            Ok(new_data) => {
+                *data = new_data;
+                *last_error = None;
+            }
+            Err(e) => {
+                *last_error = Some(e.to_string());
+            }
+        }
+    }
 
     loop {
-        terminal.draw(|frame| draw(&data, no_color, frame))?;
+        terminal.draw(|frame| draw(&data, last_error.as_deref(), no_color, frame))?;
 
         tokio::select! {
             _ = ticker.tick() => {
-                data = build_status_data(
+                refresh(
                     cwd, global_path, store, db_path, registered_clients, settings, server_up,
+                    &mut data, &mut last_error,
                 )
-                .await
-                .unwrap_or(data);
+                .await;
             }
             key = poll_key_event() => {
                 if let Some(key) = key {
@@ -63,11 +100,11 @@ pub async fn run(
                         KeyCode::Char('q') => break,
                         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
                         KeyCode::Char('r') => {
-                            data = build_status_data(
+                            refresh(
                                 cwd, global_path, store, db_path, registered_clients, settings, server_up,
+                                &mut data, &mut last_error,
                             )
-                            .await
-                            .unwrap_or(data);
+                            .await;
                         }
                         _ => {}
                     }
@@ -97,10 +134,12 @@ async fn poll_key_event() -> Option<event::KeyEvent> {
     .unwrap_or(None)
 }
 
-fn draw(data: &StatusData, no_color: bool, frame: &mut ratatui::Frame) {
+fn draw(data: &StatusData, last_error: Option<&str>, no_color: bool, frame: &mut ratatui::Frame) {
     let area = frame.area();
+    let error_height = if last_error.is_some() { 1 } else { 0 };
     let layout = Layout::vertical([
         Constraint::Length(6),
+        Constraint::Length(error_height),
         Constraint::Min(1),
         Constraint::Length(1),
     ])
@@ -108,9 +147,21 @@ fn draw(data: &StatusData, no_color: bool, frame: &mut ratatui::Frame) {
 
     render_header(data, no_color, layout[0], frame.buffer_mut());
 
+    if let Some(msg) = last_error {
+        let error_style = if no_color {
+            Style::default()
+        } else {
+            Style::default().fg(WARNING)
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(format!("refresh failed: {msg}")).style(error_style)),
+            layout[1],
+        );
+    }
+
     let body = Block::default().borders(Borders::ALL).title(" Overview ");
-    let inner = body.inner(layout[1]);
-    frame.render_widget(body, layout[1]);
+    let inner = body.inner(layout[2]);
+    frame.render_widget(body, layout[2]);
 
     let mut lines = vec![
         Line::from(format!(
@@ -157,6 +208,6 @@ fn draw(data: &StatusData, no_color: bool, frame: &mut ratatui::Frame) {
     };
     frame.render_widget(
         Paragraph::new(Line::from("q quit   r refresh").style(footer_style)),
-        layout[2],
+        layout[3],
     );
 }
