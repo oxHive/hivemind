@@ -11,6 +11,7 @@ use std::sync::Once;
 
 pub mod header;
 pub mod status_view;
+pub mod up_view;
 
 pub type Term = Terminal<CrosstermBackend<Stdout>>;
 

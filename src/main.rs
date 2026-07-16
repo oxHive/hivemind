@@ -14,7 +14,7 @@ fn main() -> Result<()> {
         None => run_server(),
         Some(Command::Init) => cli::cmd_init(),
         Some(Command::Status { plain }) => cli::cmd_status(plain),
-        Some(Command::Up { headless }) => run_up(headless),
+        Some(Command::Up { headless, plain }) => run_up(headless, plain),
         Some(Command::Dashboard { open }) => run_dashboard(open),
         Some(Command::Mcp { action }) => match action {
             McpAction::Install { client } => cli::cmd_mcp_install(&client),
@@ -98,7 +98,7 @@ async fn run_server() -> Result<()> {
 }
 
 #[tokio::main]
-async fn run_up(headless: bool) -> Result<()> {
+async fn run_up(headless: bool, plain: bool) -> Result<()> {
     cli::warn_if_not_initialized();
     init_tracing();
     let settings = config::load_server_settings(&config::global_config_path())?;
@@ -123,7 +123,7 @@ async fn run_up(headless: bool) -> Result<()> {
         _db_guard = Some(database);
     }
 
-    http::run_up(store, &settings, headless, notify_on_store).await
+    http::run_up(store, &settings, headless, plain, notify_on_store).await
 }
 
 #[tokio::main]
