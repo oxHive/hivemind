@@ -60,9 +60,13 @@ onMounted(async () => {
     // calls) without a visible reload — the browser reconnects on its own
     // if the connection drops.
     eventSource = new EventSource(BASE + '/api/v1/events')
-    eventSource.onmessage = () => {
-      memories.refreshSilently()
-      graph.fetchEdges()
+    eventSource.onmessage = (e) => {
+      let data
+      try { data = JSON.parse(e.data) } catch { data = { type: 'changed' } }
+      if (data.type === 'changed' || data.type === 'suggest_session') {
+        memories.refreshSilently()
+        graph.fetchEdges()
+      }
     }
   }
 })
