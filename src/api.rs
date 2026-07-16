@@ -117,10 +117,7 @@ pub fn router(
         .route("/api/v1/session-logs", get(list_session_logs))
         .route("/api/v1/status", get(server_status))
         .route("/api/v1/events", get(sse_events))
-        .route(
-            "/api/v1/suggest-sessions",
-            post(start_suggest_session),
-        )
+        .route("/api/v1/suggest-sessions", post(start_suggest_session))
         .route(
             "/api/v1/suggest-sessions/current",
             get(suggest_session_status).delete(end_suggest_session),
@@ -728,9 +725,7 @@ async fn revise_suggest_session(
     }
 }
 
-async fn end_suggest_session(
-    Extension(mgr): Extension<Arc<SuggestSessionManager>>,
-) -> Json<Value> {
+async fn end_suggest_session(Extension(mgr): Extension<Arc<SuggestSessionManager>>) -> Json<Value> {
     mgr.end().await;
     Json(json!({ "ended": true }))
 }
@@ -1225,7 +1220,14 @@ mod tests {
             .await
             .unwrap();
         store
-            .create_edge_with_status("mem_a", "mem_b", "sibling", "pending", Some("the phrase"), None)
+            .create_edge_with_status(
+                "mem_a",
+                "mem_b",
+                "sibling",
+                "pending",
+                Some("the phrase"),
+                None,
+            )
             .await
             .unwrap();
 
@@ -1385,7 +1387,13 @@ mod tests {
         assert_eq!(st, StatusCode::OK);
         assert_eq!(status["active"], true);
 
-        let (st, ended) = req(app.clone(), "DELETE", "/api/v1/suggest-sessions/current", None).await;
+        let (st, ended) = req(
+            app.clone(),
+            "DELETE",
+            "/api/v1/suggest-sessions/current",
+            None,
+        )
+        .await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(ended["ended"], true);
     }

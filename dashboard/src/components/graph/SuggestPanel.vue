@@ -17,8 +17,6 @@ const rows = computed(() => graph.pendingEdges.map(e => ({
   targetTitle: memories.all.find(m => m.id === e.target_id)?.title ?? e.target_id,
 })))
 
-function titleCase(s) { return s.charAt(0).toUpperCase() + s.slice(1) }
-
 function rowState(edge) {
   if (suggest.revisingEdgeId === edge.id) return 'revising'
   if (suggest.queuedEdgeIds.includes(edge.id)) return 'queued'
