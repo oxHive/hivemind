@@ -1057,6 +1057,17 @@ impl SqliteStore {
         Ok(tags)
     }
 
+    /// SQLite bumps this counter when a DIFFERENT connection commits a write,
+    /// which is exactly the cross-process signal the dashboard poller needs.
+    pub async fn data_version(&self) -> Result<i64> {
+        let mut rows = self.conn.query("PRAGMA data_version", ()).await?;
+        let row = rows
+            .next()
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("PRAGMA data_version returned no row"))?;
+        Ok(row.get(0)?)
+    }
+
     fn row_to_entry(&self, row: &libsql::Row) -> Result<MemoryEntry> {
         Ok(MemoryEntry {
             id: row.get(0)?,

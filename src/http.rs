@@ -26,12 +26,11 @@ pub fn app_router(
     sync: SyncSettings,
     notify_on_store: Option<Arc<tokio::sync::Notify>>,
     dashboard_origin: &str,
+    events_tx: tokio::sync::broadcast::Sender<serde_json::Value>,
 ) -> Router {
     // Fires whenever a memory or edge is created/updated/deleted, either via
     // an MCP tool call (below) or the REST API (api::router) — the dashboard
     // subscribes to it over SSE to silently refresh in the background.
-    let (events_tx, _) = tokio::sync::broadcast::channel::<serde_json::Value>(16);
-
     let mcp = StreamableHttpService::new(
         {
             let store = store.clone();
@@ -109,17 +108,51 @@ fn dashboard_is_bundled() -> bool {
     DASHBOARD.get_dir("assets").is_some()
 }
 
+/// Bridges writes made by other processes (the stdio MCP server the Claude
+/// Code plugin spawns) into the dashboard SSE stream. In-process writes
+/// already emit directly; data_version only moves on foreign commits.
+pub fn spawn_change_poller(
+    store: Arc<SqliteStore>,
+    events: tokio::sync::broadcast::Sender<serde_json::Value>,
+    interval: std::time::Duration,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut last: Option<i64> = None;
+        loop {
+            tokio::time::sleep(interval).await;
+            match store.data_version().await {
+                Ok(v) => {
+                    if let Some(prev) = last
+                        && v != prev
+                    {
+                        let _ = events.send(serde_json::json!({ "type": "changed" }));
+                    }
+                    last = Some(v);
+                }
+                Err(e) => tracing::debug!("data_version poll failed: {e:#}"),
+            }
+        }
+    })
+}
+
 pub async fn run_up(
     store: Arc<SqliteStore>,
     settings: &ServerSettings,
     headless: bool,
     notify_on_store: Option<Arc<tokio::sync::Notify>>,
 ) -> Result<()> {
+    let (events_tx, _) = tokio::sync::broadcast::channel::<serde_json::Value>(16);
+    spawn_change_poller(
+        store.clone(),
+        events_tx.clone(),
+        std::time::Duration::from_secs(2),
+    );
     let app = app_router(
         store.clone(),
         settings.sync.clone(),
         notify_on_store,
         &settings.cors_origin,
+        events_tx,
     );
 
     if !matches!(settings.host.as_str(), "127.0.0.1" | "localhost" | "::1") {
@@ -240,11 +273,13 @@ mod tests {
     #[tokio::test]
     async fn app_router_serves_rest_api() {
         let (store, _dir) = test_store().await;
+        let (events_tx, _) = tokio::sync::broadcast::channel::<serde_json::Value>(16);
         let app = app_router(
             store,
             crate::config::SyncSettings::default(),
             None,
             "http://127.0.0.1:3457",
+            events_tx,
         );
         let resp = app
             .oneshot(
@@ -256,6 +291,41 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn poller_emits_changed_when_other_connection_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hm.db");
+        let db1 = libsql::Builder::new_local(&path).build().await.unwrap();
+        let conn1 = db1.connect().unwrap();
+        crate::db::run_migrations(&conn1).await.unwrap();
+        let store = Arc::new(crate::store::SqliteStore::new(conn1));
+
+        let (events, mut rx) = tokio::sync::broadcast::channel::<serde_json::Value>(16);
+        let _h = spawn_change_poller(store, events, std::time::Duration::from_millis(50));
+
+        // let the poller take its baseline reading first
+        tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+
+        // foreign write through a second connection
+        let db2 = libsql::Builder::new_local(&path).build().await.unwrap();
+        let conn2 = db2.connect().unwrap();
+        crate::db::init_connection(&conn2).await.unwrap();
+        conn2
+            .execute(
+                "INSERT INTO memories (id, title, content, created_at, updated_at, token_count, layer, memory_type)
+                 VALUES ('mem_x', 't', 'c', 1, 1, 1, 'workspace', 'project')",
+                (),
+            )
+            .await
+            .unwrap();
+
+        let evt = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("poller should emit within 2s")
+            .unwrap();
+        assert_eq!(evt["type"], "changed");
     }
 
     #[tokio::test]
