@@ -1125,6 +1125,219 @@ pub(crate) fn cmd_migrate_inner(
 }
 
 /// Build the `hivemind status` report. `global_path` is injectable for testing.
+pub struct LoadedEntrySummary {
+    pub title: String,
+    pub tokens: usize,
+    pub is_local: bool,
+}
+
+pub struct SkippedEntrySummary {
+    pub query: String,
+    pub reason: &'static str,
+}
+
+pub struct ProjectStatus {
+    pub project_name: String,
+    pub has_local_config: bool,
+    pub file_open_rule_count: usize,
+    pub mention_trigger_count: usize,
+    pub loaded: Vec<LoadedEntrySummary>,
+    pub skipped: Vec<SkippedEntrySummary>,
+    pub used_tokens: usize,
+    pub max_tokens: usize,
+    pub truncated: bool,
+}
+
+pub struct StatusData {
+    pub version: &'static str,
+    pub project_label: Option<String>,
+    pub server_up: bool,
+    pub server_host: String,
+    pub server_port: u16,
+    pub db_path: String,
+    pub memory_count: i64,
+    pub sync_enabled: bool,
+    pub sync_remote_url: String,
+    pub registered_clients: Vec<String>,
+    pub project: Option<ProjectStatus>,
+}
+
+pub async fn build_status_data(
+    cwd: &Path,
+    global_path: &Path,
+    store: &crate::store::SqliteStore,
+    db_path: &str,
+    registered_clients: &[&str],
+    settings: &crate::config::ServerSettings,
+    server_up: bool,
+) -> Result<StatusData> {
+    let version = env!("CARGO_PKG_VERSION");
+    let memory_count = store.count().await?;
+
+    let root = crate::config::discover_project_root(cwd);
+    let config = match &root {
+        Some(r) => Some(crate::config::load_config_with_global(r, global_path)?),
+        None => None,
+    };
+    let project_label = config.as_ref().map(|c| c.project_name.clone());
+
+    let probe_host = match settings.host.as_str() {
+        "0.0.0.0" | "::" => "127.0.0.1",
+        h => h,
+    }
+    .to_string();
+
+    let mut data = StatusData {
+        version,
+        project_label,
+        server_up,
+        server_host: probe_host,
+        server_port: settings.port,
+        db_path: db_path.to_string(),
+        memory_count,
+        sync_enabled: settings.sync.enabled,
+        sync_remote_url: settings.sync.remote_url.clone(),
+        registered_clients: registered_clients.iter().map(|s| s.to_string()).collect(),
+        project: None,
+    };
+
+    let (Some(root), Some(config)) = (root, config) else {
+        return Ok(data);
+    };
+
+    let result = crate::session::execute_session_start(&config, store).await?;
+
+    data.project = Some(ProjectStatus {
+        project_name: config.project_name.clone(),
+        has_local_config: root.join(".hivemind.local.toml").is_file(),
+        file_open_rule_count: config.file_open_rule_count,
+        mention_trigger_count: config.mention_trigger_count,
+        loaded: result
+            .loaded
+            .iter()
+            .map(|l| LoadedEntrySummary {
+                title: l.entry.title.clone(),
+                tokens: l.tokens,
+                is_local: matches!(l.source, crate::config::RecallSource::Local),
+            })
+            .collect(),
+        skipped: result
+            .skipped
+            .iter()
+            .map(|s| SkippedEntrySummary {
+                query: s.query.clone(),
+                reason: s.reason.as_str(),
+            })
+            .collect(),
+        used_tokens: result.used_tokens,
+        max_tokens: result.max_tokens,
+        truncated: result.truncated(),
+    });
+
+    Ok(data)
+}
+
+pub fn format_status_text(data: &StatusData) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+
+    match &data.project_label {
+        Some(label) => writeln!(out, "HiveMind v{} — {label}", data.version).unwrap(),
+        None => writeln!(out, "HiveMind v{}", data.version).unwrap(),
+    }
+    writeln!(out, "─────────────────────────────────────────────────────").unwrap();
+    if data.server_up {
+        writeln!(
+            out,
+            "Server:     running at http://{}:{} (hivemind up)",
+            data.server_host, data.server_port
+        )
+        .unwrap();
+    } else {
+        writeln!(
+            out,
+            "Server:     not running (stdio instance is spawned per session)"
+        )
+        .unwrap();
+    }
+    writeln!(out, "Storage:    {} ({} memories)", data.db_path, data.memory_count).unwrap();
+    if data.sync_enabled {
+        writeln!(out, "Sync:       enabled \u{2192} {}", data.sync_remote_url).unwrap();
+    } else {
+        writeln!(out, "Sync:       disabled (local only)").unwrap();
+    }
+    if data.registered_clients.is_empty() {
+        writeln!(out, "AI clients: none registered").unwrap();
+    } else {
+        writeln!(out, "AI clients: {}", data.registered_clients.join(", ")).unwrap();
+    }
+    writeln!(out).unwrap();
+
+    let Some(project) = &data.project else {
+        writeln!(out, "No .hivemind.toml found in this directory tree.").unwrap();
+        writeln!(
+            out,
+            "Run `hivemind init` to set up memory hooks for this project."
+        )
+        .unwrap();
+        return out;
+    };
+
+    writeln!(out, "Project:    {}", project.project_name).unwrap();
+    writeln!(
+        out,
+        "Config:     .hivemind.toml{}",
+        if project.has_local_config {
+            " + .hivemind.local.toml"
+        } else {
+            ""
+        }
+    )
+    .unwrap();
+    writeln!(out).unwrap();
+    writeln!(out, "On session start will inject:").unwrap();
+    if project.loaded.is_empty() {
+        writeln!(out, "  (nothing — no recalls configured or none resolved)").unwrap();
+    }
+    for entry in &project.loaded {
+        let local = if entry.is_local { "  (local)" } else { "" };
+        writeln!(
+            out,
+            "  {:<40} ~{} tokens{}",
+            entry.title, entry.tokens, local
+        )
+        .unwrap();
+    }
+    for skip in &project.skipped {
+        writeln!(out, "  [skipped]   {:<40} ({})", skip.query, skip.reason).unwrap();
+    }
+    writeln!(
+        out,
+        "  ──────────────────────────────────────────────────────────"
+    )
+    .unwrap();
+    writeln!(out, "  Total:      ~{} tokens", project.used_tokens).unwrap();
+    writeln!(out, "  Budget:     {} tokens", project.max_tokens).unwrap();
+    let headroom = if project.truncated { "⚠" } else { "✓" };
+    let remaining = project.max_tokens.saturating_sub(project.used_tokens);
+    writeln!(out, "  Remaining:  ~{remaining} tokens  {headroom}").unwrap();
+    writeln!(out).unwrap();
+    writeln!(
+        out,
+        "On file open rules:    {} configured (reserved, not yet active)",
+        project.file_open_rule_count
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "On mention triggers:   {} (reserved, not yet active)",
+        project.mention_trigger_count
+    )
+    .unwrap();
+
+    out
+}
+
 pub async fn render_status(
     cwd: &Path,
     global_path: &Path,
@@ -1134,130 +1347,17 @@ pub async fn render_status(
     settings: &crate::config::ServerSettings,
     server_up: bool,
 ) -> Result<String> {
-    use std::fmt::Write as _;
-
-    let version = env!("CARGO_PKG_VERSION");
-    let count = store.count().await?;
-    let mut out = String::new();
-
-    // Load the config once (if a project root is found) and reuse it for both
-    // the header label and the injection preview below.
-    let root = crate::config::discover_project_root(cwd);
-    let config = match &root {
-        Some(r) => Some(crate::config::load_config_with_global(r, global_path)?),
-        None => None,
-    };
-    let project_label = config.as_ref().map(|c| c.project_name.as_str());
-
-    match project_label {
-        Some(label) => writeln!(out, "HiveMind v{version} — {label}")?,
-        None => writeln!(out, "HiveMind v{version}")?,
-    }
-    writeln!(out, "─────────────────────────────────────────────────────")?;
-    let probe_host = match settings.host.as_str() {
-        "0.0.0.0" | "::" => "127.0.0.1",
-        h => h,
-    };
-    if server_up {
-        writeln!(
-            out,
-            "Server:     running at http://{}:{} (hivemind up)",
-            probe_host, settings.port
-        )?;
-    } else {
-        writeln!(
-            out,
-            "Server:     not running (stdio instance is spawned per session)"
-        )?;
-    }
-    writeln!(out, "Storage:    {db_path} ({count} memories)")?;
-    if settings.sync.enabled {
-        writeln!(
-            out,
-            "Sync:       enabled \u{2192} {}",
-            settings.sync.remote_url
-        )?;
-    } else {
-        writeln!(out, "Sync:       disabled (local only)")?;
-    }
-    if registered_clients.is_empty() {
-        writeln!(out, "AI clients: none registered")?;
-    } else {
-        writeln!(out, "AI clients: {}", registered_clients.join(", "))?;
-    }
-    writeln!(out)?;
-
-    let (Some(root), Some(config)) = (root, config) else {
-        writeln!(out, "No .hivemind.toml found in this directory tree.")?;
-        writeln!(
-            out,
-            "Run `hivemind init` to set up memory hooks for this project."
-        )?;
-        return Ok(out);
-    };
-
-    let result = crate::session::execute_session_start(&config, store).await?;
-
-    writeln!(out, "Project:    {}", config.project_name)?;
-    writeln!(
-        out,
-        "Config:     .hivemind.toml{}",
-        if root.join(".hivemind.local.toml").is_file() {
-            " + .hivemind.local.toml"
-        } else {
-            ""
-        }
-    )?;
-    writeln!(out)?;
-    writeln!(out, "On session start will inject:")?;
-    if result.loaded.is_empty() {
-        writeln!(out, "  (nothing — no recalls configured or none resolved)")?;
-    }
-    for entry in &result.loaded {
-        let local = if matches!(entry.source, crate::config::RecallSource::Local) {
-            "  (local)"
-        } else {
-            ""
-        };
-        writeln!(
-            out,
-            "  {:<40} ~{} tokens{}",
-            entry.entry.title, entry.tokens, local
-        )?;
-    }
-    for skip in &result.skipped {
-        writeln!(
-            out,
-            "  [skipped]   {:<40} ({})",
-            skip.query,
-            skip.reason.as_str()
-        )?;
-    }
-    writeln!(
-        out,
-        "  ──────────────────────────────────────────────────────────"
-    )?;
-    writeln!(out, "  Total:      ~{} tokens", result.used_tokens)?;
-    writeln!(out, "  Budget:     {} tokens", result.max_tokens)?;
-    let headroom = if result.truncated() { "⚠" } else { "✓" };
-    writeln!(
-        out,
-        "  Remaining:  ~{} tokens  {headroom}",
-        result.remaining()
-    )?;
-    writeln!(out)?;
-    writeln!(
-        out,
-        "On file open rules:    {} configured (reserved, not yet active)",
-        config.file_open_rule_count
-    )?;
-    writeln!(
-        out,
-        "On mention triggers:   {} (reserved, not yet active)",
-        config.mention_trigger_count
-    )?;
-
-    Ok(out)
+    let data = build_status_data(
+        cwd,
+        global_path,
+        store,
+        db_path,
+        registered_clients,
+        settings,
+        server_up,
+    )
+    .await?;
+    Ok(format_status_text(&data))
 }
 
 #[cfg(test)]
@@ -1638,6 +1738,85 @@ mod tests {
             out.contains("hivemind init"),
             "suggests init when no config"
         );
+    }
+
+    #[tokio::test]
+    async fn build_status_data_matches_render_status_text() {
+        use crate::{config::SyncSettings, db, store::SqliteStore};
+
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let sync = SyncSettings::default();
+        let database = db::open_database(&sync, db_path.to_str().unwrap())
+            .await
+            .unwrap();
+        let conn = database.connect().unwrap();
+        db::run_migrations(&conn).await.unwrap();
+        let store = SqliteStore::new(conn);
+        let id = format!("mem_{}", uuid::Uuid::new_v4().simple());
+        store
+            .store(&crate::store::NewMemoryRow {
+                id: &id,
+                title: "golang preferences",
+                content: "uber/zap, sqlc, pgx v5",
+                tags: &["golang".to_string()],
+                token_count: None,
+                layer: "workspace",
+                memory_type: "project",
+            })
+            .await
+            .unwrap();
+
+        let proj = tempfile::tempdir().unwrap();
+        std::fs::write(
+            proj.path().join(".hivemind.toml"),
+            "[project]\nname=\"test-proj\"\n[hooks.on_session_start]\nrecalls=[\"golang preferences\"]\n",
+        )
+        .unwrap();
+        let global_path = dir.path().join("no-global.toml");
+        let settings = crate::config::ServerSettings {
+            host: "127.0.0.1".into(),
+            port: 3456,
+            dashboard_port: 3457,
+            api_url: "http://127.0.0.1:3456".into(),
+            cors_origin: "http://127.0.0.1:3457".into(),
+            sync: SyncSettings::default(),
+            agent: crate::config::AgentSettings::default(),
+        };
+
+        let via_text = render_status(
+            proj.path(),
+            &global_path,
+            &store,
+            "test.db",
+            &["claude"],
+            &settings,
+            true,
+        )
+        .await
+        .unwrap();
+
+        let data = build_status_data(
+            proj.path(),
+            &global_path,
+            &store,
+            "test.db",
+            &["claude"],
+            &settings,
+            true,
+        )
+        .await
+        .unwrap();
+        let via_struct = format_status_text(&data);
+
+        assert_eq!(
+            via_text, via_struct,
+            "render_status() must stay byte-for-byte identical after the struct extraction"
+        );
+        assert_eq!(data.memory_count, 1);
+        assert_eq!(data.project.as_ref().unwrap().project_name, "test-proj");
+        assert_eq!(data.project.as_ref().unwrap().loaded.len(), 1);
+        assert_eq!(data.project.as_ref().unwrap().loaded[0].title, "golang preferences");
     }
 
     // ── detect_registered_clients ────────────────────────────────────────────
