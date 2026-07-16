@@ -17,7 +17,7 @@ use tokio_stream::{Stream, StreamExt, wrappers::BroadcastStream};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
 type Store = Arc<SqliteStore>;
-type Events = broadcast::Sender<()>;
+type Events = broadcast::Sender<serde_json::Value>;
 
 pub struct ApiError(StatusCode, String);
 
@@ -128,7 +128,7 @@ async fn sse_events(
     Extension(events): Extension<Events>,
 ) -> Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>> {
     let stream = BroadcastStream::new(events.subscribe())
-        .filter_map(|msg| msg.ok().map(|_| Ok(Event::default().data("changed"))));
+        .filter_map(|msg| msg.ok().map(|v| Ok(Event::default().data(v.to_string()))));
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
@@ -212,7 +212,7 @@ async fn create_memory(
             memory_type: &memory_type,
         })
         .await?;
-    let _ = events.send(());
+    let _ = events.send(json!({ "type": "changed" }));
     Ok((StatusCode::CREATED, Json(json!({ "id": id }))))
 }
 
@@ -255,7 +255,7 @@ async fn patch_memory(
         .recall_by_id(&id)
         .await?
         .ok_or_else(|| not_found(format!("no memory {id}")))?;
-    let _ = events.send(());
+    let _ = events.send(json!({ "type": "changed" }));
     Ok(Json(entry_json(&entry)))
 }
 
@@ -267,7 +267,7 @@ async fn delete_memory(
     if !store.delete(&id).await? {
         return Err(not_found(format!("no memory {id}")));
     }
-    let _ = events.send(());
+    let _ = events.send(json!({ "type": "changed" }));
     Ok(Json(json!({ "deleted": true, "id": id })))
 }
 
@@ -276,7 +276,7 @@ async fn delete_all_memories(
     Extension(events): Extension<Events>,
 ) -> Result<Json<Value>, ApiError> {
     let deleted = store.delete_all().await?;
-    let _ = events.send(());
+    let _ = events.send(json!({ "type": "changed" }));
     Ok(Json(json!({ "deleted": deleted })))
 }
 
@@ -440,7 +440,7 @@ async fn create_edge(
         .await?
     {
         EdgeCreate::Created(id) => {
-            let _ = events.send(());
+            let _ = events.send(json!({ "type": "changed" }));
             Ok((StatusCode::CREATED, Json(json!({ "id": id }))))
         }
         EdgeCreate::Duplicate => Err(ApiError(StatusCode::CONFLICT, "edge already exists".into())),
@@ -478,7 +478,7 @@ async fn patch_edge(
     if !store.set_edge_status(&id, &b.status).await? {
         return Err(not_found(format!("no edge {id}")));
     }
-    let _ = events.send(());
+    let _ = events.send(json!({ "type": "changed" }));
     Ok(Json(json!({ "id": id, "status": b.status })))
 }
 
@@ -694,6 +694,18 @@ mod tests {
             events,
         );
         (r, dir)
+    }
+
+    async fn test_router_with_events() -> (Router, broadcast::Receiver<Value>, TempDir) {
+        let (store, dir) = test_store().await;
+        let (events, rx) = broadcast::channel(16);
+        let r = router(
+            store,
+            SyncSettings::default(),
+            "http://127.0.0.1:3457",
+            events,
+        );
+        (r, rx, dir)
     }
 
     async fn test_router_with_store() -> (Router, Arc<SqliteStore>, TempDir) {
@@ -1185,6 +1197,51 @@ mod tests {
         .await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(body["status"], "dismissed");
+    }
+
+    #[tokio::test]
+    async fn edge_patch_broadcasts_typed_changed_event() {
+        let (app, mut rx, _dir) = test_router_with_events().await;
+        let (_, ma) = req(
+            app.clone(),
+            "POST",
+            "/api/v1/memories",
+            Some(memory_body("A", "a", &[])),
+        )
+        .await;
+        let (_, mb) = req(
+            app.clone(),
+            "POST",
+            "/api/v1/memories",
+            Some(memory_body("B", "b", &[])),
+        )
+        .await;
+        let id_a = ma["id"].as_str().unwrap().to_string();
+        let id_b = mb["id"].as_str().unwrap().to_string();
+        let (_, edge) = req(
+            app.clone(),
+            "POST",
+            "/api/v1/edges",
+            Some(json!({"source_id": id_a, "target_id": id_b, "relationship": "sibling"})),
+        )
+        .await;
+        let edge_id = edge["id"].as_str().unwrap().to_string();
+
+        // Drain events emitted so far (memory creates, edge create) so we
+        // observe the one from the PATCH below.
+        while rx.try_recv().is_ok() {}
+
+        let (st, _) = req(
+            app,
+            "PATCH",
+            &format!("/api/v1/edges/{edge_id}"),
+            Some(json!({"status": "rejected"})),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+
+        let evt = rx.recv().await.unwrap();
+        assert_eq!(evt["type"], "changed");
     }
 
     #[tokio::test]

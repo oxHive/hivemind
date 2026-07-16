@@ -30,7 +30,7 @@ pub fn app_router(
     // Fires whenever a memory or edge is created/updated/deleted, either via
     // an MCP tool call (below) or the REST API (api::router) — the dashboard
     // subscribes to it over SSE to silently refresh in the background.
-    let (events_tx, _) = tokio::sync::broadcast::channel::<()>(16);
+    let (events_tx, _) = tokio::sync::broadcast::channel::<serde_json::Value>(16);
 
     let mcp = StreamableHttpService::new(
         {

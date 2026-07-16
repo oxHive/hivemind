@@ -160,7 +160,7 @@ pub struct MemoryGetEdgesInput {
 pub struct HiveMind {
     store: Arc<SqliteStore>,
     sync_trigger: Option<Arc<tokio::sync::Notify>>,
-    events: Option<tokio::sync::broadcast::Sender<()>>,
+    events: Option<tokio::sync::broadcast::Sender<serde_json::Value>>,
 }
 
 impl HiveMind {
@@ -191,14 +191,14 @@ impl HiveMind {
 
     /// Broadcasts a "changed" signal to dashboard SSE subscribers whenever a
     /// memory or edge is created/updated/deleted through this MCP handle.
-    pub fn with_events(mut self, tx: tokio::sync::broadcast::Sender<()>) -> Self {
+    pub fn with_events(mut self, tx: tokio::sync::broadcast::Sender<serde_json::Value>) -> Self {
         self.events = Some(tx);
         self
     }
 
     fn notify_change(&self) {
         if let Some(tx) = &self.events {
-            let _ = tx.send(());
+            let _ = tx.send(serde_json::json!({ "type": "changed" }));
         }
     }
 
