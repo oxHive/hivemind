@@ -1,4 +1,5 @@
 use crate::cli::StatusData;
+use crate::store::SqliteStore;
 use crate::tui::{TerminalGuard, header::render_header};
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
@@ -25,6 +26,7 @@ pub async fn run(
     dashboard_url: Option<String>,
     mcp_url: String,
     events: broadcast::Sender<serde_json::Value>,
+    store: std::sync::Arc<SqliteStore>,
 ) -> Result<()> {
     let guard = TerminalGuard::enter()?;
     let mut terminal = guard.terminal()?;
@@ -39,7 +41,16 @@ pub async fn run(
             event = rx.recv() => {
                 if let Ok(value) = event {
                     if value.get("type").and_then(|t| t.as_str()) == Some("changed") {
-                        data.memory_count += 1;
+                        // Re-fetch the real count rather than blindly incrementing:
+                        // a "changed" event fires whenever data_version moves for
+                        // any reason (delete, bulk import, several writes between
+                        // poll ticks), not only "one memory was added". On failure,
+                        // keep the last known-good count displayed rather than
+                        // showing a wrong number.
+                        match store.count().await {
+                            Ok(count) => data.memory_count = count,
+                            Err(e) => tracing::debug!("memory count refresh failed: {e:#}"),
+                        }
                     }
                     let ts = chrono_now_hms();
                     let kind = value

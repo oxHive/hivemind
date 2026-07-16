@@ -234,7 +234,7 @@ pub async fn run_up(
             true,
         )
         .await?;
-        crate::tui::up_view::run(data, dashboard_url, mcp_url, events_tx).await?;
+        crate::tui::up_view::run(data, dashboard_url, mcp_url, events_tx, store.clone()).await?;
         // `q` returns here: terminal is already restored by up_view's TerminalGuard.
         // Fall through to logging mode so the server keeps running under Ctrl+C,
         // matching the spec's "q exits the view only" behavior.
