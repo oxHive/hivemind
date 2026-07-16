@@ -6,6 +6,7 @@ export const useGraphStore = defineStore('graph', () => {
   const edges = ref([])
   const zoom = ref(2)            // 1|2|3
   const selectedNodeId = ref(null)
+  const selectedEdgeId = ref(null)
   const searchQuery = ref('')
   const layerFilter = ref('all') // 'all' | 'personal' | 'workspace'
 
@@ -38,7 +39,7 @@ export const useGraphStore = defineStore('graph', () => {
   }
 
   return {
-    edges, zoom, selectedNodeId, searchQuery, layerFilter,
+    edges, zoom, selectedNodeId, selectedEdgeId, searchQuery, layerFilter,
     pendingEdges, edgesFor, fetchEdges, resolveEdge,
     acceptAllPending, rejectAllPending,
   }

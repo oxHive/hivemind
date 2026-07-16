@@ -387,6 +387,11 @@ function draw() {
       ctx.globalAlpha = 0.6
       ctx.lineWidth = 2
     }
+    if (graph.selectedEdgeId && link.id === graph.selectedEdgeId) {
+      ctx.strokeStyle = COLORS.pending
+      ctx.globalAlpha = 1
+      ctx.lineWidth = 3.5
+    }
     ctx.moveTo(sx, sy)
     ctx.lineTo(tx, ty)
     ctx.stroke()
@@ -557,6 +562,7 @@ function handleClick(e) {
     return
   }
   graph.selectedNodeId = null
+  graph.selectedEdgeId = null
 }
 
 function ptSegDist(px, py, ax, ay, bx, by) {
@@ -697,7 +703,7 @@ onUnmounted(() => {
 })
 
 watch([nodeData, linkData], () => startSimulation())
-watch([() => graph.zoom, () => graph.searchQuery, () => graph.layerFilter, () => graph.selectedNodeId], scheduleDraw)
+watch([() => graph.zoom, () => graph.searchQuery, () => graph.layerFilter, () => graph.selectedNodeId, () => graph.selectedEdgeId], scheduleDraw)
 </script>
 
 <template>
