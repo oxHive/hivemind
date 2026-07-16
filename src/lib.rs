@@ -8,6 +8,7 @@ pub mod model;
 pub mod server;
 pub mod session;
 pub mod store;
+pub mod suggest_session;
 pub mod sync;
 pub mod tag_query;
 #[cfg(test)]
