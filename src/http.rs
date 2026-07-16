@@ -169,7 +169,8 @@ pub async fn run_up(
     if !matches!(settings.host.as_str(), "127.0.0.1" | "localhost" | "::1") {
         tracing::warn!(
             "binding to {}: the REST API and MCP endpoint are UNAUTHENTICATED; \
-             anyone who can reach this address can read and modify all memories",
+             anyone who can reach this address can read and modify all memories, \
+             and can call POST /api/v1/suggest-sessions to spawn the configured agent command",
             settings.host
         );
     }

@@ -19,6 +19,7 @@ export const useSuggestStore = defineStore('suggest', () => {
       panelOpen.value = true
     } catch (e) {
       error.value = e.status === 409 ? 'A suggest session is already running.' : String(e.message)
+      panelOpen.value = true
     }
   }
 

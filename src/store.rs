@@ -743,7 +743,10 @@ impl SqliteStore {
         if let Some(r) = relationship
             && !VALID_RELATIONSHIPS.contains(&r)
         {
-            anyhow::bail!("invalid relationship; valid: {}", VALID_RELATIONSHIPS.join(", "));
+            anyhow::bail!(
+                "invalid relationship; valid: {}",
+                VALID_RELATIONSHIPS.join(", ")
+            );
         }
         let changed = self
             .conn
@@ -1378,7 +1381,14 @@ mod tests {
         s.store(&test_row("mem_a", "A", "a", &[])).await.unwrap();
         s.store(&test_row("mem_b", "B", "b", &[])).await.unwrap();
         let created = s
-            .create_edge_with_status("mem_a", "mem_b", "sibling", "pending", None, Some("both cover auth"))
+            .create_edge_with_status(
+                "mem_a",
+                "mem_b",
+                "sibling",
+                "pending",
+                None,
+                Some("both cover auth"),
+            )
             .await
             .unwrap();
         assert!(matches!(created, crate::model::EdgeCreate::Created(_)));
@@ -1403,7 +1413,14 @@ mod tests {
         s.store(&test_row("mem_a", "A", "a", &[])).await.unwrap();
         s.store(&test_row("mem_b", "B", "b", &[])).await.unwrap();
         let created = s
-            .create_edge_with_status("mem_a", "mem_b", "sibling", "pending", None, Some("first take"))
+            .create_edge_with_status(
+                "mem_a",
+                "mem_b",
+                "sibling",
+                "pending",
+                None,
+                Some("first take"),
+            )
             .await
             .unwrap();
         let crate::model::EdgeCreate::Created(id) = created else {
@@ -1423,7 +1440,11 @@ mod tests {
     #[tokio::test]
     async fn update_edge_rejects_invalid_relationship_and_missing_id() {
         let (s, _dir) = make_store().await;
-        assert!(!s.update_edge("edge_missing", None, Some("x"), None).await.unwrap());
+        assert!(
+            !s.update_edge("edge_missing", None, Some("x"), None)
+                .await
+                .unwrap()
+        );
 
         s.store(&test_row("mem_a", "A", "a", &[])).await.unwrap();
         s.store(&test_row("mem_b", "B", "b", &[])).await.unwrap();
@@ -1432,7 +1453,11 @@ mod tests {
         else {
             panic!("expected EdgeCreate::Created");
         };
-        assert!(s.update_edge(&id, Some("related_to"), None, None).await.is_err());
+        assert!(
+            s.update_edge(&id, Some("related_to"), None, None)
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]

@@ -64,7 +64,13 @@ impl SuggestSessionManager {
         agent: AgentSettings,
         mcp_url: String,
     ) -> Arc<Self> {
-        Arc::new(Self { store, events, agent, mcp_url, inner: Mutex::new(Inner::default()) })
+        Arc::new(Self {
+            store,
+            events,
+            agent,
+            mcp_url,
+            inner: Mutex::new(Inner::default()),
+        })
     }
 
     fn emit(&self, state: &str, extra: Value) {
@@ -101,14 +107,7 @@ impl SuggestSessionManager {
     }
 
     pub async fn revise(&self, edge_id: String, feedback: String) -> Result<(), ReviseError> {
-        if self
-            .store
-            .get_edge(&edge_id)
-            .await
-            .ok()
-            .flatten()
-            .is_none()
-        {
+        if self.store.get_edge(&edge_id).await.ok().flatten().is_none() {
             return Err(ReviseError::UnknownEdge);
         }
         let mut inner = self.inner.lock().await;
@@ -117,7 +116,8 @@ impl SuggestSessionManager {
         }
         inner.queued_edge_ids.push_back(edge_id.clone());
         let tx = inner.tx.as_ref().ok_or(ReviseError::NotActive)?;
-        tx.send(Turn::Revise { edge_id, feedback }).map_err(|_| ReviseError::NotActive)?;
+        tx.send(Turn::Revise { edge_id, feedback })
+            .map_err(|_| ReviseError::NotActive)?;
         Ok(())
     }
 
@@ -149,20 +149,18 @@ impl SuggestSessionManager {
     async fn worker_loop(self: Arc<Self>, mut rx: mpsc::UnboundedReceiver<Turn>) {
         while let Some(turn) = rx.recv().await {
             match turn {
-                Turn::Initial { prompt } => {
-                    match self.run_turn(&prompt, None).await {
-                        Ok(sid) => {
-                            let mut inner = self.inner.lock().await;
-                            inner.session_id = Some(sid);
-                            inner.phase = "reviewing";
-                            drop(inner);
-                            self.emit("suggestions_ready", json!({}));
-                        }
-                        Err(msg) => {
-                            self.fail_turn(&msg).await;
-                        }
+                Turn::Initial { prompt } => match self.run_turn(&prompt, None).await {
+                    Ok(sid) => {
+                        let mut inner = self.inner.lock().await;
+                        inner.session_id = Some(sid);
+                        inner.phase = "reviewing";
+                        drop(inner);
+                        self.emit("suggestions_ready", json!({}));
                     }
-                }
+                    Err(msg) => {
+                        self.fail_turn(&msg).await;
+                    }
+                },
                 Turn::Revise { edge_id, feedback } => {
                     let resume = {
                         let mut inner = self.inner.lock().await;
@@ -256,14 +254,20 @@ impl SuggestSessionManager {
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true);
 
-        let child = cmd.spawn().map_err(|e| format!("failed to spawn {}: {e}", self.agent.command))?;
+        let child = cmd
+            .spawn()
+            .map_err(|e| format!("failed to spawn {}: {e}", self.agent.command))?;
         let out = tokio::time::timeout(TURN_TIMEOUT, child.wait_with_output())
             .await
             .map_err(|_| format!("agent timed out after {}s", TURN_TIMEOUT.as_secs()))?
             .map_err(|e| e.to_string())?;
         if !out.status.success() {
             let stderr = String::from_utf8_lossy(&out.stderr);
-            return Err(format!("agent exited with {}: {}", out.status, stderr.trim()));
+            return Err(format!(
+                "agent exited with {}: {}",
+                out.status,
+                stderr.trim()
+            ));
         }
         let stdout = String::from_utf8_lossy(&out.stdout);
         // `claude -p --output-format json` prints a single JSON object; take the
@@ -273,7 +277,8 @@ impl SuggestSessionManager {
             .rev()
             .find(|l| !l.trim().is_empty())
             .ok_or_else(|| "agent produced no output".to_string())?;
-        let v: Value = serde_json::from_str(line).map_err(|e| format!("unparseable agent output: {e}"))?;
+        let v: Value =
+            serde_json::from_str(line).map_err(|e| format!("unparseable agent output: {e}"))?;
         v.get("session_id")
             .and_then(|s| s.as_str())
             .map(String::from)
@@ -316,7 +321,13 @@ mod tests {
 
     async fn test_manager(
         dir: &std::path::Path,
-    ) -> (Arc<SuggestSessionManager>, Arc<SqliteStore>, broadcast::Receiver<Value>, String, TempDir) {
+    ) -> (
+        Arc<SuggestSessionManager>,
+        Arc<SqliteStore>,
+        broadcast::Receiver<Value>,
+        String,
+        TempDir,
+    ) {
         let (store, db_dir) = test_store().await;
         store
             .store(&NewMemoryRow {
@@ -344,8 +355,16 @@ mod tests {
             .unwrap();
         let script = write_stub_agent(dir);
         let (events, rx) = broadcast::channel::<Value>(32);
-        let agent = crate::config::AgentSettings { command: script.clone(), args: vec![] };
-        let mgr = SuggestSessionManager::new(Arc::clone(&store), events, agent, "http://127.0.0.1:3456/mcp".into());
+        let agent = crate::config::AgentSettings {
+            command: script.clone(),
+            args: vec![],
+        };
+        let mgr = SuggestSessionManager::new(
+            Arc::clone(&store),
+            events,
+            agent,
+            "http://127.0.0.1:3456/mcp".into(),
+        );
         (mgr, store, rx, script, db_dir)
     }
 
@@ -368,6 +387,8 @@ mod tests {
         assert!(log.contains("-p"));
         assert!(log.contains("--output-format json"));
         assert!(log.contains("--mcp-config"));
+        assert!(log.contains("--strict-mcp-config"));
+        assert!(log.contains("--allowedTools"));
         let _ = script;
     }
 
@@ -394,11 +415,16 @@ mod tests {
         else {
             panic!("expected EdgeCreate::Created");
         };
-        mgr.revise(edge_id.clone(), "make it parent".into()).await.unwrap();
+        mgr.revise(edge_id.clone(), "make it parent".into())
+            .await
+            .unwrap();
         assert_eq!(next_state(&mut rx).await, "revising");
         assert_eq!(next_state(&mut rx).await, "revision_ready");
         let log = std::fs::read_to_string(dir.path().join("args.log")).unwrap();
-        assert!(log.contains("--resume stub-1"), "second turn must resume the captured session id");
+        assert!(
+            log.contains("--resume stub-1"),
+            "second turn must resume the captured session id"
+        );
     }
 
     #[tokio::test]
@@ -449,10 +475,14 @@ mod tests {
             command: script.to_string_lossy().into_owned(),
             args: vec![],
         };
-        let mgr = SuggestSessionManager::new(store, events, agent, "http://127.0.0.1:3456/mcp".into());
+        let mgr =
+            SuggestSessionManager::new(store, events, agent, "http://127.0.0.1:3456/mcp".into());
         mgr.start().await.unwrap();
         assert_eq!(next_state(&mut rx).await, "started");
-        let evt = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
+        let evt = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(evt["state"], "error");
         assert!(evt["message"].as_str().unwrap().contains("boom"));
     }

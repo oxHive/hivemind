@@ -150,7 +150,10 @@ pub struct AgentSettings {
 
 impl Default for AgentSettings {
     fn default() -> Self {
-        AgentSettings { command: "claude".into(), args: Vec::new() }
+        AgentSettings {
+            command: "claude".into(),
+            args: Vec::new(),
+        }
     }
 }
 

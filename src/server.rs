@@ -769,14 +769,23 @@ impl HiveMind {
     ) -> Result<CallToolResult, ErrorData> {
         match self
             .store
-            .update_edge(&p.id, p.relationship.as_deref(), p.reason.as_deref(), p.link_text.as_deref())
+            .update_edge(
+                &p.id,
+                p.relationship.as_deref(),
+                p.reason.as_deref(),
+                p.link_text.as_deref(),
+            )
             .await
         {
             Ok(true) => {
                 self.notify_change();
-                Ok(CallToolResult::structured(json!({ "updated": true, "id": p.id })))
+                Ok(CallToolResult::structured(
+                    json!({ "updated": true, "id": p.id }),
+                ))
             }
-            Ok(false) => Ok(CallToolResult::structured(json!({ "updated": false, "id": p.id }))),
+            Ok(false) => Ok(CallToolResult::structured(
+                json!({ "updated": false, "id": p.id }),
+            )),
             Err(e) => Err(ErrorData::invalid_params(e.to_string(), None)),
         }
     }
@@ -2004,8 +2013,11 @@ mod tests {
         let (hm, _dir) = test_hivemind().await;
         let (a, b) = seed_two(&hm).await;
         hm.do_memory_store_edge(MemoryStoreEdgeInput {
-            source_id: a, target_id: b, relationship: "sibling".into(),
-            status: Some("pending".into()), reason: Some("first take".into()),
+            source_id: a,
+            target_id: b,
+            relationship: "sibling".into(),
+            status: Some("pending".into()),
+            reason: Some("first take".into()),
         })
         .await
         .unwrap();
@@ -2031,8 +2043,10 @@ mod tests {
         let (hm, _dir) = test_hivemind().await;
         let res = hm
             .do_memory_update_edge(MemoryUpdateEdgeInput {
-                id: "edge_missing".into(), relationship: None,
-                reason: Some("x".into()), link_text: None,
+                id: "edge_missing".into(),
+                relationship: None,
+                reason: Some("x".into()),
+                link_text: None,
             })
             .await
             .unwrap();
@@ -2045,16 +2059,21 @@ mod tests {
         let (hm, _dir) = test_hivemind().await;
         let (a, b) = seed_two(&hm).await;
         hm.do_memory_store_edge(MemoryStoreEdgeInput {
-            source_id: a, target_id: b, relationship: "sibling".into(),
-            status: Some("pending".into()), reason: None,
+            source_id: a,
+            target_id: b,
+            relationship: "sibling".into(),
+            status: Some("pending".into()),
+            reason: None,
         })
         .await
         .unwrap();
         let edge_id = hm.store.list_edges(None).await.unwrap()[0].id.clone();
         let res = hm
             .do_memory_update_edge(MemoryUpdateEdgeInput {
-                id: edge_id, relationship: Some("related_to".into()),
-                reason: None, link_text: None,
+                id: edge_id,
+                relationship: Some("related_to".into()),
+                reason: None,
+                link_text: None,
             })
             .await;
         assert!(res.is_err());
