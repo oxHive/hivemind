@@ -1817,6 +1817,23 @@ mod tests {
         assert_eq!(data.project.as_ref().unwrap().project_name, "test-proj");
         assert_eq!(data.project.as_ref().unwrap().loaded.len(), 1);
         assert_eq!(data.project.as_ref().unwrap().loaded[0].title, "golang preferences");
+
+        // Pin down the actual rendered format so a regression in
+        // format_status_text is caught, not just disagreement between
+        // build_status_data and render_status.
+        assert!(via_struct.contains("HiveMind v"));
+        assert!(via_struct.contains(" — test-proj")); // em dash preserved from the original literal output
+        assert!(via_struct.contains("Server:     running at http://127.0.0.1:3456 (hivemind up)"));
+        assert!(via_struct.contains("Sync:       disabled (local only)"));
+        assert!(via_struct.contains("AI clients: claude"));
+        assert!(via_struct.contains("Project:    test-proj"));
+        assert!(via_struct.contains("golang preferences"));
+        // "Remaining" line: verify the saturating_sub substitution in format_status_text
+        // matches the real budget arithmetic (used_tokens, max_tokens from the loaded config),
+        // not just that build_status_data and render_status agree with each other.
+        let project = data.project.as_ref().unwrap();
+        let expected_remaining = project.max_tokens.saturating_sub(project.used_tokens);
+        assert!(via_struct.contains(&format!("Remaining:  ~{expected_remaining} tokens")));
     }
 
     // ── detect_registered_clients ────────────────────────────────────────────
