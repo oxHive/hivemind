@@ -3,3 +3,8 @@
 /docs/HIVEMIND_*.md
 /.superpowers/
 .hivemind.local.toml
+
+# opencode plugin build artifacts
+plugins/opencode/hivemind.js
+plugins/opencode/hivemind.d.ts
+plugins/opencode/node_modules/
