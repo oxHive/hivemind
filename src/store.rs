@@ -707,6 +707,58 @@ impl SqliteStore {
         Ok(changed > 0)
     }
 
+    pub async fn get_edge(&self, id: &str) -> Result<Option<EdgeEntry>> {
+        let mut rows = self
+            .conn
+            .query(
+                "SELECT id, source_id, target_id, relationship, status, created_at, link_text, reason
+                 FROM edges WHERE id = ?1",
+                params![id],
+            )
+            .await?;
+        match rows.next().await? {
+            None => Ok(None),
+            Some(row) => Ok(Some(EdgeEntry {
+                id: row.get(0)?,
+                source_id: row.get(1)?,
+                target_id: row.get(2)?,
+                relationship: row.get(3)?,
+                status: row.get(4)?,
+                created_at: row.get(5)?,
+                link_text: row.get(6)?,
+                reason: row.get(7)?,
+            })),
+        }
+    }
+
+    /// Patch a subset of edge fields. `None` leaves a field unchanged.
+    /// Returns false when no edge has this id.
+    pub async fn update_edge(
+        &self,
+        id: &str,
+        relationship: Option<&str>,
+        reason: Option<&str>,
+        link_text: Option<&str>,
+    ) -> Result<bool> {
+        if let Some(r) = relationship
+            && !VALID_RELATIONSHIPS.contains(&r)
+        {
+            anyhow::bail!("invalid relationship; valid: {}", VALID_RELATIONSHIPS.join(", "));
+        }
+        let changed = self
+            .conn
+            .execute(
+                "UPDATE edges SET
+                     relationship = COALESCE(?1, relationship),
+                     reason = COALESCE(?2, reason),
+                     link_text = COALESCE(?3, link_text)
+                 WHERE id = ?4",
+                params![relationship, reason, link_text, id],
+            )
+            .await?;
+        Ok(changed > 0)
+    }
+
     pub async fn create_feedback(
         &self,
         memory_id: &str,
@@ -1332,6 +1384,44 @@ mod tests {
             .await
             .unwrap();
         assert!(!ok);
+    }
+
+    #[tokio::test]
+    async fn update_edge_patches_fields_in_place() {
+        let (s, _dir) = make_store().await;
+        s.store(&test_row("mem_a", "A", "a", &[])).await.unwrap();
+        s.store(&test_row("mem_b", "B", "b", &[])).await.unwrap();
+        let created = s
+            .create_edge_with_status("mem_a", "mem_b", "sibling", "pending", None, Some("first take"))
+            .await
+            .unwrap();
+        let crate::model::EdgeCreate::Created(id) = created else {
+            panic!("expected EdgeCreate::Created");
+        };
+        let ok = s
+            .update_edge(&id, Some("parent"), Some("refined reason"), None)
+            .await
+            .unwrap();
+        assert!(ok);
+        let e = s.get_edge(&id).await.unwrap().unwrap();
+        assert_eq!(e.relationship, "parent");
+        assert_eq!(e.reason.as_deref(), Some("refined reason"));
+        assert_eq!(e.status, "pending", "status untouched");
+    }
+
+    #[tokio::test]
+    async fn update_edge_rejects_invalid_relationship_and_missing_id() {
+        let (s, _dir) = make_store().await;
+        assert!(!s.update_edge("edge_missing", None, Some("x"), None).await.unwrap());
+
+        s.store(&test_row("mem_a", "A", "a", &[])).await.unwrap();
+        s.store(&test_row("mem_b", "B", "b", &[])).await.unwrap();
+        let crate::model::EdgeCreate::Created(id) =
+            s.create_edge("mem_a", "mem_b", "sibling").await.unwrap()
+        else {
+            panic!("expected EdgeCreate::Created");
+        };
+        assert!(s.update_edge(&id, Some("related_to"), None, None).await.is_err());
     }
 
     #[tokio::test]
