@@ -336,6 +336,8 @@ struct ImportEdge {
     status: String,
     #[serde(default)]
     link_text: Option<String>,
+    #[serde(default)]
+    reason: Option<String>,
 }
 
 fn default_edge_status() -> String {
@@ -374,6 +376,7 @@ async fn import(
                     &e.relationship,
                     &e.status,
                     e.link_text.as_deref(),
+                    e.reason.as_deref(),
                 )
                 .await?,
             crate::model::EdgeCreate::Created(_)
@@ -1097,7 +1100,7 @@ mod tests {
             .await
             .unwrap();
         store
-            .create_edge_with_status("mem_a", "mem_b", "sibling", "pending", Some("the phrase"))
+            .create_edge_with_status("mem_a", "mem_b", "sibling", "pending", Some("the phrase"), None)
             .await
             .unwrap();
 

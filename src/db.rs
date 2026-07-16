@@ -92,6 +92,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "V6__legacy_relationship_cleanup",
         include_str!("../migrations/V6__legacy_relationship_cleanup.sql"),
     ),
+    (
+        "V7__edge_reason",
+        include_str!("../migrations/V7__edge_reason.sql"),
+    ),
 ];
 
 pub async fn run_migrations(conn: &libsql::Connection) -> Result<()> {
