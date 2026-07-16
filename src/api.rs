@@ -1,4 +1,8 @@
-use crate::{config::SyncSettings, store::SqliteStore};
+use crate::{
+    config::SyncSettings,
+    store::SqliteStore,
+    suggest_session::{ReviseError, StartError, SuggestSessionManager},
+};
 use axum::{
     Json, Router,
     extract::{Extension, Path, Query, State},
@@ -70,7 +74,13 @@ fn localhost_origins(origin: &str) -> AllowOrigin {
     }
 }
 
-pub fn router(store: Store, sync: SyncSettings, dashboard_origin: &str, events: Events) -> Router {
+pub fn router(
+    store: Store,
+    sync: SyncSettings,
+    dashboard_origin: &str,
+    events: Events,
+    suggest: Arc<SuggestSessionManager>,
+) -> Router {
     Router::new()
         .route("/api/v1/memories", get(list_memories).post(create_memory))
         .route(
@@ -107,9 +117,22 @@ pub fn router(store: Store, sync: SyncSettings, dashboard_origin: &str, events: 
         .route("/api/v1/session-logs", get(list_session_logs))
         .route("/api/v1/status", get(server_status))
         .route("/api/v1/events", get(sse_events))
+        .route(
+            "/api/v1/suggest-sessions",
+            post(start_suggest_session),
+        )
+        .route(
+            "/api/v1/suggest-sessions/current",
+            get(suggest_session_status).delete(end_suggest_session),
+        )
+        .route(
+            "/api/v1/suggest-sessions/current/revise",
+            post(revise_suggest_session),
+        )
         .with_state(store)
         .layer(Extension(sync))
         .layer(Extension(events))
+        .layer(Extension(suggest))
         .layer(
             CorsLayer::new()
                 .allow_origin(localhost_origins(dashboard_origin))
@@ -661,6 +684,57 @@ async fn save_tag_settings(
     Ok(Json(json!({ "saved": true })))
 }
 
+// --- suggest sessions ---
+
+async fn start_suggest_session(
+    Extension(mgr): Extension<Arc<SuggestSessionManager>>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    match mgr.start().await {
+        Ok(()) => Ok((StatusCode::ACCEPTED, Json(json!({ "started": true })))),
+        Err(StartError::AlreadyActive) => Err(ApiError(
+            StatusCode::CONFLICT,
+            "a suggest session is already active".into(),
+        )),
+        Err(StartError::Failed(msg)) => Err(ApiError(StatusCode::INTERNAL_SERVER_ERROR, msg)),
+    }
+}
+
+async fn suggest_session_status(
+    Extension(mgr): Extension<Arc<SuggestSessionManager>>,
+) -> Json<Value> {
+    Json(mgr.status().await)
+}
+
+#[derive(Deserialize)]
+struct ReviseBody {
+    edge_id: String,
+    feedback: String,
+}
+
+async fn revise_suggest_session(
+    Extension(mgr): Extension<Arc<SuggestSessionManager>>,
+    Json(b): Json<ReviseBody>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    match mgr.revise(b.edge_id.clone(), b.feedback).await {
+        Ok(()) => Ok((
+            StatusCode::ACCEPTED,
+            Json(json!({ "queued": true, "edge_id": b.edge_id })),
+        )),
+        Err(ReviseError::NotActive) => Err(ApiError(
+            StatusCode::CONFLICT,
+            "no active suggest session".into(),
+        )),
+        Err(ReviseError::UnknownEdge) => Err(not_found(format!("no edge {}", b.edge_id))),
+    }
+}
+
+async fn end_suggest_session(
+    Extension(mgr): Extension<Arc<SuggestSessionManager>>,
+) -> Json<Value> {
+    mgr.end().await;
+    Json(json!({ "ended": true }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -684,14 +758,49 @@ mod tests {
         (Arc::new(SqliteStore::new(conn)), dir)
     }
 
+    /// Writes a stub agent script that mirrors suggest_session's test stub:
+    /// it echoes a fake `claude -p --output-format json` result so a real
+    /// process gets spawned but nothing calls out to a real agent.
+    fn write_stub_agent(dir: &std::path::Path) -> String {
+        let script = dir.join("stub-agent.sh");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\necho '{\"type\":\"result\",\"session_id\":\"stub-1\",\"result\":\"done\",\"is_error\":false}'\n",
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        script.to_string_lossy().into_owned()
+    }
+
+    fn test_suggest_manager(
+        store: Arc<SqliteStore>,
+        dir: &std::path::Path,
+        events: Events,
+    ) -> Arc<crate::suggest_session::SuggestSessionManager> {
+        let script = write_stub_agent(dir);
+        let agent = crate::config::AgentSettings {
+            command: script,
+            args: vec![],
+        };
+        crate::suggest_session::SuggestSessionManager::new(
+            store,
+            events,
+            agent,
+            "http://127.0.0.1:3456/mcp".into(),
+        )
+    }
+
     async fn test_router() -> (Router, TempDir) {
         let (store, dir) = test_store().await;
         let (events, _) = broadcast::channel(16);
+        let suggest = test_suggest_manager(Arc::clone(&store), dir.path(), events.clone());
         let r = router(
             store,
             SyncSettings::default(),
             "http://127.0.0.1:3457",
             events,
+            suggest,
         );
         (r, dir)
     }
@@ -699,11 +808,13 @@ mod tests {
     async fn test_router_with_events() -> (Router, broadcast::Receiver<Value>, TempDir) {
         let (store, dir) = test_store().await;
         let (events, rx) = broadcast::channel(16);
+        let suggest = test_suggest_manager(Arc::clone(&store), dir.path(), events.clone());
         let r = router(
             store,
             SyncSettings::default(),
             "http://127.0.0.1:3457",
             events,
+            suggest,
         );
         (r, rx, dir)
     }
@@ -711,11 +822,13 @@ mod tests {
     async fn test_router_with_store() -> (Router, Arc<SqliteStore>, TempDir) {
         let (store, dir) = test_store().await;
         let (events, _) = broadcast::channel(16);
+        let suggest = test_suggest_manager(Arc::clone(&store), dir.path(), events.clone());
         let r = router(
             Arc::clone(&store),
             SyncSettings::default(),
             "http://127.0.0.1:3457",
             events,
+            suggest,
         );
         (r, store, dir)
     }
@@ -1255,5 +1368,86 @@ mod tests {
         assert_eq!(st, StatusCode::OK);
         assert_eq!(body["sync"]["last_synced_at"], 1751600000_i64);
         assert_eq!(body["sync"]["conflict_count"], 0);
+    }
+
+    #[tokio::test]
+    async fn suggest_session_start_status_end_roundtrip() {
+        let (app, _dir) = test_router().await;
+
+        let (st, body) = req(app.clone(), "POST", "/api/v1/suggest-sessions", None).await;
+        assert_eq!(st, StatusCode::ACCEPTED);
+        assert_eq!(body["started"], true);
+
+        let (st, _) = req(app.clone(), "POST", "/api/v1/suggest-sessions", None).await;
+        assert_eq!(st, StatusCode::CONFLICT);
+
+        let (st, status) = req(app.clone(), "GET", "/api/v1/suggest-sessions/current", None).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(status["active"], true);
+
+        let (st, ended) = req(app.clone(), "DELETE", "/api/v1/suggest-sessions/current", None).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(ended["ended"], true);
+    }
+
+    #[tokio::test]
+    async fn revise_validates_session_and_edge() {
+        // The manager checks the edge exists before checking session state
+        // (see suggest_session::revise), so exercising the "no active
+        // session" 409 needs a real edge_id; a bogus id would 404 either way.
+        let (app, store, _dir) = test_router_with_store().await;
+        let tags: Vec<String> = vec![];
+        store
+            .store(&crate::store::NewMemoryRow {
+                id: "mem_a",
+                title: "A",
+                content: "a",
+                tags: &tags,
+                token_count: None,
+                layer: "workspace",
+                memory_type: "project",
+            })
+            .await
+            .unwrap();
+        store
+            .store(&crate::store::NewMemoryRow {
+                id: "mem_b",
+                title: "B",
+                content: "b",
+                tags: &tags,
+                token_count: None,
+                layer: "workspace",
+                memory_type: "project",
+            })
+            .await
+            .unwrap();
+        let crate::model::EdgeCreate::Created(edge_id) = store
+            .create_edge_with_status("mem_a", "mem_b", "sibling", "pending", None, None)
+            .await
+            .unwrap()
+        else {
+            panic!("expected EdgeCreate::Created");
+        };
+
+        let (st, _) = req(
+            app.clone(),
+            "POST",
+            "/api/v1/suggest-sessions/current/revise",
+            Some(json!({ "edge_id": edge_id, "feedback": "make it parent" })),
+        )
+        .await;
+        assert_eq!(st, StatusCode::CONFLICT);
+
+        let (st, _) = req(app.clone(), "POST", "/api/v1/suggest-sessions", None).await;
+        assert_eq!(st, StatusCode::ACCEPTED);
+
+        let (st, _) = req(
+            app.clone(),
+            "POST",
+            "/api/v1/suggest-sessions/current/revise",
+            Some(json!({ "edge_id": "edge_bogus", "feedback": "make it parent" })),
+        )
+        .await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
     }
 }

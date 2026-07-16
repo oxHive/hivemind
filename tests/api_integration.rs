@@ -4,7 +4,12 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
-use oxhivemind::{config::SyncSettings, db, store::SqliteStore};
+use oxhivemind::{
+    config::{AgentSettings, SyncSettings},
+    db,
+    store::SqliteStore,
+    suggest_session::SuggestSessionManager,
+};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -21,7 +26,27 @@ async fn test_app() -> (axum::Router, TempDir) {
     db::run_migrations(&conn).await.unwrap();
     let store = Arc::new(SqliteStore::new(conn));
     let (events, _) = tokio::sync::broadcast::channel(16);
-    let router = oxhivemind::api::router(store, sync, "http://127.0.0.1:3457", events);
+    let script = dir.path().join("stub-agent.sh");
+    std::fs::write(
+        &script,
+        "#!/bin/sh\necho '{\"type\":\"result\",\"session_id\":\"stub-1\",\"result\":\"done\",\"is_error\":false}'\n",
+    )
+    .unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let agent = AgentSettings {
+        command: script.to_string_lossy().into_owned(),
+        args: vec![],
+    };
+    let suggest = SuggestSessionManager::new(
+        Arc::clone(&store),
+        events.clone(),
+        agent,
+        "http://127.0.0.1:3456/mcp".into(),
+    );
+    let router = oxhivemind::api::router(store, sync, "http://127.0.0.1:3457", events, suggest);
     (router, dir)
 }
 
