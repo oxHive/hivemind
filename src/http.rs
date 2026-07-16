@@ -1,8 +1,9 @@
 use crate::{
     api,
-    config::{ServerSettings, SyncSettings},
+    config::{AgentSettings, ServerSettings, SyncSettings},
     server::HiveMind,
     store::SqliteStore,
+    suggest_session::SuggestSessionManager,
 };
 use anyhow::Result;
 use axum::{
@@ -27,6 +28,8 @@ pub fn app_router(
     notify_on_store: Option<Arc<tokio::sync::Notify>>,
     dashboard_origin: &str,
     events_tx: tokio::sync::broadcast::Sender<serde_json::Value>,
+    agent: AgentSettings,
+    mcp_url: String,
 ) -> Router {
     // Fires whenever a memory or edge is created/updated/deleted, either via
     // an MCP tool call (below) or the REST API (api::router) — the dashboard
@@ -47,7 +50,8 @@ pub fn app_router(
         Arc::new(LocalSessionManager::default()),
         Default::default(),
     );
-    api::router(store, sync, dashboard_origin, events_tx).nest_service("/mcp", mcp)
+    let suggest = SuggestSessionManager::new(store.clone(), events_tx.clone(), agent, mcp_url);
+    api::router(store, sync, dashboard_origin, events_tx, suggest).nest_service("/mcp", mcp)
 }
 
 pub fn dashboard_router(api_url: &str) -> Router {
@@ -147,12 +151,19 @@ pub async fn run_up(
         events_tx.clone(),
         std::time::Duration::from_secs(2),
     );
+    let mcp_host = match settings.host.as_str() {
+        "0.0.0.0" | "::" => "127.0.0.1",
+        h => h,
+    };
+    let mcp_url = format!("http://{}:{}/mcp", mcp_host, settings.port);
     let app = app_router(
         store.clone(),
         settings.sync.clone(),
         notify_on_store,
         &settings.cors_origin,
         events_tx,
+        settings.agent.clone(),
+        mcp_url,
     );
 
     if !matches!(settings.host.as_str(), "127.0.0.1" | "localhost" | "::1") {
@@ -270,16 +281,36 @@ mod tests {
         (Arc::new(SqliteStore::new(conn)), dir)
     }
 
+    /// Writes a stub agent script (mirrors the suggest_session test stub) so
+    /// app_router tests don't depend on a real `claude` binary being on PATH.
+    fn write_stub_agent(dir: &std::path::Path) -> String {
+        let script = dir.join("stub-agent.sh");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\necho '{\"type\":\"result\",\"session_id\":\"stub-1\",\"result\":\"done\",\"is_error\":false}'\n",
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        script.to_string_lossy().into_owned()
+    }
+
     #[tokio::test]
     async fn app_router_serves_rest_api() {
-        let (store, _dir) = test_store().await;
+        let (store, dir) = test_store().await;
         let (events_tx, _) = tokio::sync::broadcast::channel::<serde_json::Value>(16);
+        let agent = crate::config::AgentSettings {
+            command: write_stub_agent(dir.path()),
+            args: vec![],
+        };
         let app = app_router(
             store,
             crate::config::SyncSettings::default(),
             None,
             "http://127.0.0.1:3457",
             events_tx,
+            agent,
+            "http://127.0.0.1:3456/mcp".into(),
         );
         let resp = app
             .oneshot(
