@@ -15,6 +15,11 @@ pub mod up_view;
 
 pub type Term = Terminal<CrosstermBackend<Stdout>>;
 
+/// Fixed panel width in columns. The TUI renders as a left-aligned box
+/// under the shell prompt rather than stretching to the full terminal
+/// width.
+pub const BOX_WIDTH: u16 = 56;
+
 /// True when stdout is a real terminal and the caller did not pass `--plain`.
 /// `NO_COLOR` does not affect this: it only strips styling inside the TUI.
 pub fn is_interactive(plain: bool) -> bool {

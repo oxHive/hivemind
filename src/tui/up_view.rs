@@ -7,7 +7,7 @@ use ratatui::{
     layout::{Constraint, Layout},
     style::{Color, Style},
     text::Line,
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Padding, Paragraph},
 };
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -122,6 +122,8 @@ fn draw(
     frame: &mut ratatui::Frame,
 ) {
     let area = frame.area();
+    let width = crate::tui::BOX_WIDTH.min(area.width);
+    let area = Layout::horizontal([Constraint::Length(width), Constraint::Min(0)]).split(area)[0];
     let layout = Layout::vertical([
         Constraint::Length(5),
         Constraint::Min(1),
@@ -131,7 +133,10 @@ fn draw(
 
     render_header(data, no_color, layout[0], frame.buffer_mut());
 
-    let body = Block::default().borders(Borders::ALL).title(" Activity ");
+    let body = Block::default()
+        .borders(Borders::ALL)
+        .padding(Padding::left(2))
+        .title(" Activity ");
     let inner = body.inner(layout[1]);
     frame.render_widget(body, layout[1]);
 
@@ -162,7 +167,7 @@ fn draw(
         Style::default().fg(DIM)
     };
     frame.render_widget(
-        Paragraph::new(Line::from("q quit   ctrl+c stop server").style(footer_style)),
+        Paragraph::new(Line::from("  q quit   ctrl+c stop server").style(footer_style)),
         layout[2],
     );
 }
