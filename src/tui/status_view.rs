@@ -7,7 +7,7 @@ use ratatui::{
     layout::{Constraint, Layout},
     style::{Color, Style},
     text::Line,
-    widgets::{Block, Borders, Padding, Paragraph},
+    widgets::{Block, Borders, Padding, Paragraph, Wrap},
 };
 use std::path::Path;
 use std::time::Duration;
@@ -17,7 +17,7 @@ const DIM: Color = Color::Rgb(0x8a, 0x8a, 0x9a);
 const WARNING: Color = Color::Rgb(0xf5, 0xa5, 0x24);
 /// Inline viewport height in rows: renders as a compact panel under the
 /// shell prompt rather than taking over the full screen.
-const VIEWPORT_HEIGHT: u16 = 12;
+const VIEWPORT_HEIGHT: u16 = 16;
 
 /// Runs the interactive `hivemind status` view: header + a key-value panel
 /// that auto-refreshes every 5s, with `r` for an immediate manual refresh.
@@ -207,7 +207,7 @@ fn draw(data: &StatusData, last_error: Option<&str>, no_color: bool, frame: &mut
             "No .hivemind.toml found in this directory tree.",
         ));
     }
-    frame.render_widget(Paragraph::new(lines), inner);
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
 
     let footer_style = if no_color {
         Style::default()
