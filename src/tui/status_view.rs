@@ -7,7 +7,7 @@ use ratatui::{
     layout::{Constraint, Layout},
     style::{Color, Style},
     text::Line,
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Padding, Paragraph},
 };
 use std::path::Path;
 use std::time::Duration;
@@ -139,6 +139,8 @@ async fn poll_key_event() -> Option<event::KeyEvent> {
 
 fn draw(data: &StatusData, last_error: Option<&str>, no_color: bool, frame: &mut ratatui::Frame) {
     let area = frame.area();
+    let width = crate::tui::BOX_WIDTH.min(area.width);
+    let area = Layout::horizontal([Constraint::Length(width), Constraint::Min(0)]).split(area)[0];
     let error_height = if last_error.is_some() { 1 } else { 0 };
     let layout = Layout::vertical([
         Constraint::Length(5),
@@ -162,7 +164,10 @@ fn draw(data: &StatusData, last_error: Option<&str>, no_color: bool, frame: &mut
         );
     }
 
-    let body = Block::default().borders(Borders::ALL).title(" Overview ");
+    let body = Block::default()
+        .borders(Borders::ALL)
+        .padding(Padding::left(2))
+        .title(" Overview ");
     let inner = body.inner(layout[2]);
     frame.render_widget(body, layout[2]);
 
@@ -210,7 +215,7 @@ fn draw(data: &StatusData, last_error: Option<&str>, no_color: bool, frame: &mut
         Style::default().fg(DIM)
     };
     frame.render_widget(
-        Paragraph::new(Line::from("q quit   r refresh").style(footer_style)),
+        Paragraph::new(Line::from("  q quit   r refresh").style(footer_style)),
         layout[3],
     );
 }

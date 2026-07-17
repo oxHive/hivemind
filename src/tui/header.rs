@@ -4,7 +4,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Widget as _},
+    widgets::{Block, Borders, Padding, Paragraph, Widget as _},
 };
 
 const HEX_MARK: &str = "\u{25c7}"; // ◇, matches the outline-icon dashboard sidebar mark
@@ -31,6 +31,7 @@ pub fn render_header(data: &StatusData, no_color: bool, area: Rect, buf: &mut Bu
     }
     let block = Block::default()
         .borders(Borders::ALL)
+        .padding(Padding::left(2))
         .title(Line::from(vec![
             Span::raw(" "),
             Span::styled(format!("{HEX_MARK} HiveMind"), brand_style),
