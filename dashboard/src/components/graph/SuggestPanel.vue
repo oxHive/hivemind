@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { useGraphStore } from '../../stores/graph.js'
 import { useMemoriesStore } from '../../stores/memories.js'
 import { useSuggestStore } from '../../stores/suggest.js'
+import { withMention } from '../../lib/mention.js'
 
 const graph = useGraphStore()
 const memories = useMemoriesStore()
@@ -23,8 +24,30 @@ function rowState(edge) {
   return 'idle'
 }
 
+// Preview of what Approve will do: appends the mention link to the source
+// memory's content. Mirrors stores/graph.js's resolveEdge exactly (same
+// withMention helper) so this never drifts from what actually gets applied.
+function diffFor(edge) {
+  const source = memories.all.find(m => m.id === edge.source_id)
+  if (!source) return null
+  const before = source.content || ''
+  const after = withMention(before, edge)
+  if (after === before) return null
+  const added = after.slice(before.length).replace(/^\n+/, '')
+  const context = before.trim().split('\n').filter(Boolean).pop()
+  return { context: context || '(empty memory)', added }
+}
+
+// Selecting a suggestion shows the source memory's detail (in whichever
+// view is mounted — Graph's DetailPanel or the Memories page) and, on the
+// Graph page, highlights the pending edge on the canvas via selectedEdgeId.
 function selectRow(edge) {
-  graph.selectedEdgeId = graph.selectedEdgeId === edge.id ? null : edge.id
+  const isSame = graph.selectedEdgeId === edge.id
+  graph.selectedEdgeId = isSame ? null : edge.id
+  if (isSame) return
+  graph.selectedNodeId = edge.source_id
+  const source = memories.all.find(m => m.id === edge.source_id)
+  if (source) memories.select(source)
 }
 
 function openRevise(edge) {
@@ -93,6 +116,17 @@ async function endSession() {
         <p v-if="edge.reason" class="mt-1" style="font-size:11px; color:var(--hm-text-secondary)">
           {{ edge.reason }}
         </p>
+
+        <div v-if="graph.selectedEdgeId === edge.id && diffFor(edge)" class="mt-2 rounded"
+          style="font-family:var(--hm-font-mono); font-size:11px; line-height:1.5; padding:8px 10px;
+                 background:var(--hm-mono-bg); border:0.5px solid var(--hm-border-subtle)" @click.stop>
+          <div style="color:var(--hm-text-tertiary); white-space:pre-wrap; word-break:break-word">
+            {{ diffFor(edge).context }}
+          </div>
+          <div style="color:var(--hm-success); white-space:pre-wrap; word-break:break-word">
+            + {{ diffFor(edge).added }}
+          </div>
+        </div>
 
         <div v-if="rowState(edge) === 'revising'" class="mt-2 flex items-center gap-1.5"
           style="font-size:11px; color:var(--hm-warning)">

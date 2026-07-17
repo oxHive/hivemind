@@ -944,24 +944,25 @@ pub(crate) async fn build_suggest_prompt(store: &SqliteStore) -> anyhow::Result<
          Check each entry in EXISTING CONNECTIONS against the current memory content above.\n\
          Flag one as stale/irrelevant if its memories no longer support the stated relationship\n\
          (content was edited away from it, the link was a coincidence, or it duplicates/contradicts\n\
-         another edge). For each stale one, call memory_update_edge with the edge id, \n\
-         status: \"rejected\", and a one-sentence reason.\n\n\
+         another edge). You cannot reject an edge yourself — only the user can, in the dashboard.\n\
+         For each stale one, call memory_update_edge with the edge id and a reason starting with\n\
+         \"STALE:\" explaining why, so it's flagged for the user to review and reject.\n\n\
          STEP 2 — Suggest new connections.\n\
          Identify meaningful connections not yet captured. For each one, call memory_store_edge\n\
          with: source_id, target_id, relationship, status: \"pending\", link_text (a short phrase\n\
          naming the relationship, e.g. \"n-layer architecture\"), and a one-sentence reason.\n\
+         Choose link_text carefully: if the user approves this suggestion, the dashboard embeds it\n\
+         verbatim as an inline markdown link in the source memory's content, e.g.:\n\
+         \x20\x20See also: [n-layer architecture](parent:mem_xxx)\n\
+         so it reads naturally as the label of that link. Do not edit memory content yourself to\n\
+         add this link — approval in the dashboard does that, not you.\n\
          Relationship types:\n\
          \x20\x20parent  - target is a broader principle/context source falls under\n\
          \x20\x20child   - target is a specific instance of source\n\
          \x20\x20sibling - a peer, no hierarchy\n\
          Suggest 3-7 connections. Focus on cross-domain insights.\n\n\
-         STEP 3 — Anchor the connection in the source memory's content.\n\
-         For each new connection from Step 2, also call memory_update on the source memory to\n\
-         embed the relationship as an inline markdown link using link_text as the label and the\n\
-         target's id as the destination, e.g.:\n\
-         \x20\x20project architecture is based on [n-layer architecture](mem_xxx)\n\
-         Keep each memory's own content short and focused on what it uniquely knows; point to\n\
-         related context through these links rather than duplicating it inline. A future reader\n\
+         Keep each memory's own content short and focused on what it uniquely knows; these links\n\
+         are how related context gets pointed at instead of duplicated inline. A future reader\n\
          should only follow a link when the current task actually needs that related memory, not\n\
          eagerly pull in every connected memory.",
         memories.len(),

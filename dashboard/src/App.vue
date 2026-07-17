@@ -10,6 +10,7 @@ import { useAnalyticsStore } from './stores/analytics.js'
 import { useSuggestStore } from './stores/suggest.js'
 import { BASE } from './api/client.js'
 import AppSidebar from './components/sidebar/AppSidebar.vue'
+import SuggestPanel from './components/graph/SuggestPanel.vue'
 import Toast from './components/shared/Toast.vue'
 import AnalyticsView from './views/AnalyticsView.vue'
 import MemoriesView from './views/MemoriesView.vue'
@@ -114,6 +115,9 @@ onBeforeUnmount(() => {
         <FeedbackView v-show="ui.activeView === 'feedback'" />
         <SettingsView v-show="ui.activeView === 'settings'" />
       </main>
+      <!-- Global: available from any page whenever there are pending
+           suggestions to review, not just the Graph view. -->
+      <SuggestPanel v-if="suggest.panelOpen" />
     </template>
 
     <Toast />

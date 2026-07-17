@@ -211,6 +211,34 @@ export const useMemoriesStore = defineStore('memories', () => {
     }
   }
 
+  // Folds a memory object that changed outside the normal edit flow (e.g.
+  // an approved suggestion embedding a mention link) into `all`, and into
+  // `selected`/`draft` too when it's the open one — reusing the same
+  // not-dirty/dirty split as refreshSilently so an in-progress edit here
+  // isn't silently clobbered, just flagged as a conflict instead.
+  function applyExternalUpdate(updated) {
+    const idx = all.value.findIndex(m => m.id === updated.id)
+    if (idx !== -1) all.value[idx] = updated
+    else all.value.unshift(updated)
+
+    if (selected.value?.id !== updated.id) return
+    if (!dirty.value) {
+      selected.value = updated
+      draft.value = { title: updated.title, content: updated.content, tags: [...(updated.tags || [])] }
+      conflict.value = null
+    } else {
+      conflict.value = updated
+    }
+  }
+
+  // Direct content patch outside the draft/save flow — used when approving
+  // a suggested connection embeds a mention link into the source memory.
+  async function patchContent(id, content) {
+    const updated = await api.patchMemory(id, { content })
+    applyExternalUpdate(updated)
+    return updated
+  }
+
   async function create({ title, content, tags, layer }) {
     const res = await api.createMemory({ title, content, tags, layer })
     await fetchAll()
@@ -239,5 +267,6 @@ export const useMemoriesStore = defineStore('memories', () => {
     all, selected, draft, conflict, searchQuery, layerFilter, loading, saving, filtered, dirty,
     isDraft, resetDraft, resolveConflictLoadLatest, resolveConflictKeepMine,
     fetchAll, refreshSilently, select, save, create, remove, clearAll,
+    applyExternalUpdate, patchContent,
   }
 })
