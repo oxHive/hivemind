@@ -16,6 +16,9 @@ use tokio::sync::broadcast;
 const MAX_FEED_LINES: usize = 200;
 const DIM: Color = Color::Rgb(0x8a, 0x8a, 0x9a);
 const CYAN: Color = Color::Rgb(0x67, 0xe8, 0xf9);
+/// Inline viewport height in rows: renders as a compact panel under the
+/// shell prompt rather than taking over the full screen.
+const VIEWPORT_HEIGHT: u16 = 12;
 
 /// Runs the interactive `hivemind up` view: header + a live activity feed fed
 /// by the existing SSE broadcast channel. Returns on `q` (server keeps
@@ -28,7 +31,7 @@ pub async fn run(
     events: broadcast::Sender<serde_json::Value>,
     store: std::sync::Arc<SqliteStore>,
 ) -> Result<()> {
-    let guard = TerminalGuard::enter()?;
+    let guard = TerminalGuard::enter(VIEWPORT_HEIGHT)?;
     let mut terminal = guard.terminal()?;
     let mut rx = events.subscribe();
     let mut feed: VecDeque<String> = VecDeque::with_capacity(MAX_FEED_LINES);
@@ -120,7 +123,7 @@ fn draw(
 ) {
     let area = frame.area();
     let layout = Layout::vertical([
-        Constraint::Length(6),
+        Constraint::Length(5),
         Constraint::Min(1),
         Constraint::Length(1),
     ])
