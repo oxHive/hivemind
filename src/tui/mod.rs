@@ -1,10 +1,10 @@
 use anyhow::Result;
 use crossterm::{
-    event::{DisableMouseCapture, EnableMouseCapture},
+    cursor::Show,
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{Terminal, backend::CrosstermBackend};
+use ratatui::{Terminal, TerminalOptions, Viewport, backend::CrosstermBackend};
 use std::io::IsTerminal as _;
 use std::io::{Stdout, stdout};
 use std::sync::Once;
@@ -30,7 +30,7 @@ pub fn no_color() -> bool {
 
 fn restore_terminal() {
     let _ = disable_raw_mode();
-    let _ = execute!(stdout(), LeaveAlternateScreen, DisableMouseCapture);
+    let _ = execute!(stdout(), Show);
 }
 
 static PANIC_HOOK_INSTALLED: Once = Once::new();
@@ -45,24 +45,30 @@ fn install_panic_hook() {
     });
 }
 
-/// Owns the alt-screen/raw-mode terminal state. Restores the terminal on
-/// Drop (normal exit) and via a panic hook (abnormal exit), so a bug in
-/// rendering never leaves the user's shell in raw/alt-screen state.
-pub struct TerminalGuard;
+/// Owns the raw-mode terminal state for an inline (non-alt-screen) viewport.
+/// Renders in place under the shell prompt, scrolling with the terminal like
+/// normal output, rather than taking over the full screen. Restores the
+/// terminal on Drop (normal exit) and via a panic hook (abnormal exit), so a
+/// bug in rendering never leaves the user's shell in raw mode.
+pub struct TerminalGuard {
+    height: u16,
+}
 
 impl TerminalGuard {
-    pub fn enter() -> Result<Self> {
+    pub fn enter(height: u16) -> Result<Self> {
         install_panic_hook();
         enable_raw_mode()?;
-        if let Err(e) = execute!(stdout(), EnterAlternateScreen, EnableMouseCapture) {
-            let _ = disable_raw_mode();
-            return Err(e.into());
-        }
-        Ok(TerminalGuard)
+        Ok(TerminalGuard { height })
     }
 
     pub fn terminal(&self) -> Result<Term> {
-        Ok(Terminal::new(CrosstermBackend::new(stdout()))?)
+        let backend = CrosstermBackend::new(stdout());
+        Ok(Terminal::with_options(
+            backend,
+            TerminalOptions {
+                viewport: Viewport::Inline(self.height),
+            },
+        )?)
     }
 }
 

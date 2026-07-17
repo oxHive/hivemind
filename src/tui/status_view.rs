@@ -15,6 +15,9 @@ use std::time::Duration;
 const REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 const DIM: Color = Color::Rgb(0x8a, 0x8a, 0x9a);
 const WARNING: Color = Color::Rgb(0xf5, 0xa5, 0x24);
+/// Inline viewport height in rows: renders as a compact panel under the
+/// shell prompt rather than taking over the full screen.
+const VIEWPORT_HEIGHT: u16 = 12;
 
 /// Runs the interactive `hivemind status` view: header + a key-value panel
 /// that auto-refreshes every 5s, with `r` for an immediate manual refresh.
@@ -29,7 +32,7 @@ pub async fn run(
     settings: &crate::config::ServerSettings,
     server_up: bool,
 ) -> Result<()> {
-    let guard = TerminalGuard::enter()?;
+    let guard = TerminalGuard::enter(VIEWPORT_HEIGHT)?;
     let mut terminal = guard.terminal()?;
 
     let mut data = build_status_data(
@@ -138,7 +141,7 @@ fn draw(data: &StatusData, last_error: Option<&str>, no_color: bool, frame: &mut
     let area = frame.area();
     let error_height = if last_error.is_some() { 1 } else { 0 };
     let layout = Layout::vertical([
-        Constraint::Length(6),
+        Constraint::Length(5),
         Constraint::Length(error_height),
         Constraint::Min(1),
         Constraint::Length(1),
