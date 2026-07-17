@@ -5,8 +5,8 @@ use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::{
     layout::{Constraint, Layout},
-    style::{Color, Style},
-    text::Line,
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
     widgets::{Block, Borders, Padding, Paragraph},
 };
 use std::collections::VecDeque;
@@ -100,6 +100,16 @@ async fn poll_key_event() -> Option<event::KeyEvent> {
     .unwrap_or(None)
 }
 
+/// Wraps `label` in an OSC 8 terminal hyperlink escape sequence pointing at
+/// `url`. The escape bytes have zero display width, so they don't affect
+/// layout; terminals that support OSC 8 (iTerm2, kitty, Windows Terminal,
+/// most VTE-based terminals) render `label` as a clickable link that opens
+/// `url` in the default browser. Terminals without support just print the
+/// label, the escapes are silently ignored.
+fn hyperlink(url: &str, label: &str) -> String {
+    format!("\x1b]8;;{url}\x1b\\{label}\x1b]8;;\x1b\\")
+}
+
 fn chrono_now_hms() -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -135,7 +145,7 @@ fn draw(
 
     let body = Block::default()
         .borders(Borders::ALL)
-        .padding(Padding::left(2))
+        .padding(Padding::new(2, 2, 0, 0))
         .title(" Activity ");
     let inner = body.inner(layout[1]);
     frame.render_widget(body, layout[1]);
@@ -148,7 +158,14 @@ fn draw(
         Line::from(format!("MCP        {mcp_url}")),
     ];
     if let Some(url) = dashboard_url {
-        lines.push(Line::from(format!("Dashboard  {url}")));
+        let mut link_style = Style::default().add_modifier(Modifier::UNDERLINED);
+        if !no_color {
+            link_style = link_style.fg(CYAN);
+        }
+        lines.push(Line::from(vec![
+            Span::raw("Dashboard  "),
+            Span::styled(hyperlink(url, url), link_style),
+        ]));
     }
     lines.push(Line::from(""));
     let feed_style = if no_color {
