@@ -1,24 +1,38 @@
 {
-  "name": "opencode-hivemind",
+  "name": "@oxhive/opencode-hivemind",
   "version": "0.6.0",
   "description": "HiveMind persistent memory plugin for OpenCode. Auto-registers MCP server and provides memory skills.",
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "mcp",
+    "memory",
+    "ai",
+    "agent"
+  ],
+  "homepage": "https://github.com/oxhive/hivemind#readme",
+  "bugs": {
+    "url": "https://github.com/oxhive/hivemind/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/oxhive/hivemind.git",
+    "directory": "plugins/opencode"
+  },
+  "license": "AGPL-3.0-only",
+  "author": "oxhive",
+  "type": "commonjs",
   "main": "hivemind.js",
-  "types": "hivemind.d.ts",
   "files": [
     "hivemind.js",
-    "hivemind.d.ts",
     "skills/"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "bun build --target=bun hivemind.ts --outfile=hivemind.js && bun run scripts/resolve-skills.ts",
     "prepublishOnly": "bun run build"
-  },
-  "keywords": ["opencode", "opencode-plugin", "mcp", "memory", "ai", "agent"],
-  "license": "AGPL-3.0-only",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/oxhive/hivemind",
-    "directory": "plugins/opencode"
   },
   "peerDependencies": {
     "@opencode-ai/plugin": "*"
