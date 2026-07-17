@@ -32,3 +32,7 @@ If a section has no entries, say "(none)" rather than omitting the heading.
 
 - Never fabricate connections. Only show what `memory_get_edges` returned.
 - If the user wants to explore a connected memory further, offer to `memory_recall` it or run `/memory-connections` on it next.
+- A memory's content may contain inline mention links like `[label](mem_xxx)` pointing at
+  a parent/child/sibling. Treat these as lazy pointers, not required reading: follow one
+  only when the current task actually needs that related memory's content. Don't
+  proactively `memory_recall` every mentioned id just because it's linked.
