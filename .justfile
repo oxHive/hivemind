@@ -1,22 +1,17 @@
 mod dashboard
 
 import 'recipes/release.just'
+import 'recipes/cargo.just'
 
 _default:
   @just --choose
 
-test:
-  cargo test
-
-build:
-  cargo build
-
-install:
-  cargo install --path . --force
 
 up:
-  just dashboard build
-  cargo run -- up
+  just run up
+
+status:
+  just run status
 
 # Build, install, and register with an AI client for local testing (default: claude)
 mcp-install client='claude': install
