@@ -7,7 +7,7 @@ use ratatui::{
     layout::{Constraint, Layout},
     style::{Color, Style},
     text::Line,
-    widgets::{Block, Borders, Padding, Paragraph, Wrap},
+    widgets::{Block, Borders, Padding, Paragraph},
 };
 use std::path::Path;
 use std::time::Duration;
@@ -17,7 +17,7 @@ const DIM: Color = Color::Rgb(0x8a, 0x8a, 0x9a);
 const WARNING: Color = Color::Rgb(0xf5, 0xa5, 0x24);
 /// Inline viewport height in rows: renders as a compact panel under the
 /// shell prompt rather than taking over the full screen.
-const VIEWPORT_HEIGHT: u16 = 16;
+const VIEWPORT_HEIGHT: u16 = 12;
 
 /// Runs the interactive `hivemind status` view: header + a key-value panel
 /// that auto-refreshes every 5s, with `r` for an immediate manual refresh.
@@ -137,40 +137,14 @@ async fn poll_key_event() -> Option<event::KeyEvent> {
     .unwrap_or(None)
 }
 
+/// Border (2) + left/right padding (2+2) added around the body's content
+/// width to get the box's total column width.
+const BODY_FRAME_OVERHEAD: u16 = 6;
+/// Floor so the box never shrinks below fitting the header wordmark/title.
+const MIN_BOX_WIDTH: u16 = 40;
+const FOOTER_TEXT: &str = "  q quit   r refresh";
+
 fn draw(data: &StatusData, last_error: Option<&str>, no_color: bool, frame: &mut ratatui::Frame) {
-    let area = frame.area();
-    let width = crate::tui::BOX_WIDTH.min(area.width);
-    let area = Layout::horizontal([Constraint::Length(width), Constraint::Min(0)]).split(area)[0];
-    let error_height = if last_error.is_some() { 1 } else { 0 };
-    let layout = Layout::vertical([
-        Constraint::Length(5),
-        Constraint::Length(error_height),
-        Constraint::Min(1),
-        Constraint::Length(1),
-    ])
-    .split(area);
-
-    render_header(data, no_color, layout[0], frame.buffer_mut());
-
-    if let Some(msg) = last_error {
-        let error_style = if no_color {
-            Style::default()
-        } else {
-            Style::default().fg(WARNING)
-        };
-        frame.render_widget(
-            Paragraph::new(Line::from(format!("refresh failed: {msg}")).style(error_style)),
-            layout[1],
-        );
-    }
-
-    let body = Block::default()
-        .borders(Borders::ALL)
-        .padding(Padding::new(2, 2, 0, 0))
-        .title(" Overview ");
-    let inner = body.inner(layout[2]);
-    frame.render_widget(body, layout[2]);
-
     let mut lines = vec![
         Line::from(format!(
             "Server     {}",
@@ -207,7 +181,51 @@ fn draw(data: &StatusData, last_error: Option<&str>, no_color: bool, frame: &mut
             "No .hivemind.toml found in this directory tree.",
         ));
     }
-    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+
+    // Size the box to the widest line instead of a fixed width, so long
+    // values (storage path, sync URL) fit without wrapping or clipping.
+    let content_width = lines
+        .iter()
+        .map(Line::width)
+        .max()
+        .unwrap_or(0)
+        .max(FOOTER_TEXT.len()) as u16;
+
+    let area = frame.area();
+    let width = (content_width + BODY_FRAME_OVERHEAD)
+        .max(MIN_BOX_WIDTH)
+        .min(area.width);
+    let area = Layout::horizontal([Constraint::Length(width), Constraint::Min(0)]).split(area)[0];
+    let error_height = if last_error.is_some() { 1 } else { 0 };
+    let layout = Layout::vertical([
+        Constraint::Length(5),
+        Constraint::Length(error_height),
+        Constraint::Min(1),
+        Constraint::Length(1),
+    ])
+    .split(area);
+
+    render_header(data, no_color, layout[0], frame.buffer_mut());
+
+    if let Some(msg) = last_error {
+        let error_style = if no_color {
+            Style::default()
+        } else {
+            Style::default().fg(WARNING)
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(format!("refresh failed: {msg}")).style(error_style)),
+            layout[1],
+        );
+    }
+
+    let body = Block::default()
+        .borders(Borders::ALL)
+        .padding(Padding::new(2, 2, 0, 0))
+        .title(" Overview ");
+    let inner = body.inner(layout[2]);
+    frame.render_widget(body, layout[2]);
+    frame.render_widget(Paragraph::new(lines), inner);
 
     let footer_style = if no_color {
         Style::default()
@@ -215,7 +233,7 @@ fn draw(data: &StatusData, last_error: Option<&str>, no_color: bool, frame: &mut
         Style::default().fg(DIM)
     };
     frame.render_widget(
-        Paragraph::new(Line::from("  q quit   r refresh").style(footer_style)),
+        Paragraph::new(Line::from(FOOTER_TEXT).style(footer_style)),
         layout[3],
     );
 }
