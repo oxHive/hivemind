@@ -93,12 +93,11 @@ pub async fn run(
 /// 100ms timeout with no event, or a non-press event (e.g. key release).
 async fn poll_key_event() -> Option<event::KeyEvent> {
     tokio::task::spawn_blocking(|| {
-        if event::poll(Duration::from_millis(100)).unwrap_or(false) {
-            if let Ok(Event::Key(key)) = event::read() {
-                if key.kind == KeyEventKind::Press {
-                    return Some(key);
-                }
-            }
+        if event::poll(Duration::from_millis(100)).unwrap_or(false)
+            && let Ok(Event::Key(key)) = event::read()
+            && key.kind == KeyEventKind::Press
+        {
+            return Some(key);
         }
         None
     })
