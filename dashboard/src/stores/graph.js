@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import * as api from '../api/edges.js'
+import { useMemoriesStore } from './memories.js'
+import { withMention } from '../lib/mention.js'
 
 export const useGraphStore = defineStore('graph', () => {
   const edges = ref([])
@@ -24,10 +26,25 @@ export const useGraphStore = defineStore('graph', () => {
     edges.value = data.edges ?? []
   }
 
+  // Approving a suggested (pending) connection also embeds it as a mention
+  // link in the source memory's content — the dashboard is what applies the
+  // edit the agent only proposed, keeping the review step meaningful.
   async function resolveEdge(id, status) {
+    const before = edges.value.find(e => e.id === id)
     await api.patchEdge(id, { status })
     const idx = edges.value.findIndex(e => e.id === id)
     if (idx !== -1) edges.value[idx] = { ...edges.value[idx], status }
+
+    if (status === 'active' && before?.status === 'pending' && before.link_text) {
+      const memories = useMemoriesStore()
+      const source = memories.all.find(m => m.id === before.source_id)
+      if (source) {
+        const nextContent = withMention(source.content, before)
+        if (nextContent !== source.content) {
+          await memories.patchContent(before.source_id, nextContent)
+        }
+      }
+    }
   }
 
   async function acceptAllPending() {

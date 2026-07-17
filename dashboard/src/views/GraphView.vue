@@ -6,7 +6,6 @@ import GraphCanvas from '../components/graph/GraphCanvas.vue'
 import GraphToolbar from '../components/graph/GraphToolbar.vue'
 import PendingBar from '../components/graph/PendingBar.vue'
 import DetailPanel from '../components/graph/DetailPanel.vue'
-import SuggestPanel from '../components/graph/SuggestPanel.vue'
 import Legend from '../components/graph/Legend.vue'
 import EmptyState from '../components/shared/EmptyState.vue'
 import Tooltip from '../components/shared/Tooltip.vue'
@@ -48,9 +47,8 @@ const tooltipText = computed(() => {
       <Legend />
     </div>
 
-    <!-- Right: suggest panel wins over node detail while open -->
-    <SuggestPanel v-if="suggest.panelOpen" />
-    <DetailPanel v-else />
+    <!-- Right: node detail, unless the global suggest panel (App.vue) is open -->
+    <DetailPanel v-if="!suggest.panelOpen" />
 
     <Tooltip :visible="!!(hoveredNode || hoveredEdge)" :text="tooltipText" :x="mouseX" :y="mouseY" />
   </div>
