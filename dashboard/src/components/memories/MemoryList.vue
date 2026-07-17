@@ -4,10 +4,8 @@ import { useMemoriesStore } from '../../stores/memories.js'
 import MemoryCard from './MemoryCard.vue'
 import FilterChip from '../shared/FilterChip.vue'
 import SkeletonCard from '../shared/SkeletonCard.vue'
-import NewMemoryModal from './NewMemoryModal.vue'
 
 const memories = useMemoriesStore()
-const showNew = ref(false)
 const searchEl = ref(null)
 
 function handleSlash(e) {
@@ -35,8 +33,7 @@ const filters = [
     <!-- Header -->
     <div class="px-4 pt-4 pb-3" style="border-bottom:0.5px solid var(--hm-border-subtle)">
       <button class="hm-btn hm-btn-primary hm-btn-sm mb-3 w-full justify-center"
-        @click="showNew = true">+ New memory</button>
-      <NewMemoryModal v-if="showNew" @close="showNew = false" />
+        @click="memories.startNew()">+ New memory</button>
       <div class="relative mb-3">
         <span class="absolute left-2.5 top-1/2 -translate-y-1/2" style="color:var(--hm-text-tertiary); font-size:13px">⌕</span>
         <input
