@@ -19,6 +19,12 @@ const CYAN: Color = Color::Rgb(0x67, 0xe8, 0xf9);
 /// Inline viewport height in rows: renders as a compact panel under the
 /// shell prompt rather than taking over the full screen.
 const VIEWPORT_HEIGHT: u16 = 12;
+/// Border (2) + left/right padding (2+2) added around the body's content
+/// width to get the box's total column width.
+const BODY_FRAME_OVERHEAD: u16 = 6;
+/// Floor so the box never shrinks below fitting the header wordmark/title.
+const MIN_BOX_WIDTH: u16 = 40;
+const FOOTER_TEXT: &str = "  q quit   ctrl+c stop server";
 
 /// Runs the interactive `hivemind up` view: header + a live activity feed fed
 /// by the existing SSE broadcast channel. Returns on `q` (server keeps
@@ -121,25 +127,6 @@ fn draw(
     feed: &VecDeque<String>,
     frame: &mut ratatui::Frame,
 ) {
-    let area = frame.area();
-    let width = crate::tui::BOX_WIDTH.min(area.width);
-    let area = Layout::horizontal([Constraint::Length(width), Constraint::Min(0)]).split(area)[0];
-    let layout = Layout::vertical([
-        Constraint::Length(5),
-        Constraint::Min(1),
-        Constraint::Length(1),
-    ])
-    .split(area);
-
-    render_header(data, no_color, layout[0], frame.buffer_mut());
-
-    let body = Block::default()
-        .borders(Borders::ALL)
-        .padding(Padding::new(2, 2, 0, 0))
-        .title(" Activity ");
-    let inner = body.inner(layout[1]);
-    frame.render_widget(body, layout[1]);
-
     let mut lines = vec![
         Line::from(format!(
             "Server     running at http://{}:{}",
@@ -171,6 +158,36 @@ fn draw(
     for entry in feed.iter().take(20) {
         lines.push(Line::from(entry.as_str()).style(feed_style));
     }
+
+    // Size the box to the widest line instead of a fixed width, so long
+    // values (dashboard URL, feed entries) fit without clipping.
+    let content_width = lines
+        .iter()
+        .map(Line::width)
+        .max()
+        .unwrap_or(0)
+        .max(FOOTER_TEXT.len()) as u16;
+
+    let area = frame.area();
+    let width = (content_width + BODY_FRAME_OVERHEAD)
+        .max(MIN_BOX_WIDTH)
+        .min(area.width);
+    let area = Layout::horizontal([Constraint::Length(width), Constraint::Min(0)]).split(area)[0];
+    let layout = Layout::vertical([
+        Constraint::Length(5),
+        Constraint::Min(1),
+        Constraint::Length(1),
+    ])
+    .split(area);
+
+    render_header(data, no_color, layout[0], frame.buffer_mut());
+
+    let body = Block::default()
+        .borders(Borders::ALL)
+        .padding(Padding::new(2, 2, 0, 0))
+        .title(" Activity ");
+    let inner = body.inner(layout[1]);
+    frame.render_widget(body, layout[1]);
     frame.render_widget(Paragraph::new(lines), inner);
 
     let footer_style = if no_color {
@@ -179,7 +196,7 @@ fn draw(
         Style::default().fg(DIM)
     };
     frame.render_widget(
-        Paragraph::new(Line::from("  q quit   ctrl+c stop server").style(footer_style)),
+        Paragraph::new(Line::from(FOOTER_TEXT).style(footer_style)),
         layout[2],
     );
 }
