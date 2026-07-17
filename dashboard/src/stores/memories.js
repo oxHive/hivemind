@@ -35,6 +35,13 @@ export const useMemoriesStore = defineStore('memories', () => {
   const layerFilter = ref('all')
   const loading = ref(false)
   const saving = ref(false)
+  // True while composing a brand-new memory in the detail panel — no id
+  // yet, nothing sent to the backend until Save.
+  const creatingNew = ref(false)
+
+  const canSaveNew = computed(() =>
+    !!(creatingNew.value && draft.value?.title?.trim() && draft.value?.content?.trim())
+  )
 
   const filtered = computed(() => {
     let list = all.value
@@ -180,6 +187,7 @@ export const useMemoriesStore = defineStore('memories', () => {
       persistDrafts()
     }
     conflict.value = null
+    creatingNew.value = false
     selected.value = entry
     if (!entry) {
       draft.value = null
@@ -189,7 +197,41 @@ export const useMemoriesStore = defineStore('memories', () => {
       ?? { title: entry.title, content: entry.content, tags: [...(entry.tags || [])] }
   }
 
+  // Opens an empty draft in the detail panel for composing a new memory —
+  // nothing is sent to the backend until Save. Stashes any unsaved edit on
+  // the currently open memory first, same as switching to another memory.
+  function startNew() {
+    if (selected.value && dirty.value) {
+      stashedDrafts.value[selected.value.id] = draft.value
+      persistDrafts()
+    }
+    conflict.value = null
+    selected.value = null
+    creatingNew.value = true
+    draft.value = { title: '', content: '', tags: [], layer: 'workspace' }
+  }
+
+  function cancelNew() {
+    creatingNew.value = false
+    draft.value = null
+  }
+
   async function save() {
+    if (creatingNew.value) {
+      if (!canSaveNew.value) return false
+      saving.value = true
+      try {
+        const id = await create({
+          title: draft.value.title.trim(),
+          content: draft.value.content,
+          tags: draft.value.tags,
+          layer: draft.value.layer,
+        })
+        return !!id
+      } finally {
+        saving.value = false
+      }
+    }
     if (!selected.value || !dirty.value || conflict.value) return false
     saving.value = true
     try {
@@ -265,8 +307,9 @@ export const useMemoriesStore = defineStore('memories', () => {
 
   return {
     all, selected, draft, conflict, searchQuery, layerFilter, loading, saving, filtered, dirty,
+    creatingNew, canSaveNew,
     isDraft, resetDraft, resolveConflictLoadLatest, resolveConflictKeepMine,
-    fetchAll, refreshSilently, select, save, create, remove, clearAll,
+    fetchAll, refreshSilently, select, startNew, cancelNew, save, create, remove, clearAll,
     applyExternalUpdate, patchContent,
   }
 })

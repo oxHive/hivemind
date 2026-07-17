@@ -118,8 +118,13 @@ async function flag(signal) {
 }
 
 async function handleSave() {
+  const wasNew = memories.creatingNew
   const saved = await memories.save()
-  if (saved) ui.showToast('Changes saved')
+  if (saved) ui.showToast(wasNew ? 'Memory created' : 'Changes saved')
+}
+
+function handleCancelNew() {
+  memories.cancelNew()
 }
 
 async function handleDelete() {
@@ -138,7 +143,8 @@ function handleReset() {
 function handleKeydown(e) {
   if ((e.ctrlKey || e.metaKey) && e.key === 's') {
     e.preventDefault()
-    if (memories.selected && memories.dirty && !memories.saving) handleSave()
+    if (memories.saving) return
+    if (memories.creatingNew ? memories.canSaveNew : memories.selected && memories.dirty) handleSave()
   }
 }
 
@@ -150,7 +156,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
   <div class="flex flex-col h-full flex-1" style="background:var(--hm-bg-base)">
 
     <!-- Empty state -->
-    <EmptyState v-if="!memories.selected"
+    <EmptyState v-if="!memories.selected && !memories.creatingNew"
       message="Select a memory to view or edit"
       hint="Press / to search, Ctrl+S to save changes" />
 
@@ -159,9 +165,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
       <div class="flex items-center justify-between px-5 py-2.5"
         style="border-bottom:0.5px solid var(--hm-border-subtle)">
         <span class="font-mono" style="font-size:10px; color:var(--hm-text-tertiary)">
-          {{ memories.selected.id }}
+          {{ memories.creatingNew ? 'New memory (unsaved)' : memories.selected.id }}
         </span>
-        <div class="flex gap-1">
+        <div v-if="memories.selected" class="flex gap-1">
           <div class="relative">
             <button class="hm-btn hm-btn-ghost hm-btn-sm" title="Flag for review"
               @click="flagOpen = !flagOpen" @keydown.esc="flagOpen = false">⚑</button>
@@ -257,6 +263,19 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
             @update:model-value="memories.draft.tags = $event" />
         </div>
 
+        <!-- Layer: only chosen once, at creation -->
+        <template v-if="memories.creatingNew">
+          <label class="hm-label">LAYER</label>
+          <div class="flex gap-1.5 mb-6">
+            <button class="hm-btn hm-btn-sm"
+              :style="memories.draft.layer==='workspace' ? 'background:var(--hm-workspace-bg); border-color:var(--hm-workspace); color:var(--hm-workspace)' : 'border-color:var(--hm-border-subtle); color:var(--hm-text-secondary)'"
+              @click="memories.draft.layer='workspace'">workspace</button>
+            <button class="hm-btn hm-btn-sm"
+              :style="memories.draft.layer==='personal' ? 'background:var(--hm-personal-bg); border-color:var(--hm-personal); color:var(--hm-personal)' : 'border-color:var(--hm-border-subtle); color:var(--hm-text-secondary)'"
+              @click="memories.draft.layer='personal'">personal</button>
+          </div>
+        </template>
+
         <!-- Connections -->
         <template v-if="memories.selected && graph.edgesFor(memories.selected.id).length">
           <label class="hm-label">CONNECTIONS</label>
@@ -280,21 +299,30 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
       <!-- Footer -->
       <div class="flex items-center justify-between px-5 py-3"
         style="border-top:0.5px solid var(--hm-border-subtle)">
-        <span class="flex items-center gap-2 font-mono" style="font-size:11px; color:var(--hm-text-tertiary)">
+        <span v-if="memories.selected" class="flex items-center gap-2 font-mono"
+          style="font-size:11px; color:var(--hm-text-tertiary)">
           updated {{ fmtDate(memories.selected.updated_at) }}
           <LayerBadge :layer="memories.selected.layer" />
         </span>
+        <span v-else class="font-mono" style="font-size:11px; color:var(--hm-text-tertiary)">
+          not saved yet
+        </span>
         <div class="flex items-center gap-2">
-          <button v-if="memories.dirty" class="hm-btn hm-btn-default hm-btn-sm"
+          <button v-if="memories.creatingNew" class="hm-btn hm-btn-default hm-btn-sm"
+            :disabled="memories.saving"
+            @click="handleCancelNew">
+            Cancel
+          </button>
+          <button v-else-if="memories.dirty" class="hm-btn hm-btn-default hm-btn-sm"
             :disabled="memories.saving"
             @click="showResetModal = true">
             Reset
           </button>
           <button class="hm-btn hm-btn-primary hm-btn-sm"
-            :disabled="!memories.dirty || memories.saving || !!memories.conflict"
+            :disabled="(memories.creatingNew ? !memories.canSaveNew : !memories.dirty) || memories.saving || !!memories.conflict"
             :title="memories.conflict ? 'Resolve the conflict above before saving' : undefined"
             @click="handleSave">
-            {{ memories.saving ? 'Saving…' : 'Save' }}
+            {{ memories.saving ? (memories.creatingNew ? 'Creating…' : 'Saving…') : (memories.creatingNew ? 'Create' : 'Save') }}
           </button>
         </div>
       </div>
