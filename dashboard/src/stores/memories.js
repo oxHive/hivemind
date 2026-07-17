@@ -3,6 +3,14 @@ import { ref, computed, watch } from 'vue'
 import * as api from '../api/memories.js'
 
 const DRAFTS_KEY = 'hivemind.memories.drafts'
+// Sentinel key for the in-progress "new memory" draft in the same
+// id-keyed stash used for existing memories' unsaved edits — there's no
+// real id to key it by until it's actually saved.
+const NEW_DRAFT_KEY = '__new__'
+
+function isNewDraftFilled(d) {
+  return !!(d && (d.title?.trim() || d.content?.trim() || (d.tags && d.tags.length)))
+}
 
 function loadStashedDrafts() {
   try {
@@ -41,6 +49,14 @@ export const useMemoriesStore = defineStore('memories', () => {
 
   const canSaveNew = computed(() =>
     !!(creatingNew.value && draft.value?.title?.trim() && draft.value?.content?.trim())
+  )
+
+  // Whether there's a stashed new-memory draft waiting — either the one
+  // currently being composed (if it has anything in it) or one left behind
+  // from switching away earlier.
+  const hasNewDraft = computed(() =>
+    (creatingNew.value && isNewDraftFilled(draft.value)) ||
+    Object.prototype.hasOwnProperty.call(stashedDrafts.value, NEW_DRAFT_KEY)
   )
 
   const filtered = computed(() => {
@@ -83,8 +99,17 @@ export const useMemoriesStore = defineStore('memories', () => {
   // switch-away time, so a page reload while still editing (never having
   // switched to another memory) doesn't lose the edit either.
   watch(
-    [draft, selected],
+    [draft, selected, creatingNew],
     () => {
+      if (creatingNew.value) {
+        if (isNewDraftFilled(draft.value)) {
+          stashedDrafts.value[NEW_DRAFT_KEY] = draft.value
+        } else {
+          delete stashedDrafts.value[NEW_DRAFT_KEY]
+        }
+        persistDrafts()
+        return
+      }
       if (!selected.value) return
       if (dirty.value) {
         stashedDrafts.value[selected.value.id] = draft.value
@@ -181,11 +206,26 @@ export const useMemoriesStore = defineStore('memories', () => {
     conflict.value = null
   }
 
-  function select(entry) {
-    if (selected.value && dirty.value) {
+  // Stashes whatever is currently open — an existing memory's dirty edit,
+  // or an in-progress new-memory draft — before navigating away from it, so
+  // switching to another memory / another New Memory / another page and
+  // coming back restores it instead of silently discarding it.
+  function stashCurrentDraft() {
+    if (creatingNew.value) {
+      if (isNewDraftFilled(draft.value)) {
+        stashedDrafts.value[NEW_DRAFT_KEY] = draft.value
+      } else {
+        delete stashedDrafts.value[NEW_DRAFT_KEY]
+      }
+      persistDrafts()
+    } else if (selected.value && dirty.value) {
       stashedDrafts.value[selected.value.id] = draft.value
       persistDrafts()
     }
+  }
+
+  function select(entry) {
+    stashCurrentDraft()
     conflict.value = null
     creatingNew.value = false
     selected.value = entry
@@ -197,23 +237,25 @@ export const useMemoriesStore = defineStore('memories', () => {
       ?? { title: entry.title, content: entry.content, tags: [...(entry.tags || [])] }
   }
 
-  // Opens an empty draft in the detail panel for composing a new memory —
-  // nothing is sent to the backend until Save. Stashes any unsaved edit on
-  // the currently open memory first, same as switching to another memory.
+  // Opens a draft in the detail panel for composing a new memory — nothing
+  // is sent to the backend until Save. Restores a stashed new-memory draft
+  // left behind from switching away earlier, if there is one; otherwise
+  // starts empty. Stashes whatever was open before switching to this, same
+  // as switching to another memory.
   function startNew() {
-    if (selected.value && dirty.value) {
-      stashedDrafts.value[selected.value.id] = draft.value
-      persistDrafts()
-    }
+    stashCurrentDraft()
     conflict.value = null
     selected.value = null
     creatingNew.value = true
-    draft.value = { title: '', content: '', tags: [], layer: 'workspace' }
+    draft.value = stashedDrafts.value[NEW_DRAFT_KEY]
+      ?? { title: '', content: '', tags: [], layer: 'workspace' }
   }
 
   function cancelNew() {
     creatingNew.value = false
     draft.value = null
+    delete stashedDrafts.value[NEW_DRAFT_KEY]
+    persistDrafts()
   }
 
   async function save() {
@@ -227,6 +269,12 @@ export const useMemoriesStore = defineStore('memories', () => {
           tags: draft.value.tags,
           layer: draft.value.layer,
         })
+        // create() -> select(created) re-stashes this draft under
+        // NEW_DRAFT_KEY on the way (creatingNew was still true when it
+        // ran) since it can't tell "switching away" from "just saved" —
+        // clear it now that it's actually persisted as a real memory.
+        delete stashedDrafts.value[NEW_DRAFT_KEY]
+        persistDrafts()
         return !!id
       } finally {
         saving.value = false
@@ -307,7 +355,7 @@ export const useMemoriesStore = defineStore('memories', () => {
 
   return {
     all, selected, draft, conflict, searchQuery, layerFilter, loading, saving, filtered, dirty,
-    creatingNew, canSaveNew,
+    creatingNew, canSaveNew, hasNewDraft,
     isDraft, resetDraft, resolveConflictLoadLatest, resolveConflictKeepMine,
     fetchAll, refreshSilently, select, startNew, cancelNew, save, create, remove, clearAll,
     applyExternalUpdate, patchContent,

@@ -32,8 +32,12 @@ const filters = [
 
     <!-- Header -->
     <div class="px-4 pt-4 pb-3" style="border-bottom:0.5px solid var(--hm-border-subtle)">
-      <button class="hm-btn hm-btn-primary hm-btn-sm mb-3 w-full justify-center"
-        @click="memories.startNew()">+ New memory</button>
+      <button class="hm-btn hm-btn-primary hm-btn-sm mb-3 w-full justify-center gap-1.5"
+        @click="memories.startNew()">
+        + New memory
+        <span v-if="memories.hasNewDraft" class="font-mono rounded-sm px-1"
+          style="font-size:9px; background:var(--hm-warning-bg); color:var(--hm-warning)">DRAFT</span>
+      </button>
       <div class="relative mb-3">
         <span class="absolute left-2.5 top-1/2 -translate-y-1/2" style="color:var(--hm-text-tertiary); font-size:13px">⌕</span>
         <input
