@@ -127,8 +127,9 @@ fn draw(
     frame: &mut ratatui::Frame,
 ) {
     let mut lines = vec![
+        Line::from("Status     running"),
         Line::from(format!(
-            "Server     running at http://{}:{}",
+            "Server     http://{}:{}",
             data.server_host, data.server_port
         )),
         Line::from(format!("MCP        {mcp_url}")),
