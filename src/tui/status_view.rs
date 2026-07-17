@@ -166,7 +166,7 @@ fn draw(data: &StatusData, last_error: Option<&str>, no_color: bool, frame: &mut
 
     let body = Block::default()
         .borders(Borders::ALL)
-        .padding(Padding::left(2))
+        .padding(Padding::new(2, 2, 0, 0))
         .title(" Overview ");
     let inner = body.inner(layout[2]);
     frame.render_widget(body, layout[2]);

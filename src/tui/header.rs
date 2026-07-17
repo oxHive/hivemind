@@ -31,7 +31,7 @@ pub fn render_header(data: &StatusData, no_color: bool, area: Rect, buf: &mut Bu
     }
     let block = Block::default()
         .borders(Borders::ALL)
-        .padding(Padding::left(2))
+        .padding(Padding::new(2, 2, 0, 0))
         .title(Line::from(vec![
             Span::raw(" "),
             Span::styled(format!("{HEX_MARK} HiveMind"), brand_style),
