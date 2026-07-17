@@ -1,6 +1,6 @@
 {
   "name": "@oxhive/opencode-hivemind",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "HiveMind persistent memory plugin for OpenCode. Auto-registers MCP server and provides memory skills.",
   "keywords": [
     "opencode",
