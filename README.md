@@ -335,6 +335,9 @@ hivemind mcp install windsurf    Register with Windsurf
 hivemind service install         Install and enable as a background service
 hivemind service uninstall       Stop and remove the background service
 hivemind service status          Show background service status
+hivemind matrix login            Log into a Matrix account (once); session saved to OS keyring
+hivemind matrix run               Run the Matrix bot daemon
+hivemind matrix status            Show Matrix bot login/sync/session state
 hivemind dashboard --open        Open the dashboard (requires server running)
 ```
 
@@ -446,6 +449,77 @@ Two `remote_url` targets are supported:
 `api_key` is never sent to Claude or the dashboard. It is only used during replication.
 
 With `sync_on_store = true`, a memory stored through any interface (MCP tool, REST API, or dashboard) triggers an immediate sync in addition to the periodic background sync. If a sync pulls remote changes that overwrite a local edit, HiveMind records a conflict holding both versions; pending conflicts appear in the dashboard's Feedback view. Resolving with `keep_local` restores your version of the content, while `keep_remote` accepts the replicated one.
+
+---
+
+## Matrix chat interface (optional)
+
+Capture and recall HiveMind memories from a Matrix room or DM — mention the bot in a
+room, or DM it directly. Under the hood it's the same headless-agent mechanism as the
+dashboard's suggest flow: no bespoke NLU, no local model.
+
+This is a separate process from `hivemind up` and doesn't depend on it being started —
+each message spawns a short-lived agent turn that talks to HiveMind the same way any
+other MCP client does.
+
+### Setup
+
+```sh
+hivemind matrix login
+```
+
+Prompts for your homeserver URL, the bot's Matrix user ID, and its password. The
+password is used once, to log in, then discarded — only the resulting session is
+persisted, in your OS keyring (Secret Service/kwallet on Linux, Keychain on macOS).
+
+> **Headless Linux servers:** `keyring` needs a functioning Secret Service (D-Bus). A
+> bare VPS with no login session running may not have one available; `hivemind matrix
+> login` will fail with an actionable message if so. Install/start a Secret Service
+> provider (e.g. `gnome-keyring`) first.
+
+Add room mappings and the DM allowlist to `~/.config/hivemind/config.toml`:
+
+```toml
+[matrix]
+homeserver_url = "https://matrix.org"      # written automatically by `matrix login`
+user_id = "@hivemind-bot:matrix.org"       # written automatically by `matrix login`
+allowed_users = ["@you:matrix.org"]        # required for DMs — anyone else is ignored
+
+[[matrix.rooms]]
+room_id = "!abc123:matrix.org"
+alias = "hivemind-project"                 # optional, for `hivemind matrix status`
+base_tags = ["project:hivemind"]
+```
+
+Rooms the bot is in but not listed here still work — memories land in the `workspace`
+layer tagged `room:<id-or-alias>` + `source:matrix` instead of your configured
+`base_tags`. DMs always use the `personal` layer.
+
+Then run it:
+
+```sh
+hivemind matrix run
+```
+
+Or install it as a background service alongside `hivemind up` — `hivemind service
+install` automatically adds a second unit once `[matrix]` is configured.
+
+### Using it
+
+- Mention the bot in a mapped/unmapped room, or just message it directly in a DM.
+- `!hm store <text>` — direct write, skips the agent (fast, no interpretation).
+- `!hm reset` — starts a fresh conversation in that room (drops continuity, not memory).
+- `hivemind matrix status` — shows login state, sync status, and per-room session
+  activity.
+
+### Agent compatibility
+
+Claude Code works out of the box (same `[agent]` config as the dashboard's suggest
+flow). OpenCode needs one manual step first: OpenCode's non-interactive CLI has no
+per-invocation MCP tool allowlist, so you must pre-create a restricted agent profile
+named `hivemind-bot` in your `opencode.json`, scoped to the hivemind MCP tools — the
+bot spawns `opencode run --agent hivemind-bot`, it doesn't configure that profile for
+you.
 
 ---
 
