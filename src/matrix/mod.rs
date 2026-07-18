@@ -6,3 +6,4 @@ pub mod login;
 pub mod rooms;
 pub mod session;
 pub mod status;
+pub mod store_direct;
