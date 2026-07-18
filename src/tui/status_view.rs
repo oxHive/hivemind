@@ -69,9 +69,10 @@ pub async fn run(
         last_error: &mut Option<String>,
     ) {
         let probe_settings = settings.clone();
-        let server_up = tokio::task::spawn_blocking(move || crate::cli::probe_server_up(&probe_settings))
-            .await
-            .unwrap_or(false);
+        let server_up =
+            tokio::task::spawn_blocking(move || crate::cli::probe_server_up(&probe_settings))
+                .await
+                .unwrap_or(false);
         match build_status_data(
             cwd,
             global_path,
@@ -94,7 +95,15 @@ pub async fn run(
     }
 
     loop {
-        terminal.draw(|frame| draw(&data, last_error.as_deref(), last_message.as_deref(), no_color, frame))?;
+        terminal.draw(|frame| {
+            draw(
+                &data,
+                last_error.as_deref(),
+                last_message.as_deref(),
+                no_color,
+                frame,
+            )
+        })?;
 
         tokio::select! {
             _ = ticker.tick() => {
