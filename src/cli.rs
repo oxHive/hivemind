@@ -53,6 +53,11 @@ pub enum Command {
         #[command(subcommand)]
         action: ServiceAction,
     },
+    /// Matrix chat interface: capture/recall HiveMind memories from a room or DM
+    Matrix {
+        #[command(subcommand)]
+        action: MatrixAction,
+    },
     /// Migrate the database from the legacy ~/.hivemind/ path to XDG data dir
     Migrate,
     /// Print the session-start memory context for the current project (for hooks and scripts)
@@ -70,6 +75,16 @@ pub enum ServiceAction {
     /// Stop and remove the HiveMind background service
     Uninstall,
     /// Show the status of the HiveMind background service
+    Status,
+}
+
+#[derive(Subcommand)]
+pub enum MatrixAction {
+    /// Log into a Matrix account once; persists the session to the OS keyring
+    Login,
+    /// Run the Matrix bot daemon (requires `hivemind matrix login` first)
+    Run,
+    /// Show whether the daemon is running and its sync/session state
     Status,
 }
 
@@ -680,6 +695,16 @@ fn exe_path() -> String {
         .ok()
         .and_then(|p| p.to_str().map(String::from))
         .unwrap_or_else(|| "hivemind".to_string())
+}
+
+// ── matrix ────────────────────────────────────────────────────────────────
+
+pub fn cmd_matrix_login() -> Result<()> {
+    anyhow::bail!("hivemind matrix login is not yet implemented (see Task 9)")
+}
+
+pub fn cmd_matrix_status() -> Result<()> {
+    anyhow::bail!("hivemind matrix status is not yet implemented (see Task 10)")
 }
 
 pub fn cmd_mcp_install(client: &str) -> Result<()> {
@@ -1419,6 +1444,39 @@ mod tests {
             Some(Command::Status { plain }) => assert!(plain),
             _ => panic!("expected Status command"),
         }
+    }
+
+    #[test]
+    fn parses_matrix_login_subcommand() {
+        let cli = Cli::parse_from(["hivemind", "matrix", "login"]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Matrix {
+                action: MatrixAction::Login
+            })
+        ));
+    }
+
+    #[test]
+    fn parses_matrix_run_subcommand() {
+        let cli = Cli::parse_from(["hivemind", "matrix", "run"]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Matrix {
+                action: MatrixAction::Run
+            })
+        ));
+    }
+
+    #[test]
+    fn parses_matrix_status_subcommand() {
+        let cli = Cli::parse_from(["hivemind", "matrix", "status"]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Matrix {
+                action: MatrixAction::Status
+            })
+        ));
     }
 
     #[test]

@@ -24,6 +24,11 @@ fn main() -> Result<()> {
             ServiceAction::Uninstall => cli::cmd_service_uninstall(),
             ServiceAction::Status => cli::cmd_service_status(),
         },
+        Some(Command::Matrix { action }) => match action {
+            cli::MatrixAction::Login => cli::cmd_matrix_login(),
+            cli::MatrixAction::Run => run_matrix(),
+            cli::MatrixAction::Status => cli::cmd_matrix_status(),
+        },
         Some(Command::Migrate) => cli::cmd_migrate(),
         Some(Command::SessionStart { json }) => cli::cmd_session_start(json),
     }
@@ -131,4 +136,10 @@ async fn run_dashboard(open: bool) -> Result<()> {
     init_tracing();
     let settings = config::load_server_settings(&config::global_config_path())?;
     http::run_dashboard(&settings, open).await
+}
+
+#[tokio::main]
+async fn run_matrix() -> Result<()> {
+    init_tracing();
+    anyhow::bail!("hivemind matrix run is not yet implemented (see Task 11)")
 }
