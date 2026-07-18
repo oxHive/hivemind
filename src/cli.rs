@@ -749,7 +749,38 @@ pub fn cmd_matrix_login() -> Result<()> {
 }
 
 pub fn cmd_matrix_status() -> Result<()> {
-    anyhow::bail!("hivemind matrix status is not yet implemented (see Task 10)")
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(async {
+            let socket_path = crate::matrix::status::socket_path();
+            match crate::matrix::status::query_status(&socket_path).await {
+                Ok(reply) => {
+                    println!("logged_in:  {}", reply.logged_in);
+                    println!("user_id:    {}", reply.user_id);
+                    println!("sync_state: {}", reply.sync_state);
+                    if let Some(t) = &reply.last_sync_at {
+                        println!("last_sync:  {t}");
+                    }
+                    if reply.rooms.is_empty() {
+                        println!("rooms:      (none)");
+                    } else {
+                        println!("rooms:");
+                        for room in &reply.rooms {
+                            let label = room.alias.as_deref().unwrap_or(&room.room_id);
+                            let session = if room.active_session { "active session" } else { "no active session" };
+                            println!("  {label}  ({session})");
+                        }
+                    }
+                    Ok(())
+                }
+                Err(_) => {
+                    println!("hivemind matrix is not running.");
+                    println!("Start it with: hivemind matrix run");
+                    Ok(())
+                }
+            }
+        })
 }
 
 pub fn cmd_mcp_install(client: &str) -> Result<()> {
