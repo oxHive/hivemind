@@ -6,6 +6,12 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Mutex;
 
+#[derive(Debug, Clone)]
+pub enum QueryError {
+    NotRunning,
+    Protocol(String),
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RoomStatus {
     pub room_id: String,
@@ -43,12 +49,17 @@ pub async fn serve_status(socket_path: &Path, reply_source: Arc<Mutex<StatusRepl
     }
 }
 
-pub async fn query_status(socket_path: &Path) -> Result<StatusReply> {
-    let mut stream = UnixStream::connect(socket_path).await?;
+pub async fn query_status(socket_path: &Path) -> Result<StatusReply, QueryError> {
+    let mut stream = UnixStream::connect(socket_path)
+        .await
+        .map_err(|_| QueryError::NotRunning)?;
     let mut buf = String::new();
-    stream.read_to_string(&mut buf).await?;
-    let reply: StatusReply = serde_json::from_str(buf.trim())?;
-    Ok(reply)
+    stream
+        .read_to_string(&mut buf)
+        .await
+        .map_err(|e| QueryError::Protocol(format!("failed reading from daemon: {e}")))?;
+    serde_json::from_str(buf.trim())
+        .map_err(|e| QueryError::Protocol(format!("daemon sent malformed status: {e}")))
 }
 
 #[cfg(test)]
@@ -109,6 +120,28 @@ mod tests {
     async fn query_against_nonexistent_socket_errors() {
         let dir = tempfile::tempdir().unwrap();
         let socket_path = dir.path().join("does-not-exist.sock");
-        assert!(query_status(&socket_path).await.is_err());
+        assert!(matches!(
+            query_status(&socket_path).await,
+            Err(QueryError::NotRunning)
+        ));
+    }
+
+    #[tokio::test]
+    async fn query_against_a_socket_serving_garbage_reports_a_protocol_error_not_not_running() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket_path = dir.path().join("garbage.sock");
+        let listener = tokio::net::UnixListener::bind(&socket_path).unwrap();
+        let server_socket_path = socket_path.clone();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let _ = stream.write_all(b"not valid json\n").await;
+            let _ = server_socket_path; // keep path alive for clarity, listener already bound
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let result = query_status(&socket_path).await;
+        assert!(
+            matches!(result, Err(QueryError::Protocol(_))),
+            "expected a Protocol error (daemon reachable but sent bad data), got: {result:?}"
+        );
     }
 }

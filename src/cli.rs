@@ -774,9 +774,13 @@ pub fn cmd_matrix_status() -> Result<()> {
                     }
                     Ok(())
                 }
-                Err(_) => {
+                Err(crate::matrix::status::QueryError::NotRunning) => {
                     println!("hivemind matrix is not running.");
                     println!("Start it with: hivemind matrix run");
+                    Ok(())
+                }
+                Err(crate::matrix::status::QueryError::Protocol(msg)) => {
+                    println!("hivemind matrix appears to be running but returned invalid status data: {msg}");
                     Ok(())
                 }
             }
