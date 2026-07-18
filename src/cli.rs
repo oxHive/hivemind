@@ -611,11 +611,7 @@ fn service_install_linux() -> Result<()> {
 #[cfg(target_os = "linux")]
 fn service_uninstall_linux() -> Result<()> {
     service_uninstall_unit_linux("hivemind")?;
-    if crate::config::load_matrix_settings(&crate::config::global_config_path())
-        .ok()
-        .flatten()
-        .is_some()
-    {
+    if systemd_unit_path("hivemind-matrix").exists() {
         service_uninstall_unit_linux("hivemind-matrix")?;
     }
 
@@ -626,11 +622,7 @@ fn service_uninstall_linux() -> Result<()> {
 #[cfg(target_os = "linux")]
 fn service_status_linux() -> Result<()> {
     service_status_unit_linux("hivemind")?;
-    if crate::config::load_matrix_settings(&crate::config::global_config_path())
-        .ok()
-        .flatten()
-        .is_some()
-    {
+    if systemd_unit_path("hivemind-matrix").exists() {
         service_status_unit_linux("hivemind-matrix")?;
     }
     Ok(())
@@ -804,11 +796,7 @@ fn service_install_macos() -> Result<()> {
 #[cfg(target_os = "macos")]
 fn service_uninstall_macos() -> Result<()> {
     service_uninstall_unit_macos(LAUNCH_AGENT_LABEL)?;
-    if crate::config::load_matrix_settings(&crate::config::global_config_path())
-        .ok()
-        .flatten()
-        .is_some()
-    {
+    if launch_agent_path(MATRIX_LAUNCH_AGENT_LABEL).exists() {
         service_uninstall_unit_macos(MATRIX_LAUNCH_AGENT_LABEL)?;
     }
 
@@ -819,11 +807,7 @@ fn service_uninstall_macos() -> Result<()> {
 #[cfg(target_os = "macos")]
 fn service_status_macos() -> Result<()> {
     service_status_unit_macos(LAUNCH_AGENT_LABEL)?;
-    if crate::config::load_matrix_settings(&crate::config::global_config_path())
-        .ok()
-        .flatten()
-        .is_some()
-    {
+    if launch_agent_path(MATRIX_LAUNCH_AGENT_LABEL).exists() {
         service_status_unit_macos(MATRIX_LAUNCH_AGENT_LABEL)?;
     }
     Ok(())
