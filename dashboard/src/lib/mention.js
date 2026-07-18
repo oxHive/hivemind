@@ -14,3 +14,15 @@ export function withMention(content, edge) {
   if (content && content.includes(line)) return content
   return content ? `${content}\n\n${line}` : line
 }
+
+// Preview of what approving `edge` will do to `content`: the trailing line
+// of existing content for context, plus whatever withMention would append.
+// Returns null when the edge is already reflected (nothing would change).
+export function diffPreview(content, edge) {
+  const before = content || ''
+  const after = withMention(before, edge)
+  if (after === before) return null
+  const added = after.slice(before.length).replace(/^\n+/, '')
+  const context = before.trim().split('\n').filter(Boolean).pop()
+  return { context: context || '(empty memory)', added, removed: null }
+}

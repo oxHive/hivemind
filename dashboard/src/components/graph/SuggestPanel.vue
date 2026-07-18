@@ -1,9 +1,8 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useGraphStore } from '../../stores/graph.js'
 import { useMemoriesStore } from '../../stores/memories.js'
 import { useSuggestStore } from '../../stores/suggest.js'
-import { withMention } from '../../lib/mention.js'
 
 const graph = useGraphStore()
 const memories = useMemoriesStore()
@@ -11,6 +10,27 @@ const suggest = useSuggestStore()
 
 const revisingFor = ref(null)   // edge id whose revise textbox is open
 const feedbackText = ref('')
+
+// Ticking elapsed-time display while the agent is analyzing. Starts on
+// entering 'suggesting', stops the instant the SSE moves the phase along
+// (e.g. 'suggestions_ready') so the clock never overruns the real work.
+const now = ref(Date.now())
+let tickTimer = null
+watch(() => suggest.phase, (phase) => {
+  if (phase === 'suggesting') {
+    now.value = Date.now()
+    if (!tickTimer) tickTimer = setInterval(() => { now.value = Date.now() }, 1000)
+  } else if (tickTimer) {
+    clearInterval(tickTimer)
+    tickTimer = null
+  }
+}, { immediate: true })
+onBeforeUnmount(() => { if (tickTimer) clearInterval(tickTimer) })
+
+const elapsedSeconds = computed(() => {
+  if (!suggest.suggestingStartedAt) return 0
+  return Math.max(0, Math.floor((now.value - suggest.suggestingStartedAt) / 1000))
+})
 
 const rows = computed(() => graph.pendingEdges.map(e => ({
   ...e,
@@ -24,23 +44,11 @@ function rowState(edge) {
   return 'idle'
 }
 
-// Preview of what Approve will do: appends the mention link to the source
-// memory's content. Mirrors stores/graph.js's resolveEdge exactly (same
-// withMention helper) so this never drifts from what actually gets applied.
-function diffFor(edge) {
-  const source = memories.all.find(m => m.id === edge.source_id)
-  if (!source) return null
-  const before = source.content || ''
-  const after = withMention(before, edge)
-  if (after === before) return null
-  const added = after.slice(before.length).replace(/^\n+/, '')
-  const context = before.trim().split('\n').filter(Boolean).pop()
-  return { context: context || '(empty memory)', added }
-}
-
 // Selecting a suggestion shows the source memory's detail (in whichever
 // view is mounted — Graph's DetailPanel or the Memories page) and, on the
 // Graph page, highlights the pending edge on the canvas via selectedEdgeId.
+// The preview of what Approve will change now renders in the content field
+// itself (MemoryDetail/DetailPanel), not inline here.
 function selectRow(edge) {
   const isSame = graph.selectedEdgeId === edge.id
   graph.selectedEdgeId = isSame ? null : edge.id
@@ -77,8 +85,8 @@ async function endSession() {
   <div class="flex flex-col h-full shrink-0"
     style="width:300px; background:var(--hm-bg-surface); border-left:0.5px solid var(--hm-border-subtle)">
 
-    <div class="flex items-center justify-between px-4 py-2.5"
-      style="border-bottom:0.5px solid var(--hm-border-subtle)">
+    <div class="flex items-center justify-between px-4"
+      style="height:52px; border-bottom:0.5px solid var(--hm-border-subtle)">
       <span style="font-size:13px; font-weight:500; color:var(--hm-text-primary)">
         ✦ Suggestions
       </span>
@@ -90,10 +98,13 @@ async function endSession() {
       {{ suggest.error }}
     </div>
 
-    <div v-if="suggest.phase === 'suggesting'" class="px-4 py-3"
-      style="font-size:12px; color:var(--hm-text-tertiary)">
+    <div v-if="suggest.phase === 'suggesting'" class="px-4 py-3 flex items-center gap-2"
+      style="font-size:13px; font-weight:600; color:var(--hm-text-primary)">
       <span class="hm-skeleton" style="display:inline-block; width:10px; height:10px; border-radius:50%"></span>
       Agent is analyzing your memories…
+      <span class="font-mono" style="margin-left:auto; font-weight:500; font-size:11px; color:var(--hm-text-tertiary)">
+        {{ elapsedSeconds }}s
+      </span>
     </div>
 
     <div class="flex-1 overflow-y-auto">
@@ -117,17 +128,6 @@ async function endSession() {
           {{ edge.reason }}
         </p>
 
-        <div v-if="graph.selectedEdgeId === edge.id && diffFor(edge)" class="mt-2 rounded"
-          style="font-family:var(--hm-font-mono); font-size:11px; line-height:1.5; padding:8px 10px;
-                 background:var(--hm-mono-bg); border:0.5px solid var(--hm-border-subtle)" @click.stop>
-          <div style="color:var(--hm-text-tertiary); white-space:pre-wrap; word-break:break-word">
-            {{ diffFor(edge).context }}
-          </div>
-          <div style="color:var(--hm-success); white-space:pre-wrap; word-break:break-word">
-            + {{ diffFor(edge).added }}
-          </div>
-        </div>
-
         <div v-if="rowState(edge) === 'revising'" class="mt-2 flex items-center gap-1.5"
           style="font-size:11px; color:var(--hm-warning)">
           <span class="hm-skeleton" style="display:inline-block; width:8px; height:8px; border-radius:50%"></span>
@@ -150,7 +150,7 @@ async function endSession() {
       </div>
     </div>
 
-    <div class="px-4 py-2.5 flex gap-1.5" style="border-top:0.5px solid var(--hm-border-subtle)">
+    <div class="px-4 flex items-center gap-1.5" style="height:40px; border-top:0.5px solid var(--hm-border-subtle)">
       <template v-if="rows.length">
         <button class="hm-btn hm-btn-primary hm-btn-sm" @click="graph.acceptAllPending()">Accept all</button>
         <button class="hm-btn hm-btn-default hm-btn-sm" @click="graph.rejectAllPending()">Reject all</button>

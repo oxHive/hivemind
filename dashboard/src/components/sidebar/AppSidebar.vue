@@ -3,19 +3,12 @@ import { computed } from 'vue'
 import { useUiStore } from '../../stores/ui.js'
 import { useFeedbackStore } from '../../stores/feedback.js'
 import { useGraphStore } from '../../stores/graph.js'
-import { useSuggestStore } from '../../stores/suggest.js'
 import StatusRow from './StatusRow.vue'
 import oxhiveMark from '../../assets/oxhive-mark.png'
 
 const ui = useUiStore()
 const feedback = useFeedbackStore()
 const graph = useGraphStore()
-const suggest = useSuggestStore()
-
-function toggleSuggestions() {
-  if (suggest.panelOpen) suggest.closePanel()
-  else suggest.openPanel()
-}
 
 const feedbackCount = computed(() =>
   feedback.conflicts.length + feedback.feedbackItems.length
@@ -28,6 +21,14 @@ const navItems = [
   { id: 'feedback', label: 'Feedback' },
   { id: 'settings', label: 'Settings' },
 ]
+
+// Pending connection suggestions: badged on the two pages that surface them
+// (both show the review bar), same treatment as the feedback count.
+function navBadgeCount(id) {
+  if (id === 'feedback') return feedbackCount.value
+  if (id === 'memories' || id === 'graph') return graph.pendingEdges.length
+  return 0
+}
 
 const statusDot = computed(() => {
   if (ui.serverStatus === 'unreachable') return 'red'
@@ -96,29 +97,17 @@ const syncDot = computed(() => {
           :aria-current="ui.activeView === item.id ? 'page' : undefined"
         >
           <span>{{ item.label }}</span>
-          <span v-if="item.id === 'feedback' && feedbackCount > 0"
+          <span v-if="navBadgeCount(item.id) > 0"
             class="font-mono rounded-sm px-1.5 py-0.5"
             style="font-size:10px; background:var(--hm-warning-bg); color:var(--hm-warning)">
-            {{ feedbackCount }}
+            {{ navBadgeCount(item.id) }}
           </span>
         </button>
       </li>
     </ul>
 
-    <!-- Suggestions toggle: visible from any page whenever there are
-         pending connection suggestions to review. -->
-    <button v-if="graph.pendingEdges.length" class="suggest-toggle mt-auto"
-      :class="{ 'suggest-toggle--active': suggest.panelOpen }"
-      :aria-pressed="suggest.panelOpen" @click="toggleSuggestions">
-      <span>✦ Suggestions</span>
-      <span class="font-mono rounded-sm px-1.5 py-0.5"
-        style="font-size:10px; background:var(--hm-warning-bg); color:var(--hm-warning)">
-        {{ graph.pendingEdges.length }}
-      </span>
-    </button>
-
     <!-- Status (push to bottom) -->
-    <div :class="graph.pendingEdges.length ? '' : 'mt-auto'" class="px-5 pb-5 pt-4"
+    <div class="mt-auto px-5 pb-5 pt-4"
       style="border-top:0.5px solid var(--hm-border-subtle)">
       <StatusRow v-if="syncStatusText" :dot="syncDot" :text="syncStatusText" />
       <StatusRow
@@ -172,33 +161,6 @@ const syncDot = computed(() => {
   color: var(--hm-text-primary);
   font-weight: 500;
   box-shadow: inset 2px 0 0 var(--hm-accent);
-}
-
-.suggest-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin: 0 12px;
-  padding: 8px 8px;
-  font-size: 12px;
-  color: var(--hm-warning);
-  text-align: left;
-  background: transparent;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background 0.1s;
-}
-
-.suggest-toggle:hover,
-.suggest-toggle:focus-visible {
-  background: var(--hm-warning-bg);
-  outline: none;
-}
-
-.suggest-toggle--active {
-  background: var(--hm-warning-bg);
 }
 
 .footer {

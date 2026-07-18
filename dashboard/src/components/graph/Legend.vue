@@ -1,6 +1,6 @@
 <template>
-  <div class="flex items-center gap-5 px-4 py-2 shrink-0 font-mono"
-    style="border-top:0.5px solid var(--hm-border-subtle); font-size:10px; color:var(--hm-text-tertiary)">
+  <div class="flex items-center gap-5 px-4 shrink-0 font-mono"
+    style="height:40px; border-top:0.5px solid var(--hm-border-subtle); font-size:10px; color:var(--hm-text-tertiary)">
     <span class="flex items-center gap-1.5">
       <span class="hm-hex" style="width:10px; height:11px; background:#1d9e75"></span>personal
     </span>

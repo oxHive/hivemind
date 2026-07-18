@@ -17,8 +17,8 @@ function jumpToMatch() {
 </script>
 
 <template>
-  <div class="flex items-center gap-3 px-4 py-2.5 shrink-0"
-    style="border-bottom:0.5px solid var(--hm-border-subtle); background:var(--hm-bg-surface)">
+  <div class="flex items-center gap-3 px-4 shrink-0"
+    style="height:52px; border-bottom:0.5px solid var(--hm-border-subtle); background:var(--hm-bg-surface)">
 
     <input class="hm-input" style="width:180px" placeholder="Find node…"
       v-model="graph.searchQuery" @keyup.enter="jumpToMatch" />

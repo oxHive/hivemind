@@ -9,6 +9,7 @@ export const useSuggestStore = defineStore('suggest', () => {
   const queuedEdgeIds = ref([])
   const error = ref(null)
   const panelOpen = ref(false)
+  const suggestingStartedAt = ref(null) // ms epoch; null when not analyzing
 
   async function start() {
     error.value = null
@@ -16,6 +17,7 @@ export const useSuggestStore = defineStore('suggest', () => {
       await api.startSession()
       active.value = true
       phase.value = 'suggesting'
+      suggestingStartedAt.value = Date.now()
       panelOpen.value = true
     } catch (e) {
       error.value = e.status === 409 ? 'A suggest session is already running.' : String(e.message)
@@ -39,6 +41,7 @@ export const useSuggestStore = defineStore('suggest', () => {
     phase.value = 'idle'
     revisingEdgeId.value = null
     queuedEdgeIds.value = []
+    suggestingStartedAt.value = null
   }
 
   async function hydrate() {
@@ -48,6 +51,9 @@ export const useSuggestStore = defineStore('suggest', () => {
       phase.value = s.phase ?? 'idle'
       revisingEdgeId.value = s.revising_edge_id ?? null
       queuedEdgeIds.value = s.queued_edge_ids ?? []
+      // No server-side start timestamp to hydrate exactly; approximate from now
+      // so a page reload mid-analysis still shows a (slightly short) timer.
+      suggestingStartedAt.value = phase.value === 'suggesting' ? Date.now() : null
       if (active.value) panelOpen.value = true
     } catch { /* server without the feature; leave idle */ }
   }
@@ -55,9 +61,11 @@ export const useSuggestStore = defineStore('suggest', () => {
   function handleEvent(data) {
     switch (data.state) {
       case 'started':
-        active.value = true; phase.value = 'suggesting'; panelOpen.value = true; break
+        active.value = true; phase.value = 'suggesting'; panelOpen.value = true
+        suggestingStartedAt.value = Date.now()
+        break
       case 'suggestions_ready':
-        phase.value = 'reviewing'; break
+        phase.value = 'reviewing'; suggestingStartedAt.value = null; break
       case 'revising':
         phase.value = 'revising'
         revisingEdgeId.value = data.edge_id ?? null
@@ -69,10 +77,12 @@ export const useSuggestStore = defineStore('suggest', () => {
         phase.value = active.value ? 'reviewing' : 'idle'
         revisingEdgeId.value = null
         error.value = data.message ?? 'agent error'
+        suggestingStartedAt.value = null
         break
       case 'ended':
         active.value = false; phase.value = 'idle'
         revisingEdgeId.value = null; queuedEdgeIds.value = []
+        suggestingStartedAt.value = null
         break
     }
   }
@@ -81,7 +91,7 @@ export const useSuggestStore = defineStore('suggest', () => {
   function closePanel() { panelOpen.value = false }
 
   return {
-    active, phase, revisingEdgeId, queuedEdgeIds, error, panelOpen,
+    active, phase, revisingEdgeId, queuedEdgeIds, error, panelOpen, suggestingStartedAt,
     start, revise, end, hydrate, handleEvent, openPanel, closePanel,
   }
 })

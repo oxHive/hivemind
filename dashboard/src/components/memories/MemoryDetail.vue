@@ -9,9 +9,11 @@ import EmptyState from '../shared/EmptyState.vue'
 import DeleteConfirmModal from './DeleteConfirmModal.vue'
 import MarkdownContent from '../shared/MarkdownContent.vue'
 import ConfirmModal from '../shared/ConfirmModal.vue'
+import CopyIdButton from '../shared/CopyIdButton.vue'
 import { fmtDate } from '../../lib/format.js'
 import { createFeedback } from '../../api/feedback.js'
 import { caretCoords } from '../../lib/caret.js'
+import { diffPreview } from '../../lib/mention.js'
 
 const memories = useMemoriesStore()
 const ui = useUiStore()
@@ -106,6 +108,26 @@ function insertMention(m, kind) {
   nextTick(() => { ta.focus(); ta.setSelectionRange(pos, pos) })
 }
 
+// When a pending suggestion for the currently open memory is selected in
+// SuggestPanel, preview what Approve would change right in the content
+// field instead of a separate inline box.
+const pendingDiff = computed(() => {
+  const edge = graph.selectedEdge
+  if (!edge || edge.status !== 'pending' || !memories.selected) return null
+  if (edge.source_id !== memories.selected.id) return null
+  return diffPreview(memories.selected.content, edge)
+})
+
+// edge.relationship describes the target relative to the source (e.g.
+// "parent" means the target is the source's parent). When the memory we're
+// viewing is the target, not the source, the label must be flipped so it
+// still describes the OTHER memory correctly.
+const INVERSE_RELATIONSHIP = { parent: 'child', child: 'parent', sibling: 'sibling' }
+function relationshipFor(edge) {
+  if (edge.source_id === memories.selected.id) return edge.relationship
+  return INVERSE_RELATIONSHIP[edge.relationship] ?? edge.relationship
+}
+
 function goToMemory(id) {
   const target = memories.all.find(m => m.id === id)
   if (target) memories.select(target)
@@ -164,12 +186,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
       <!-- Toolbar -->
       <div class="flex items-center justify-between px-5 py-2.5"
         style="border-bottom:0.5px solid var(--hm-border-subtle)">
-        <span class="font-mono" style="font-size:10px; color:var(--hm-text-tertiary)">
+        <span class="flex items-center gap-1 font-mono" style="font-size:10px; color:var(--hm-text-tertiary)">
           {{ memories.creatingNew ? 'New memory (unsaved)' : memories.selected.id }}
+          <CopyIdButton v-if="!memories.creatingNew" :id="memories.selected.id" />
         </span>
         <div v-if="memories.selected" class="flex gap-1">
           <div class="relative">
-            <button class="hm-btn hm-btn-ghost hm-btn-sm" title="Flag for review"
+            <button class="hm-btn hm-btn-ghost hm-btn-sm" style="font-size:15px" title="Flag for review"
               @click="flagOpen = !flagOpen" @keydown.esc="flagOpen = false">⚑</button>
             <div v-if="flagOpen" class="fixed inset-0" style="z-index:9" @click="flagOpen = false"></div>
             <div v-if="flagOpen" class="absolute right-0 mt-1 rounded-md py-1"
@@ -222,7 +245,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
               @click="contentView = 'raw'">Raw</button>
           </div>
         </div>
-        <div v-if="contentView === 'raw'" class="relative mb-6">
+        <div v-if="pendingDiff" class="mb-6 rounded"
+          style="font-family:var(--hm-font-mono); font-size:12px; line-height:1.6; padding:12px 14px;
+                 background:var(--hm-mono-bg); border:0.5px solid var(--hm-border-subtle)">
+          <div style="color:var(--hm-text-secondary); white-space:pre-wrap; word-break:break-word">{{ pendingDiff.context }}</div>
+          <div v-if="pendingDiff.removed" style="color:var(--hm-danger); text-decoration:line-through; white-space:pre-wrap; word-break:break-word">- {{ pendingDiff.removed }}</div>
+          <div style="color:var(--hm-success); white-space:pre-wrap; word-break:break-word">+ {{ pendingDiff.added }}</div>
+        </div>
+
+        <div v-else-if="contentView === 'raw'" class="relative mb-6">
           <textarea
             id="mem-content"
             ref="contentEl"
@@ -285,7 +316,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
               style="border:0.5px solid var(--hm-border-subtle); font-size:12px"
               @click="memories.select(memories.all.find(m => m.id === (edge.source_id === memories.selected.id ? edge.target_id : edge.source_id)))">
               <span class="font-mono" style="font-size:10px; color:var(--hm-text-tertiary); margin-right:8px">
-                {{ edge.relationship }}
+                {{ relationshipFor(edge) }}
               </span>
               <span style="flex:1; color:var(--hm-text-primary)">
                 {{ memories.all.find(m => m.id === (edge.source_id === memories.selected.id ? edge.target_id : edge.source_id))?.title || edge.target_id }}
@@ -297,8 +328,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
       </div>
 
       <!-- Footer -->
-      <div class="flex items-center justify-between px-5 py-3"
-        style="border-top:0.5px solid var(--hm-border-subtle)">
+      <div class="flex items-center justify-between px-5"
+        style="height:40px; border-top:0.5px solid var(--hm-border-subtle)">
         <span v-if="memories.selected" class="flex items-center gap-2 font-mono"
           style="font-size:11px; color:var(--hm-text-tertiary)">
           updated {{ fmtDate(memories.selected.updated_at) }}

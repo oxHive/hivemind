@@ -13,6 +13,7 @@ export const useGraphStore = defineStore('graph', () => {
   const layerFilter = ref('all') // 'all' | 'personal' | 'workspace'
 
   const pendingEdges = computed(() => edges.value.filter(e => e.status === 'pending'))
+  const selectedEdge = computed(() => edges.value.find(e => e.id === selectedEdgeId.value) || null)
 
   function edgesFor(memoryId) {
     return edges.value.filter(e =>
@@ -57,7 +58,7 @@ export const useGraphStore = defineStore('graph', () => {
 
   return {
     edges, zoom, selectedNodeId, selectedEdgeId, searchQuery, layerFilter,
-    pendingEdges, edgesFor, fetchEdges, resolveEdge,
+    pendingEdges, selectedEdge, edgesFor, fetchEdges, resolveEdge,
     acceptAllPending, rejectAllPending,
   }
 })
