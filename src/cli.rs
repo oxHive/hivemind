@@ -966,6 +966,24 @@ pub fn warn_if_not_initialized() {
     }
 }
 
+/// TCP-probes whether a HiveMind server is currently listening on
+/// `settings`'s host:port. 0.0.0.0/:: are redirected to 127.0.0.1 since you
+/// can't dial a wildcard bind address directly.
+pub fn probe_server_up(settings: &crate::config::ServerSettings) -> bool {
+    let probe_host = match settings.host.as_str() {
+        "0.0.0.0" | "::" => "127.0.0.1",
+        h => h,
+    };
+    format!("{probe_host}:{}", settings.port)
+        .parse::<std::net::SocketAddr>()
+        .ok()
+        .map(|addr| {
+            std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(300))
+                .is_ok()
+        })
+        .unwrap_or(false)
+}
+
 pub fn cmd_status(plain: bool) -> Result<()> {
     let home = home_dir();
     let cwd = std::env::current_dir()?;
@@ -979,21 +997,7 @@ pub fn cmd_status(plain: bool) -> Result<()> {
                 let clients = detect_registered_clients(&home);
                 let settings =
                     crate::config::load_server_settings(&crate::config::global_config_path())?;
-                let probe_host = match settings.host.as_str() {
-                    "0.0.0.0" | "::" => "127.0.0.1",
-                    h => h,
-                };
-                let server_up = format!("{probe_host}:{}", settings.port)
-                    .parse::<std::net::SocketAddr>()
-                    .ok()
-                    .map(|addr| {
-                        std::net::TcpStream::connect_timeout(
-                            &addr,
-                            std::time::Duration::from_millis(300),
-                        )
-                        .is_ok()
-                    })
-                    .unwrap_or(false);
+                let server_up = probe_server_up(&settings);
                 let sync = crate::config::SyncSettings::default();
                 let database = crate::db::open_database(&sync, &db_path).await?;
                 let conn = database.connect()?;
@@ -1015,18 +1019,7 @@ pub fn cmd_status(plain: bool) -> Result<()> {
     let (out, clients) = with_spinner("checking status...", || {
         let clients = detect_registered_clients(&home);
         let settings = crate::config::load_server_settings(&crate::config::global_config_path())?;
-        let probe_host = match settings.host.as_str() {
-            "0.0.0.0" | "::" => "127.0.0.1",
-            h => h,
-        };
-        let server_up = format!("{probe_host}:{}", settings.port)
-            .parse::<std::net::SocketAddr>()
-            .ok()
-            .map(|addr| {
-                std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(300))
-                    .is_ok()
-            })
-            .unwrap_or(false);
+        let server_up = probe_server_up(&settings);
         let result = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?

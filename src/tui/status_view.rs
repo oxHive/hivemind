@@ -50,10 +50,14 @@ pub async fn run(
     ticker.tick().await; // first tick fires immediately; consume it, we already fetched above
     let no_color = crate::tui::no_color();
     let mut last_error: Option<String> = None;
+    let mut last_message: Option<String> = None;
 
-    // Refreshes `data` in place. On success, clears `last_error`; on failure,
-    // leaves `data` untouched (stale but valid) and records the error so it
-    // can be shown inline. Never aborts the loop over a failed refresh.
+    // Refreshes `data` in place, re-probing whether the server is up rather
+    // than trusting the possibly-stale `server_up` this fn was first called
+    // with — otherwise a server started/killed while this view is open would
+    // never be reflected. On success, clears `last_error`; on failure, leaves
+    // `data` untouched (stale but valid) and records the error so it can be
+    // shown inline. Never aborts the loop over a failed refresh.
     async fn refresh(
         cwd: &Path,
         global_path: &Path,
@@ -61,10 +65,13 @@ pub async fn run(
         db_path: &str,
         registered_clients: &[&str],
         settings: &crate::config::ServerSettings,
-        server_up: bool,
         data: &mut StatusData,
         last_error: &mut Option<String>,
     ) {
+        let probe_settings = settings.clone();
+        let server_up = tokio::task::spawn_blocking(move || crate::cli::probe_server_up(&probe_settings))
+            .await
+            .unwrap_or(false);
         match build_status_data(
             cwd,
             global_path,
@@ -87,12 +94,12 @@ pub async fn run(
     }
 
     loop {
-        terminal.draw(|frame| draw(&data, last_error.as_deref(), no_color, frame))?;
+        terminal.draw(|frame| draw(&data, last_error.as_deref(), last_message.as_deref(), no_color, frame))?;
 
         tokio::select! {
             _ = ticker.tick() => {
                 refresh(
-                    cwd, global_path, store, db_path, registered_clients, settings, server_up,
+                    cwd, global_path, store, db_path, registered_clients, settings,
                     &mut data, &mut last_error,
                 )
                 .await;
@@ -103,8 +110,17 @@ pub async fn run(
                         KeyCode::Char('q') => break,
                         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
                         KeyCode::Char('r') => {
+                            last_message = None;
                             refresh(
-                                cwd, global_path, store, db_path, registered_clients, settings, server_up,
+                                cwd, global_path, store, db_path, registered_clients, settings,
+                                &mut data, &mut last_error,
+                            )
+                            .await;
+                        }
+                        KeyCode::Char('k') if data.server_up => {
+                            last_message = Some(tokio::task::spawn_blocking(kill_server).await.unwrap_or_else(|_| "kill task panicked".to_string()));
+                            refresh(
+                                cwd, global_path, store, db_path, registered_clients, settings,
                                 &mut data, &mut last_error,
                             )
                             .await;
@@ -117,6 +133,57 @@ pub async fn run(
     }
 
     Ok(())
+}
+
+/// Sends SIGTERM to the PID recorded in `hivemind up`'s pidfile and waits
+/// briefly for it to exit. Shells out to `kill` rather than adding a signal
+/// crate dependency — matches the project's existing Unix-only assumptions
+/// (XDG paths, $HOME, the `open`/`xdg-open` dashboard launcher). Always
+/// leaves the pidfile removed, even on a stale or unresponsive PID, so a
+/// dead server never blocks a later `k` press.
+fn kill_server() -> String {
+    let path = crate::db::pidfile_path();
+    let Ok(contents) = std::fs::read_to_string(&path) else {
+        return "no server pidfile found".to_string();
+    };
+    let Ok(pid) = contents.trim().parse::<u32>() else {
+        let _ = std::fs::remove_file(&path);
+        return "pidfile was corrupt; removed it".to_string();
+    };
+    if !process_alive(pid) {
+        let _ = std::fs::remove_file(&path);
+        return "server was already stopped; removed stale pidfile".to_string();
+    }
+    let sent = std::process::Command::new("kill")
+        .arg("-TERM")
+        .arg(pid.to_string())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !sent {
+        return format!("failed to signal pid {pid}");
+    }
+    for _ in 0..20 {
+        if !process_alive(pid) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let _ = std::fs::remove_file(&path);
+    if process_alive(pid) {
+        format!("sent SIGTERM to pid {pid}, still shutting down")
+    } else {
+        format!("stopped server (pid {pid})")
+    }
+}
+
+fn process_alive(pid: u32) -> bool {
+    std::process::Command::new("kill")
+        .arg("-0")
+        .arg(pid.to_string())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 /// Polls for a key-press event on a blocking thread (crossterm's `poll`/`read`
@@ -141,9 +208,18 @@ async fn poll_key_event() -> Option<event::KeyEvent> {
 const BODY_FRAME_OVERHEAD: u16 = 6;
 /// Floor so the box never shrinks below fitting the header wordmark/title.
 const MIN_BOX_WIDTH: u16 = 40;
-const FOOTER_TEXT: &str = "  q quit   r refresh";
-
-fn draw(data: &StatusData, last_error: Option<&str>, no_color: bool, frame: &mut ratatui::Frame) {
+fn draw(
+    data: &StatusData,
+    last_error: Option<&str>,
+    last_message: Option<&str>,
+    no_color: bool,
+    frame: &mut ratatui::Frame,
+) {
+    let footer_text = if data.server_up {
+        "  q quit   r refresh   k kill server"
+    } else {
+        "  q quit   r refresh"
+    };
     let mut lines = vec![
         Line::from(format!(
             "Server     {}",
@@ -181,6 +257,12 @@ fn draw(data: &StatusData, last_error: Option<&str>, no_color: bool, frame: &mut
         ));
     }
 
+    // Error takes priority over an info message when both are somehow set;
+    // only one notice row is budgeted below.
+    let notice = last_error
+        .map(|m| (format!("refresh failed: {m}"), WARNING))
+        .or_else(|| last_message.map(|m| (m.to_string(), DIM)));
+
     // Size the box to the widest line instead of a fixed width, so long
     // values (storage path, sync URL) fit without wrapping or clipping.
     let content_width = lines
@@ -188,17 +270,17 @@ fn draw(data: &StatusData, last_error: Option<&str>, no_color: bool, frame: &mut
         .map(Line::width)
         .max()
         .unwrap_or(0)
-        .max(FOOTER_TEXT.len()) as u16;
+        .max(footer_text.len()) as u16;
 
     let area = frame.area();
     let width = (content_width + BODY_FRAME_OVERHEAD)
         .max(MIN_BOX_WIDTH)
         .min(area.width);
     let area = Layout::horizontal([Constraint::Length(width), Constraint::Min(0)]).split(area)[0];
-    let error_height = if last_error.is_some() { 1 } else { 0 };
+    let notice_height = if notice.is_some() { 1 } else { 0 };
     let layout = Layout::vertical([
         Constraint::Length(5),
-        Constraint::Length(error_height),
+        Constraint::Length(notice_height),
         Constraint::Min(1),
         Constraint::Length(1),
     ])
@@ -206,14 +288,14 @@ fn draw(data: &StatusData, last_error: Option<&str>, no_color: bool, frame: &mut
 
     render_header(data, no_color, layout[0], frame.buffer_mut());
 
-    if let Some(msg) = last_error {
-        let error_style = if no_color {
+    if let Some((msg, color)) = notice {
+        let notice_style = if no_color {
             Style::default()
         } else {
-            Style::default().fg(WARNING)
+            Style::default().fg(color)
         };
         frame.render_widget(
-            Paragraph::new(Line::from(format!("refresh failed: {msg}")).style(error_style)),
+            Paragraph::new(Line::from(msg).style(notice_style)),
             layout[1],
         );
     }
@@ -232,7 +314,7 @@ fn draw(data: &StatusData, last_error: Option<&str>, no_color: bool, frame: &mut
         Style::default().fg(DIM)
     };
     frame.render_widget(
-        Paragraph::new(Line::from(FOOTER_TEXT).style(footer_style)),
+        Paragraph::new(Line::from(footer_text).style(footer_style)),
         layout[3],
     );
 }

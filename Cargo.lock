@@ -1865,6 +1865,7 @@ dependencies = [
  "crossterm",
  "http-body-util",
  "include_dir",
+ "libc",
  "libsql",
  "mime_guess",
  "ratatui",

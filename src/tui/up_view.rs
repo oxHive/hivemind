@@ -24,12 +24,14 @@ const VIEWPORT_HEIGHT: u16 = 12;
 const BODY_FRAME_OVERHEAD: u16 = 6;
 /// Floor so the box never shrinks below fitting the header wordmark/title.
 const MIN_BOX_WIDTH: u16 = 40;
-const FOOTER_TEXT: &str = "  q quit   ctrl+c stop server";
+const FOOTER_TEXT: &str = "  d detach   ctrl+c stop server";
 
 /// Runs the interactive `hivemind up` view: header + a live activity feed fed
-/// by the existing SSE broadcast channel. Returns on `q` (server keeps
-/// running) or exits the process directly on Ctrl+C, since raw mode swallows
-/// the OS SIGINT that would normally stop the process.
+/// by the existing SSE broadcast channel. Returns on `d` — the caller
+/// (`http::run_up`) then actually detaches: aborts its listeners, re-execs a
+/// background copy of the server, and exits so the shell prompt comes back.
+/// `Ctrl+C` exits the process directly (stopping the server for good), since
+/// raw mode swallows the OS SIGINT that would normally do that.
 pub async fn run(
     mut data: StatusData,
     dashboard_url: Option<String>,
@@ -73,9 +75,10 @@ pub async fn run(
             key = poll_key_event() => {
                 if let Some(key) = key {
                     match key.code {
-                        KeyCode::Char('q') => break,
+                        KeyCode::Char('d') => break,
                         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                             drop(guard);
+                            let _ = std::fs::remove_file(crate::db::pidfile_path());
                             std::process::exit(0);
                         }
                         _ => {}
