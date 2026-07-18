@@ -174,12 +174,15 @@ pub async fn run(settings: MatrixSettings, agent: AgentSettings, hivemind_bin: S
                     mark_room_inactive(&status_reply, room.room_id().as_str()).await;
                 }
                 crate::matrix::commands::Command::Store(memory_text) => {
-                    let prompt = format!(
-                        "Call memory_store with content: {memory_text:?}. Use layer and tags per the room's mapping rules already in your system context."
-                    );
-                    if let Ok(result) = crate::matrix::agent::run_turn(&agent, &hivemind_bin, &prompt, None).await {
-                        mark_room_active(&status_reply, room.room_id().as_str()).await;
-                        let _ = room.send(matrix_sdk::ruma::events::room::message::RoomMessageEventContent::text_plain(result.reply_text)).await;
+                    let target = crate::matrix::rooms::resolve_target(&settings, room.room_id().as_str(), is_dm);
+                    match crate::matrix::store_direct::store_memory(&hivemind_bin, &memory_text, &target).await {
+                        Ok(()) => {
+                            mark_room_active(&status_reply, room.room_id().as_str()).await;
+                            let _ = room.send(matrix_sdk::ruma::events::room::message::RoomMessageEventContent::text_plain("Stored.")).await;
+                        }
+                        Err(e) => {
+                            let _ = room.send(matrix_sdk::ruma::events::room::message::RoomMessageEventContent::text_plain(format!("hivemind matrix failed to store that: {e}"))).await;
+                        }
                     }
                 }
                 crate::matrix::commands::Command::Chat(message) => {
