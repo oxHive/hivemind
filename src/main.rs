@@ -141,5 +141,9 @@ async fn run_dashboard(open: bool) -> Result<()> {
 #[tokio::main]
 async fn run_matrix() -> Result<()> {
     init_tracing();
-    anyhow::bail!("hivemind matrix run is not yet implemented (see Task 11)")
+    let settings = config::load_matrix_settings(&config::global_config_path())?
+        .ok_or_else(|| anyhow::anyhow!("no [matrix] config found — run `hivemind matrix login` first"))?;
+    let server_settings = config::load_server_settings(&config::global_config_path())?;
+    let hivemind_bin = std::env::current_exe()?.to_string_lossy().into_owned();
+    oxhivemind::matrix::daemon::run(settings, server_settings.agent, hivemind_bin).await
 }
