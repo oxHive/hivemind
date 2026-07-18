@@ -16,7 +16,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/oxhive/hivemind.git",
+    "url": "git+https://github.com/oxHive/hivemind.git",
     "directory": "plugins/opencode"
   },
   "license": "AGPL-3.0-only",
