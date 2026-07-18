@@ -911,7 +911,7 @@ pub(crate) async fn build_suggest_prompt(store: &SqliteStore) -> anyhow::Result<
             };
             let snippet: String = m.content.chars().take(80).collect();
             let ellipsis = if m.content.len() > 80 { "…" } else { "" };
-            format!("{} | {} | {}{}", m.id, m.title, snippet, ellipsis) + &tags
+            format!("{} | {} | {}{}{}", m.id, m.title, snippet, ellipsis, tags)
         })
         .collect();
 

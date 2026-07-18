@@ -700,7 +700,52 @@ fn exe_path() -> String {
 // ── matrix ────────────────────────────────────────────────────────────────
 
 pub fn cmd_matrix_login() -> Result<()> {
-    anyhow::bail!("hivemind matrix login is not yet implemented (see Task 9)")
+    print!("Homeserver URL (e.g. https://matrix.org): ");
+    std::io::stdout().flush()?;
+    let mut homeserver_url = String::new();
+    std::io::stdin().read_line(&mut homeserver_url)?;
+    let homeserver_url = homeserver_url.trim().to_string();
+
+    print!("User ID (e.g. @hivemind-bot:matrix.org): ");
+    std::io::stdout().flush()?;
+    let mut user_id = String::new();
+    std::io::stdin().read_line(&mut user_id)?;
+    let user_id = user_id.trim().to_string();
+
+    let password = rpassword::prompt_password("Password: ")?;
+
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(async {
+            let client = matrix_sdk::Client::builder()
+                .homeserver_url(&homeserver_url)
+                .sqlite_store(crate::db::xdg_data_dir().join("matrix-store"), None)
+                .build()
+                .await?;
+            let response = client
+                .matrix_auth()
+                .login_username(&user_id, &password)
+                .initial_device_display_name("HiveMind bot")
+                .await?;
+            drop(password);
+            let session = client
+                .matrix_auth()
+                .session()
+                .ok_or_else(|| anyhow::anyhow!("login succeeded but no session was created"))?;
+            let session_json = serde_json::to_string(&session)?;
+            let store = crate::matrix::keyring_store::KeyringSessionStore;
+            crate::matrix::login::persist_login(
+                &homeserver_url,
+                &user_id,
+                &session_json,
+                &store,
+                &crate::config::global_config_path(),
+            )?;
+            println!("Logged in as {} (device {}).", response.user_id, response.device_id);
+            println!("Session saved to the OS keyring. Run `hivemind matrix run` to start the bot.");
+            anyhow::Ok(())
+        })
 }
 
 pub fn cmd_matrix_status() -> Result<()> {
