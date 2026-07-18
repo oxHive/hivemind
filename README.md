@@ -134,20 +134,21 @@ Install the HiveMind plugin (recommended):
 }
 ```
 
-Add that to `opencode.json` (project) or `~/.config/opencode/opencode.json` (global). OpenCode's Bun runtime installs the package automatically on next start — no separate `npm install` step. The plugin then does two things at startup:
+Add that to `opencode.json` (project) or `~/.config/opencode/opencode.json` (global). OpenCode's Bun runtime installs the package automatically on next start — no separate `npm install` step. The plugin then does three things at startup:
 
 - **Auto-registers the MCP server** if it finds `hivemind` in `PATH` (skips silently if you've already configured `mcp.hivemind` yourself, e.g. via the manual method below).
 - **Injects the HiveMind system-prompt instructions** into every session — the OpenCode equivalent of the CLAUDE.md block `hivemind init` writes for Claude Code, telling the agent when to call `hivemind_session_start` and to never auto-store.
+- **Installs the memory skills** (`memory-store`, `memory-search`, `memory-list`, `memory-edit`, `memory-status`, `memory-connections`) into `~/.config/opencode/skills/` (or `$XDG_CONFIG_HOME/opencode/skills/`). OpenCode only discovers skills from specific filesystem paths, never from npm package contents, so the plugin copies its bundled skills there itself on every load — this keeps them in sync with the installed plugin version, so don't hand-edit the copies.
 
 The `hivemind` binary itself still needs to be installed and on `PATH` (see [Installation](#installation) above) — the plugin only wires it up, it doesn't ship the server.
 
-**Manual alternative (MCP only, static config):**
+**Manual alternative (MCP only, no skills):**
 
 ```sh
 hivemind mcp install opencode
 ```
 
-Writes to `~/.config/opencode/opencode.json` directly (uses the `opencode` CLI if available). Redundant once the plugin is installed, since the plugin registers the MCP server itself — use this if you'd rather not add a plugin dependency, or need MCP-only without the auto-injected instructions. Manual config:
+Writes to `~/.config/opencode/opencode.json` directly (uses the `opencode` CLI if available). Redundant once the plugin is installed, since the plugin registers the MCP server itself — use this if you'd rather not add a plugin dependency, or need MCP-only without the auto-injected instructions or skills. Manual config:
 
 ```json
 {
