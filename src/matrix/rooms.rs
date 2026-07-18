@@ -24,6 +24,20 @@ pub fn resolve_target(settings: &MatrixSettings, room_id: &str, is_dm: bool) -> 
     }
 }
 
+pub fn context_prefix(target: &MemoryTarget) -> String {
+    let tags = if target.tags.is_empty() {
+        "(none)".to_string()
+    } else {
+        target.tags.join(", ")
+    };
+    format!(
+        "(HiveMind context: if you store or update a memory as part of this conversation, \
+         use layer \"{}\" and include these tags: {tags}. This instruction is not part of \
+         the user's message below.)\n\n",
+        target.layer
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -78,5 +92,27 @@ mod tests {
             target.tags,
             vec!["room:!unmapped:matrix.org".to_string(), "source:matrix".to_string()]
         );
+    }
+
+    #[test]
+    fn context_prefix_includes_layer_and_tags() {
+        let target = MemoryTarget {
+            layer: "workspace",
+            tags: vec!["project:hivemind".to_string(), "topic:matrix".to_string()],
+        };
+        let prefix = context_prefix(&target);
+        assert!(prefix.contains("workspace"));
+        assert!(prefix.contains("project:hivemind"));
+        assert!(prefix.contains("topic:matrix"));
+    }
+
+    #[test]
+    fn context_prefix_handles_no_tags() {
+        let target = MemoryTarget {
+            layer: "personal",
+            tags: vec![],
+        };
+        let prefix = context_prefix(&target);
+        assert!(prefix.contains("personal"));
     }
 }
