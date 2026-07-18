@@ -170,6 +170,7 @@ pub async fn run(settings: MatrixSettings, agent: AgentSettings, hivemind_bin: S
                         }
                         Err(e) => {
                             sessions.reset(room.room_id().as_str()).await;
+                            mark_room_inactive(&status_reply, room.room_id().as_str()).await;
                             let _ = room.send(matrix_sdk::ruma::events::room::message::RoomMessageEventContent::text_plain(format!("hivemind matrix hit an error: {e}"))).await;
                         }
                     }
