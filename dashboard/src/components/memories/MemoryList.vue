@@ -80,7 +80,7 @@ const filters = [
     </div>
 
     <!-- Footer -->
-    <div class="px-4 py-2.5" style="border-top:0.5px solid var(--hm-border-subtle)">
+    <div class="px-4 flex items-center" style="height:40px; border-top:0.5px solid var(--hm-border-subtle)">
       <span class="font-mono" style="font-size:11px; color:var(--hm-text-tertiary)">
         <template v-if="memories.searchQuery || memories.layerFilter !== 'all'">
           {{ memories.filtered.length }} of {{ memories.all.length }} memories

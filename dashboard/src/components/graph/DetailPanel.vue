@@ -5,6 +5,7 @@ import { useMemoriesStore } from '../../stores/memories.js'
 import LayerBadge from '../shared/LayerBadge.vue'
 import TagChip from '../shared/TagChip.vue'
 import CopyButton from '../shared/CopyButton.vue'
+import CopyIdButton from '../shared/CopyIdButton.vue'
 
 const graph = useGraphStore()
 const memories = useMemoriesStore()
@@ -28,7 +29,10 @@ const node = computed(() => memories.all.find(m => m.id === graph.selectedNodeId
           <span style="font-size:14px; font-weight:500; color:var(--hm-text-primary)">{{ node.title }}</span>
           <LayerBadge :layer="node.layer" />
         </div>
-        <span class="font-mono block mb-4" style="font-size:10px; color:var(--hm-text-tertiary)">{{ node.id }}</span>
+        <div class="flex items-center gap-1 mb-4">
+          <span class="font-mono" style="font-size:10px; color:var(--hm-text-tertiary)">{{ node.id }}</span>
+          <CopyIdButton :id="node.id" />
+        </div>
 
         <p style="font-size:12px; color:var(--hm-text-secondary); line-height:1.5" class="mb-4">
           {{ node.content?.slice(0, 200) }}{{ (node.content?.length || 0) > 200 ? '…' : '' }}
