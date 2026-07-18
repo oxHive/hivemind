@@ -125,11 +125,29 @@ In addition, `hivemind init` installs a Claude Code SessionStart hook in the pro
 
 ### OpenCode
 
+Install the HiveMind plugin (recommended):
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["@oxhive/opencode-hivemind"]
+}
+```
+
+Add that to `opencode.json` (project) or `~/.config/opencode/opencode.json` (global). OpenCode's Bun runtime installs the package automatically on next start — no separate `npm install` step. The plugin then does two things at startup:
+
+- **Auto-registers the MCP server** if it finds `hivemind` in `PATH` (skips silently if you've already configured `mcp.hivemind` yourself, e.g. via the manual method below).
+- **Injects the HiveMind system-prompt instructions** into every session — the OpenCode equivalent of the CLAUDE.md block `hivemind init` writes for Claude Code, telling the agent when to call `hivemind_session_start` and to never auto-store.
+
+The `hivemind` binary itself still needs to be installed and on `PATH` (see [Installation](#installation) above) — the plugin only wires it up, it doesn't ship the server.
+
+**Manual alternative (MCP only, static config):**
+
 ```sh
 hivemind mcp install opencode
 ```
 
-Writes to `~/.config/opencode/opencode.json` (uses the `opencode` CLI if available, otherwise writes the config file directly). Manual config:
+Writes to `~/.config/opencode/opencode.json` directly (uses the `opencode` CLI if available). Redundant once the plugin is installed, since the plugin registers the MCP server itself — use this if you'd rather not add a plugin dependency, or need MCP-only without the auto-injected instructions. Manual config:
 
 ```json
 {
@@ -144,7 +162,7 @@ Writes to `~/.config/opencode/opencode.json` (uses the `opencode` CLI if availab
 }
 ```
 
-Docs: [opencode.ai/docs/mcp-servers](https://opencode.ai/docs/mcp-servers/)
+Docs: [opencode.ai/docs/mcp-servers](https://opencode.ai/docs/mcp-servers/), [opencode.ai/docs/plugins](https://opencode.ai/docs/plugins/)
 
 ### Kimi Code CLI
 
@@ -308,7 +326,7 @@ hivemind status                  Show config, memory count, and session-start pr
 hivemind migrate                 Move the database from the legacy ~/.hivemind path to the XDG data dir
 hivemind session-start [--json]  Print the session-start context; used by the Claude Code SessionStart hook
 hivemind mcp install claude      Register with Claude Code
-hivemind mcp install opencode    Register with OpenCode
+hivemind mcp install opencode    Register with OpenCode (manual; the npm plugin does this automatically)
 hivemind mcp install kimi        Register with Kimi Code CLI
 hivemind mcp install codex       Register with OpenAI Codex CLI
 hivemind mcp install cursor      Register with Cursor
