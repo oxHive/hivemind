@@ -151,7 +151,7 @@ pub async fn run(
 /// leaves the pidfile removed, even on a stale or unresponsive PID, so a
 /// dead server never blocks a later `k` press.
 fn kill_server() -> String {
-    let path = crate::db::pidfile_path();
+    let path = crate::db::up_pidfile_path();
     let Ok(contents) = std::fs::read_to_string(&path) else {
         return "no server pidfile found".to_string();
     };
