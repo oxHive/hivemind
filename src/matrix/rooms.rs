@@ -18,15 +18,9 @@ pub fn resolve_target(settings: &MatrixSettings, room_id: &str, is_dm: bool) -> 
             tags: mapping.base_tags.clone(),
         };
     }
-    let room_label = settings
-        .rooms
-        .iter()
-        .find(|r| r.room_id == room_id)
-        .and_then(|r| r.alias.clone())
-        .unwrap_or_else(|| room_id.to_string());
     MemoryTarget {
         layer: "workspace",
-        tags: vec![format!("room:{room_label}"), "source:matrix".to_string()],
+        tags: vec![format!("room:{room_id}"), "source:matrix".to_string()],
     }
 }
 
@@ -71,12 +65,13 @@ mod tests {
     }
 
     #[test]
-    fn unmapped_room_uses_alias_when_present() {
-        let settings = settings_with_room(MatrixRoomMapping {
-            room_id: "!abc:matrix.org".into(),
-            alias: Some("hivemind-project".into()),
-            base_tags: vec!["project:hivemind".into()],
-        });
+    fn unmapped_room_falls_back_to_room_id() {
+        let settings = MatrixSettings {
+            homeserver_url: "https://matrix.org".into(),
+            user_id: "@bot:matrix.org".into(),
+            allowed_users: vec![],
+            rooms: vec![],
+        };
         let target = resolve_target(&settings, "!unmapped:matrix.org", false);
         assert_eq!(target.layer, "workspace");
         assert_eq!(
