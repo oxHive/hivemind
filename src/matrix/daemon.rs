@@ -183,8 +183,10 @@ pub async fn run(settings: MatrixSettings, agent: AgentSettings, hivemind_bin: S
                     }
                 }
                 crate::matrix::commands::Command::Chat(message) => {
+                    let target = crate::matrix::rooms::resolve_target(&settings, room.room_id().as_str(), is_dm);
+                    let prompt = format!("{}{message}", crate::matrix::rooms::context_prefix(&target));
                     let resume = sessions.get(room.room_id().as_str()).await;
-                    match crate::matrix::agent::run_turn(&agent, &hivemind_bin, &message, resume.as_deref()).await {
+                    match crate::matrix::agent::run_turn(&agent, &hivemind_bin, &prompt, resume.as_deref()).await {
                         Ok(result) => {
                             sessions.set(room.room_id().as_str(), result.session_id).await;
                             mark_room_active(&status_reply, room.room_id().as_str()).await;
