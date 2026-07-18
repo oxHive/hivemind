@@ -1,6 +1,7 @@
 import type { Plugin } from "@opencode-ai/plugin"
-import { existsSync } from "node:fs"
-import { resolve } from "node:path"
+import { existsSync, mkdirSync, readdirSync, copyFileSync } from "node:fs"
+import { resolve, join } from "node:path"
+import { homedir } from "node:os"
 
 const HIVEMIND_INSTRUCTIONS = `# HiveMind Memory System
 
@@ -37,6 +38,16 @@ Wait for explicit confirmation before calling memory_store.
 
 export default (async ({ client, directory, $ }) => {
   const hivemindBin = await resolveHivemind($)
+  const installedSkills = installSkills()
+  if (installedSkills.length) {
+    await client.app.log({
+      body: {
+        service: "hivemind",
+        level: "info",
+        message: `installed ${installedSkills.length} skill(s) to ${globalSkillsDir()}`,
+      },
+    })
+  }
 
   if (hivemindBin) {
     await client.app.log({
@@ -83,6 +94,40 @@ export default (async ({ client, directory, $ }) => {
     },
   }
 }) satisfies Plugin
+
+// OpenCode never scans npm package contents for skills — it only discovers
+// them from specific filesystem paths (.opencode/skills, ~/.claude/skills,
+// ~/.config/opencode/skills, etc — see https://opencode.ai/docs/skills/).
+// So the skills/ bundled in this package are otherwise invisible to
+// OpenCode-only users; copy them into its global skills directory on every
+// plugin load so they're actually picked up. Overwrites each time (these
+// aren't meant to be hand-edited, same as Claude Code plugin skills) so
+// updates to this package propagate on next OpenCode start.
+function globalSkillsDir(): string {
+  const xdg = process.env.XDG_CONFIG_HOME
+  const base = xdg && xdg.trim() ? xdg : join(homedir(), ".config")
+  return join(base, "opencode", "skills")
+}
+
+function installSkills(): string[] {
+  try {
+    const sourceDir = resolve(import.meta.dir, "skills")
+    if (!existsSync(sourceDir)) return []
+    const targetRoot = globalSkillsDir()
+    const installed: string[] = []
+    for (const name of readdirSync(sourceDir)) {
+      const sourceSkill = join(sourceDir, name, "SKILL.md")
+      if (!existsSync(sourceSkill)) continue
+      const targetDir = join(targetRoot, name)
+      mkdirSync(targetDir, { recursive: true })
+      copyFileSync(sourceSkill, join(targetDir, "SKILL.md"))
+      installed.push(name)
+    }
+    return installed
+  } catch {
+    return []
+  }
+}
 
 async function resolveHivemind(
   $: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<{ stdout: Uint8Array }>,
