@@ -157,6 +157,8 @@ fn kill_server() -> String {
     let sent = std::process::Command::new("kill")
         .arg("-TERM")
         .arg(pid.to_string())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status()
         .map(|s| s.success())
         .unwrap_or(false);
@@ -177,10 +179,17 @@ fn kill_server() -> String {
     }
 }
 
+/// `kill -0` (and `-TERM` above) inherit stdio by default, so an unsilenced
+/// call prints things like "kill: sending signal to 123 failed: No such
+/// process" straight into the raw-mode terminal — corrupting the TUI frame
+/// mid-render, since nothing here goes through ratatui's buffer. Silenced;
+/// the exit status alone tells us what we need.
 fn process_alive(pid: u32) -> bool {
     std::process::Command::new("kill")
         .arg("-0")
         .arg(pid.to_string())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
