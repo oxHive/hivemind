@@ -78,7 +78,7 @@ pub async fn run(
                         KeyCode::Char('d') => break,
                         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                             drop(guard);
-                            let _ = std::fs::remove_file(crate::db::pidfile_path());
+                            let _ = std::fs::remove_file(crate::db::up_pidfile_path());
                             std::process::exit(0);
                         }
                         _ => {}

@@ -5,6 +5,27 @@ use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+struct PidGuard(std::path::PathBuf);
+
+impl Drop for PidGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// Records this process's PID at `crate::db::matrix_pidfile_path()` while the
+/// daemon is running, mirroring `hivemind up`'s pidfile in `http.rs` — kept
+/// as a small self-contained duplicate rather than sharing that module's
+/// private guard across modules.
+fn write_pidfile() -> Result<PidGuard> {
+    let path = crate::db::matrix_pidfile_path();
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(&path, std::process::id().to_string())?;
+    Ok(PidGuard(path))
+}
+
 pub struct EventDecision {
     pub should_handle: bool,
     pub is_dm: bool,
@@ -84,6 +105,7 @@ pub async fn run(settings: MatrixSettings, agent: AgentSettings, hivemind_bin: S
         .build()
         .await?;
     client.restore_session(session).await?;
+    let _pid_guard = write_pidfile()?;
 
     let status_reply = Arc::new(Mutex::new(StatusReply {
         logged_in: true,
