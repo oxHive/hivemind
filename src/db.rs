@@ -23,6 +23,12 @@ pub fn legacy_db_path() -> std::path::PathBuf {
         .join("memories.db")
 }
 
+/// PID file written by `hivemind up` while its server process is running,
+/// so `hivemind status` can find and signal it: $XDG_DATA_HOME/hivemind/hivemind.pid
+pub fn pidfile_path() -> std::path::PathBuf {
+    xdg_data_dir().join("hivemind.pid")
+}
+
 pub fn resolve_db_path() -> String {
     if let Ok(p) = std::env::var("HIVEMIND_DB_PATH") {
         return p;

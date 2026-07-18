@@ -139,6 +139,30 @@ pub fn spawn_change_poller(
     })
 }
 
+/// Removes the pidfile when dropped. Held for the lifetime of `run_up` so an
+/// early `?` return (e.g. the dashboard listener failing to bind) still
+/// cleans up; the Ctrl+C path in `tui::up_view` bypasses Drop entirely (it
+/// calls `std::process::exit`) and removes the file itself instead.
+struct PidGuard(std::path::PathBuf);
+
+impl Drop for PidGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// Records this process's PID so `hivemind status`'s `k` shortcut (a
+/// separate process, with no other way to identify the server) can find and
+/// signal it.
+fn write_pidfile() -> Result<PidGuard> {
+    let path = crate::db::pidfile_path();
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(&path, std::process::id().to_string())?;
+    Ok(PidGuard(path))
+}
+
 pub async fn run_up(
     store: Arc<SqliteStore>,
     settings: &ServerSettings,
@@ -177,6 +201,7 @@ pub async fn run_up(
     }
 
     let listener = tokio::net::TcpListener::bind((settings.host.as_str(), settings.port)).await?;
+    let _pid_guard = write_pidfile()?;
     tracing::info!(
         "MCP endpoint:  http://{}:{}/mcp",
         settings.host,
@@ -235,15 +260,74 @@ pub async fn run_up(
         )
         .await?;
         crate::tui::up_view::run(data, dashboard_url, mcp_url, events_tx, store.clone()).await?;
-        // `q` returns here: terminal is already restored by up_view's TerminalGuard.
-        // Fall through to logging mode so the server keeps running under Ctrl+C,
-        // matching the spec's "q exits the view only" behavior.
+        // `d` returns here: terminal is already restored by up_view's TerminalGuard.
+        // Actually detach: stop this process's listeners so a re-exec'd child
+        // can rebind the same port, hand off the pidfile, and exit — the
+        // shell gets its prompt back immediately, and the child survives
+        // this terminal closing (new session, stdio off the tty).
+        api_handle.abort();
+        if let Some(h) = dash_handle {
+            h.abort();
+        }
+        for _ in 0..20 {
+            if !crate::cli::probe_server_up(settings) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        drop(_pid_guard); // removes the pidfile now; the child writes its own on bind
+        spawn_detached_child(headless)?;
+        std::process::exit(0);
     }
 
     api_handle.await??;
     if let Some(h) = dash_handle {
         h.await??;
     }
+    Ok(())
+}
+
+/// Re-execs this binary as `hivemind up [--headless] --plain`, detached from
+/// the controlling terminal (new session via `setsid`, stdio redirected to a
+/// log file), and does not wait for it. Used by the `up` TUI's `d` (detach)
+/// key: the caller aborts its own listeners and exits right after this
+/// returns, so the child can bind the now-free port.
+fn spawn_detached_child(headless: bool) -> Result<()> {
+    use std::os::unix::process::CommandExt;
+
+    let exe = std::env::current_exe()?;
+    let log_path = crate::db::xdg_data_dir().join("hivemind.detached.log");
+    if let Some(dir) = log_path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let log_out = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)?;
+    let log_err = log_out.try_clone()?;
+
+    let mut cmd = std::process::Command::new(exe);
+    cmd.arg("up");
+    if headless {
+        cmd.arg("--headless");
+    }
+    // Detached child has no controlling tty; force plain output.
+    cmd.arg("--plain");
+    cmd.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::from(log_out))
+        .stderr(std::process::Stdio::from(log_err));
+    // Safety: setsid() only detaches the child from the parent's controlling
+    // terminal/session; it touches no shared state and can't fail in a way
+    // that leaves the child (or this process) in an inconsistent state.
+    unsafe {
+        cmd.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    cmd.spawn()?;
     Ok(())
 }
 
