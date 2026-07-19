@@ -71,7 +71,14 @@ pub enum Command {
 #[derive(Subcommand)]
 pub enum ServiceAction {
     /// Install and enable HiveMind as a user-level background service
-    Install,
+    Install {
+        /// Also serve the dashboard from the background service
+        #[arg(long)]
+        dashboard: bool,
+        /// Also install the Matrix bot unit (requires `hivemind matrix login` first)
+        #[arg(long)]
+        matrix: bool,
+    },
     /// Stop and remove the HiveMind background service
     Uninstall,
     /// Show the status of the HiveMind background service
@@ -465,11 +472,11 @@ Wait for explicit confirmation before calling memory_store.
 
 // ── service management ────────────────────────────────────────────────────────
 
-pub fn cmd_service_install() -> Result<()> {
+pub fn cmd_service_install(dashboard: bool, matrix: bool) -> Result<()> {
     #[cfg(target_os = "macos")]
-    return service_install_macos();
+    return service_install_macos(dashboard, matrix);
     #[cfg(target_os = "linux")]
-    return service_install_linux();
+    return service_install_linux(dashboard, matrix);
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     anyhow::bail!("hivemind service install is only supported on Linux and macOS");
 }
@@ -603,13 +610,25 @@ fn service_status_unit_linux(unit_name: &str) -> Result<()> {
 }
 
 #[cfg(target_os = "linux")]
-fn service_install_linux() -> Result<()> {
-    service_install_unit_linux("hivemind", "HiveMind MCP memory server", &[])?;
-    if crate::config::load_matrix_settings(&crate::config::global_config_path())
-        .ok()
-        .flatten()
-        .is_some()
-    {
+fn service_install_linux(dashboard: bool, matrix: bool) -> Result<()> {
+    let (args, desc): (&[&str], &str) = if dashboard {
+        (&["up"], "HiveMind server (API + dashboard)")
+    } else {
+        (&["up", "--headless"], "HiveMind server (API only)")
+    };
+    service_install_unit_linux("hivemind", desc, args)?;
+
+    if matrix {
+        let configured = crate::config::load_matrix_settings(&crate::config::global_config_path())
+            .ok()
+            .flatten()
+            .is_some();
+        if !configured {
+            anyhow::bail!(
+                "--matrix was passed but Matrix is not configured.\n\
+                 Run `hivemind matrix login` first, then re-run `hivemind service install --matrix`."
+            );
+        }
         service_install_unit_linux(
             "hivemind-matrix",
             "HiveMind Matrix chat bot",
@@ -619,6 +638,12 @@ fn service_install_linux() -> Result<()> {
 
     println!();
     println!("HiveMind will now start automatically on login.");
+    if dashboard {
+        let port = crate::config::load_server_settings(&crate::config::global_config_path())
+            .map(|s| s.dashboard_port)
+            .unwrap_or(3457);
+        println!("Dashboard: http://127.0.0.1:{port}");
+    }
     println!("Check status: hivemind service status");
     Ok(())
 }
@@ -783,17 +808,25 @@ fn service_status_unit_macos(label: &str) -> Result<()> {
 }
 
 #[cfg(target_os = "macos")]
-fn service_install_macos() -> Result<()> {
-    service_install_unit_macos(
-        LAUNCH_AGENT_LABEL,
-        &["up", "--headless"],
-        "HiveMind service",
-    )?;
-    if crate::config::load_matrix_settings(&crate::config::global_config_path())
-        .ok()
-        .flatten()
-        .is_some()
-    {
+fn service_install_macos(dashboard: bool, matrix: bool) -> Result<()> {
+    let (args, desc): (&[&str], &str) = if dashboard {
+        (&["up"], "HiveMind server (API + dashboard)")
+    } else {
+        (&["up", "--headless"], "HiveMind server (API only)")
+    };
+    service_install_unit_macos(LAUNCH_AGENT_LABEL, args, desc)?;
+
+    if matrix {
+        let configured = crate::config::load_matrix_settings(&crate::config::global_config_path())
+            .ok()
+            .flatten()
+            .is_some();
+        if !configured {
+            anyhow::bail!(
+                "--matrix was passed but Matrix is not configured.\n\
+                 Run `hivemind matrix login` first, then re-run `hivemind service install --matrix`."
+            );
+        }
         service_install_unit_macos(
             MATRIX_LAUNCH_AGENT_LABEL,
             &["matrix", "run"],
@@ -803,6 +836,12 @@ fn service_install_macos() -> Result<()> {
 
     println!();
     println!("HiveMind will now start automatically on login.");
+    if dashboard {
+        let port = crate::config::load_server_settings(&crate::config::global_config_path())
+            .map(|s| s.dashboard_port)
+            .unwrap_or(3457);
+        println!("Dashboard: http://127.0.0.1:{port}");
+    }
     println!("Logs: ~/Library/Logs/hivemind.log");
     println!("Check status: hivemind service status");
     Ok(())
