@@ -521,7 +521,11 @@ fn systemd_unit_content(description: &str, exe: &Path, exec_args: &[&str]) -> St
 }
 
 #[cfg(target_os = "linux")]
-fn service_install_unit_linux(unit_name: &str, description: &str, exec_args: &[&str]) -> Result<()> {
+fn service_install_unit_linux(
+    unit_name: &str,
+    description: &str,
+    exec_args: &[&str],
+) -> Result<()> {
     let exe = std::env::current_exe()?;
     let unit = systemd_unit_content(description, &exe, exec_args);
 
@@ -867,8 +871,13 @@ pub fn cmd_matrix_login() -> Result<()> {
                 &store,
                 &crate::config::global_config_path(),
             )?;
-            println!("Logged in as {} (device {}).", response.user_id, response.device_id);
-            println!("Session saved to the OS keyring. Run `hivemind matrix run` to start the bot.");
+            println!(
+                "Logged in as {} (device {}).",
+                response.user_id, response.device_id
+            );
+            println!(
+                "Session saved to the OS keyring. Run `hivemind matrix run` to start the bot."
+            );
             anyhow::Ok(())
         })
 }

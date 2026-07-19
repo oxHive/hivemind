@@ -37,7 +37,10 @@ mod tests {
     async fn set_then_get_returns_the_stored_session_id() {
         let map = SessionMap::new();
         map.set("!room:matrix.org", "sess-1".to_string()).await;
-        assert_eq!(map.get("!room:matrix.org").await, Some("sess-1".to_string()));
+        assert_eq!(
+            map.get("!room:matrix.org").await,
+            Some("sess-1".to_string())
+        );
     }
 
     #[tokio::test]
@@ -45,7 +48,10 @@ mod tests {
         let map = SessionMap::new();
         map.set("!room:matrix.org", "sess-1".to_string()).await;
         map.set("!room:matrix.org", "sess-2".to_string()).await;
-        assert_eq!(map.get("!room:matrix.org").await, Some("sess-2".to_string()));
+        assert_eq!(
+            map.get("!room:matrix.org").await,
+            Some("sess-2".to_string())
+        );
     }
 
     #[tokio::test]
@@ -63,6 +69,9 @@ mod tests {
         let map = SessionMap::new();
         let cloned = map.clone();
         cloned.set("!room:matrix.org", "sess-1".to_string()).await;
-        assert_eq!(map.get("!room:matrix.org").await, Some("sess-1".to_string()));
+        assert_eq!(
+            map.get("!room:matrix.org").await,
+            Some("sess-1".to_string())
+        );
     }
 }

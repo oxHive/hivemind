@@ -20,7 +20,11 @@ use rmcp::transport::TokioChildProcess;
 /// no agent CLI, no LLM interpretation. This is the `!hm store` fast path:
 /// verbatim, no cost, no tagging/dedup judgment beyond what resolve_target
 /// already decided.
-pub async fn store_memory(hivemind_bin: &str, content: &str, target: &MemoryTarget) -> Result<(), String> {
+pub async fn store_memory(
+    hivemind_bin: &str,
+    content: &str,
+    target: &MemoryTarget,
+) -> Result<(), String> {
     let transport = TokioChildProcess::new(tokio::process::Command::new(hivemind_bin))
         .map_err(|e| format!("failed to spawn hivemind: {e}"))?;
     let client = ()
@@ -29,16 +33,34 @@ pub async fn store_memory(hivemind_bin: &str, content: &str, target: &MemoryTarg
         .map_err(|e| format!("failed to connect to hivemind MCP: {e}"))?;
 
     let mut arguments = serde_json::Map::new();
-    arguments.insert("title".to_string(), serde_json::Value::String(derive_title(content)));
-    arguments.insert("content".to_string(), serde_json::Value::String(content.to_string()));
+    arguments.insert(
+        "title".to_string(),
+        serde_json::Value::String(derive_title(content)),
+    );
+    arguments.insert(
+        "content".to_string(),
+        serde_json::Value::String(content.to_string()),
+    );
     arguments.insert(
         "tags".to_string(),
-        serde_json::Value::Array(target.tags.iter().cloned().map(serde_json::Value::String).collect()),
+        serde_json::Value::Array(
+            target
+                .tags
+                .iter()
+                .cloned()
+                .map(serde_json::Value::String)
+                .collect(),
+        ),
     );
-    arguments.insert("layer".to_string(), serde_json::Value::String(target.layer.to_string()));
+    arguments.insert(
+        "layer".to_string(),
+        serde_json::Value::String(target.layer.to_string()),
+    );
 
     let result = client
-        .call_tool(rmcp::model::CallToolRequestParams::new("memory_store").with_arguments(arguments))
+        .call_tool(
+            rmcp::model::CallToolRequestParams::new("memory_store").with_arguments(arguments),
+        )
         .await;
 
     let _ = client.cancel().await;
@@ -62,7 +84,11 @@ mod tests {
     fn long_content_is_truncated_with_ellipsis() {
         let content = "a".repeat(100);
         let title = derive_title(&content);
-        assert!(title.len() <= 63, "title should be truncated, got {} chars", title.len());
+        assert!(
+            title.len() <= 63,
+            "title should be truncated, got {} chars",
+            title.len()
+        );
         assert!(title.ends_with('…'));
     }
 

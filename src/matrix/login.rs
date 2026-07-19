@@ -41,7 +41,9 @@ mod tests {
             store.load("@bot:matrix.org").unwrap(),
             Some("{\"access_token\":\"abc\"}".to_string())
         );
-        let settings = crate::config::load_matrix_settings(&config_path).unwrap().unwrap();
+        let settings = crate::config::load_matrix_settings(&config_path)
+            .unwrap()
+            .unwrap();
         assert_eq!(settings.homeserver_url, "https://matrix.org");
         assert_eq!(settings.user_id, "@bot:matrix.org");
     }

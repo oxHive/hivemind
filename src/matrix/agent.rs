@@ -56,7 +56,8 @@ async fn run_claude_turn(
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
     let out = spawn_and_wait(cmd).await?;
-    let v: Value = serde_json::from_str(&out).map_err(|e| format!("unparseable agent output: {e}"))?;
+    let v: Value =
+        serde_json::from_str(&out).map_err(|e| format!("unparseable agent output: {e}"))?;
     let session_id = v
         .get("session_id")
         .and_then(|s| s.as_str())
@@ -67,7 +68,10 @@ async fn run_claude_turn(
         .and_then(|s| s.as_str())
         .unwrap_or_default()
         .to_string();
-    Ok(TurnResult { reply_text, session_id })
+    Ok(TurnResult {
+        reply_text,
+        session_id,
+    })
 }
 
 async fn run_opencode_turn(
@@ -89,7 +93,8 @@ async fn run_opencode_turn(
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
     let out = spawn_and_wait(cmd).await?;
-    let v: Value = serde_json::from_str(&out).map_err(|e| format!("unparseable agent output: {e}"))?;
+    let v: Value =
+        serde_json::from_str(&out).map_err(|e| format!("unparseable agent output: {e}"))?;
     let session_id = v
         .get("session_id")
         .and_then(|s| s.as_str())
@@ -100,7 +105,10 @@ async fn run_opencode_turn(
         .and_then(|s| s.as_str())
         .unwrap_or_default()
         .to_string();
-    Ok(TurnResult { reply_text, session_id })
+    Ok(TurnResult {
+        reply_text,
+        session_id,
+    })
 }
 
 async fn spawn_and_wait(mut cmd: tokio::process::Command) -> Result<String, String> {
@@ -113,7 +121,11 @@ async fn spawn_and_wait(mut cmd: tokio::process::Command) -> Result<String, Stri
         .map_err(|e| e.to_string())?;
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
-        return Err(format!("agent exited with {}: {}", out.status, stderr.trim()));
+        return Err(format!(
+            "agent exited with {}: {}",
+            out.status,
+            stderr.trim()
+        ));
     }
     let stdout = String::from_utf8_lossy(&out.stdout);
     stdout
@@ -157,7 +169,10 @@ mod tests {
     async fn claude_turn_passes_isolation_flags_and_stdio_mcp_config() {
         let dir = tempfile::tempdir().unwrap();
         let script = write_stub_claude_agent(dir.path());
-        let agent = AgentSettings { command: script, args: vec![] };
+        let agent = AgentSettings {
+            command: script,
+            args: vec![],
+        };
         let result = run_turn(&agent, "/usr/local/bin/hivemind", "remember X", None)
             .await
             .unwrap();
@@ -170,18 +185,32 @@ mod tests {
         assert!(log.contains("--strict-mcp-config"));
         assert!(log.contains("--allowedTools"));
         assert!(log.contains("mcp__hivemind__memory_store"));
-        assert!(log.contains("\"command\":\"/usr/local/bin/hivemind\""), "mcp-config must point at hivemind in stdio mode, not an HTTP url");
-        assert!(!log.contains("--resume"), "first turn must not pass --resume");
+        assert!(
+            log.contains("\"command\":\"/usr/local/bin/hivemind\""),
+            "mcp-config must point at hivemind in stdio mode, not an HTTP url"
+        );
+        assert!(
+            !log.contains("--resume"),
+            "first turn must not pass --resume"
+        );
     }
 
     #[tokio::test]
     async fn claude_turn_resumes_with_the_given_session_id() {
         let dir = tempfile::tempdir().unwrap();
         let script = write_stub_claude_agent(dir.path());
-        let agent = AgentSettings { command: script, args: vec![] };
-        run_turn(&agent, "/usr/local/bin/hivemind", "again", Some("prior-session"))
-            .await
-            .unwrap();
+        let agent = AgentSettings {
+            command: script,
+            args: vec![],
+        };
+        run_turn(
+            &agent,
+            "/usr/local/bin/hivemind",
+            "again",
+            Some("prior-session"),
+        )
+        .await
+        .unwrap();
         let log = std::fs::read_to_string(dir.path().join("args.log")).unwrap();
         assert!(log.contains("--resume prior-session"));
     }
@@ -204,9 +233,14 @@ mod tests {
             command: renamed.to_string_lossy().into_owned(),
             ..agent
         };
-        let result = run_turn(&agent, "/usr/local/bin/hivemind", "remember X", Some("sess-1"))
-            .await
-            .unwrap();
+        let result = run_turn(
+            &agent,
+            "/usr/local/bin/hivemind",
+            "remember X",
+            Some("sess-1"),
+        )
+        .await
+        .unwrap();
         assert_eq!(result.session_id, "stub-sess-2");
         let log = std::fs::read_to_string(dir.path().join("args.log")).unwrap();
         assert!(log.contains("run"));

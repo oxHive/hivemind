@@ -40,14 +40,20 @@ pub fn decide(
     mentions_bot: bool,
 ) -> EventDecision {
     if is_own_message {
-        return EventDecision { should_handle: false, is_dm };
+        return EventDecision {
+            should_handle: false,
+            is_dm,
+        };
     }
     let should_handle = if is_dm {
         settings.allowed_users.iter().any(|u| u == sender_user_id)
     } else {
         mentions_bot
     };
-    EventDecision { should_handle, is_dm }
+    EventDecision {
+        should_handle,
+        is_dm,
+    }
 }
 
 /// Current time as a string, matching the epoch-seconds-as-string pattern
@@ -88,7 +94,11 @@ async fn mark_room_inactive(status_reply: &Arc<Mutex<StatusReply>>, room_id: &st
     }
 }
 
-pub async fn run(settings: MatrixSettings, agent: AgentSettings, hivemind_bin: String) -> Result<()> {
+pub async fn run(
+    settings: MatrixSettings,
+    agent: AgentSettings,
+    hivemind_bin: String,
+) -> Result<()> {
     use matrix_sdk::config::SyncSettings as MatrixSyncSettings;
     use matrix_sdk::ruma::events::room::message::{MessageType, OriginalSyncRoomMessageEvent};
     use matrix_sdk::{Client, Room, RoomState};
@@ -97,7 +107,8 @@ pub async fn run(settings: MatrixSettings, agent: AgentSettings, hivemind_bin: S
     let session_json = store
         .load(&settings.user_id)?
         .ok_or_else(|| anyhow::anyhow!("no saved session — run `hivemind matrix login` first"))?;
-    let session: matrix_sdk::authentication::matrix::MatrixSession = serde_json::from_str(&session_json)?;
+    let session: matrix_sdk::authentication::matrix::MatrixSession =
+        serde_json::from_str(&session_json)?;
 
     let client = Client::builder()
         .homeserver_url(&settings.homeserver_url)
@@ -235,32 +246,67 @@ mod tests {
 
     #[test]
     fn own_messages_are_never_handled() {
-        let d = decide(&settings(), "!abc:matrix.org", false, "@bot:matrix.org", true, true);
+        let d = decide(
+            &settings(),
+            "!abc:matrix.org",
+            false,
+            "@bot:matrix.org",
+            true,
+            true,
+        );
         assert!(!d.should_handle);
     }
 
     #[test]
     fn dm_from_allowed_user_is_handled() {
-        let d = decide(&settings(), "!dm:matrix.org", true, "@you:matrix.org", false, false);
+        let d = decide(
+            &settings(),
+            "!dm:matrix.org",
+            true,
+            "@you:matrix.org",
+            false,
+            false,
+        );
         assert!(d.should_handle);
         assert!(d.is_dm);
     }
 
     #[test]
     fn dm_from_non_allowed_user_is_silently_ignored() {
-        let d = decide(&settings(), "!dm:matrix.org", true, "@stranger:matrix.org", false, false);
+        let d = decide(
+            &settings(),
+            "!dm:matrix.org",
+            true,
+            "@stranger:matrix.org",
+            false,
+            false,
+        );
         assert!(!d.should_handle);
     }
 
     #[test]
     fn room_message_without_mention_is_ignored() {
-        let d = decide(&settings(), "!abc:matrix.org", false, "@you:matrix.org", false, false);
+        let d = decide(
+            &settings(),
+            "!abc:matrix.org",
+            false,
+            "@you:matrix.org",
+            false,
+            false,
+        );
         assert!(!d.should_handle);
     }
 
     #[test]
     fn room_message_with_mention_is_handled_regardless_of_sender() {
-        let d = decide(&settings(), "!abc:matrix.org", false, "@anyone:matrix.org", false, true);
+        let d = decide(
+            &settings(),
+            "!abc:matrix.org",
+            false,
+            "@anyone:matrix.org",
+            false,
+            true,
+        );
         assert!(d.should_handle);
         assert!(!d.is_dm);
     }
