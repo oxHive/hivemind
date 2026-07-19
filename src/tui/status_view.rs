@@ -1,4 +1,4 @@
-use crate::cli::{StatusData, build_status_data};
+use crate::cli::{MatrixStatusLine, StatusData, build_status_data};
 use crate::store::SqliteStore;
 use crate::tui::{TerminalGuard, header::render_header};
 use anyhow::Result;
@@ -268,6 +268,23 @@ fn draw(
             }
         )),
     ];
+    match &data.matrix {
+        MatrixStatusLine::NotConfigured => {}
+        MatrixStatusLine::NotRunning => {
+            lines.push(Line::from("Matrix     configured, not running"));
+        }
+        MatrixStatusLine::Running {
+            user_id,
+            sync_state,
+            room_count,
+            active_sessions,
+        } => {
+            lines.push(Line::from(format!(
+                "Matrix     {user_id} ({sync_state}), {room_count} room(s), \
+                 {active_sessions} active session(s)"
+            )));
+        }
+    }
     if data.project.is_none() {
         lines.push(Line::from(""));
         lines.push(Line::from(

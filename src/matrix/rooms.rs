@@ -24,16 +24,18 @@ pub fn resolve_target(settings: &MatrixSettings, room_id: &str, is_dm: bool) -> 
     }
 }
 
-pub fn context_prefix(target: &MemoryTarget) -> String {
+/// Instruction for the agent's system prompt (not spliced into the user
+/// message) so it can't be confused with attacker-controlled text arriving
+/// in the DM/room message itself.
+pub fn context_system_prompt(target: &MemoryTarget) -> String {
     let tags = if target.tags.is_empty() {
         "(none)".to_string()
     } else {
         target.tags.join(", ")
     };
     format!(
-        "(HiveMind context: if you store or update a memory as part of this conversation, \
-         use layer \"{}\" and include these tags: {tags}. This instruction is not part of \
-         the user's message below.)\n\n",
+        "If you store or update a memory as part of this conversation, use layer \"{}\" \
+         and include these tags: {tags}.",
         target.layer
     )
 }
@@ -49,6 +51,7 @@ mod tests {
             user_id: "@bot:matrix.org".into(),
             allowed_users: vec![],
             rooms: vec![mapping],
+            session_ttl_seconds: crate::config::DEFAULT_SESSION_TTL_SECONDS,
         }
     }
 
@@ -86,6 +89,7 @@ mod tests {
             user_id: "@bot:matrix.org".into(),
             allowed_users: vec![],
             rooms: vec![],
+            session_ttl_seconds: crate::config::DEFAULT_SESSION_TTL_SECONDS,
         };
         let target = resolve_target(&settings, "!unmapped:matrix.org", false);
         assert_eq!(target.layer, "workspace");
@@ -99,24 +103,24 @@ mod tests {
     }
 
     #[test]
-    fn context_prefix_includes_layer_and_tags() {
+    fn context_system_prompt_includes_layer_and_tags() {
         let target = MemoryTarget {
             layer: "workspace",
             tags: vec!["project:hivemind".to_string(), "topic:matrix".to_string()],
         };
-        let prefix = context_prefix(&target);
-        assert!(prefix.contains("workspace"));
-        assert!(prefix.contains("project:hivemind"));
-        assert!(prefix.contains("topic:matrix"));
+        let prompt = context_system_prompt(&target);
+        assert!(prompt.contains("workspace"));
+        assert!(prompt.contains("project:hivemind"));
+        assert!(prompt.contains("topic:matrix"));
     }
 
     #[test]
-    fn context_prefix_handles_no_tags() {
+    fn context_system_prompt_handles_no_tags() {
         let target = MemoryTarget {
             layer: "personal",
             tags: vec![],
         };
-        let prefix = context_prefix(&target);
-        assert!(prefix.contains("personal"));
+        let prompt = context_system_prompt(&target);
+        assert!(prompt.contains("personal"));
     }
 }

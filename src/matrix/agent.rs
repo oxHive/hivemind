@@ -15,15 +15,21 @@ pub async fn run_turn(
     hivemind_bin: &str,
     prompt: &str,
     resume: Option<&str>,
+    system_prompt: Option<&str>,
 ) -> Result<TurnResult, String> {
     let command_name = std::path::Path::new(&agent.command)
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or(&agent.command);
     if command_name == "opencode" {
+        // opencode's `run` subcommand has no per-invocation system-prompt
+        // flag, so this instruction can't be routed through a trusted
+        // channel here; it's silently dropped rather than spliced into the
+        // user-visible prompt, where it would be indistinguishable from
+        // attacker-controlled message text.
         run_opencode_turn(agent, prompt, resume).await
     } else {
-        run_claude_turn(agent, hivemind_bin, prompt, resume).await
+        run_claude_turn(agent, hivemind_bin, prompt, resume, system_prompt).await
     }
 }
 
@@ -32,6 +38,7 @@ async fn run_claude_turn(
     hivemind_bin: &str,
     prompt: &str,
     resume: Option<&str>,
+    system_prompt: Option<&str>,
 ) -> Result<TurnResult, String> {
     let mcp_config = json!({
         "mcpServers": { "hivemind": { "command": hivemind_bin, "args": [] } }
@@ -41,6 +48,9 @@ async fn run_claude_turn(
     cmd.args(&agent.args);
     if let Some(id) = resume {
         cmd.arg("--resume").arg(id);
+    }
+    if let Some(sp) = system_prompt {
+        cmd.arg("--append-system-prompt").arg(sp);
     }
     cmd.arg("-p")
         .arg(prompt)
@@ -173,7 +183,7 @@ mod tests {
             command: script,
             args: vec![],
         };
-        let result = run_turn(&agent, "/usr/local/bin/hivemind", "remember X", None)
+        let result = run_turn(&agent, "/usr/local/bin/hivemind", "remember X", None, None)
             .await
             .unwrap();
         assert_eq!(result.session_id, "stub-sess-1");
@@ -208,11 +218,34 @@ mod tests {
             "/usr/local/bin/hivemind",
             "again",
             Some("prior-session"),
+            None,
         )
         .await
         .unwrap();
         let log = std::fs::read_to_string(dir.path().join("args.log")).unwrap();
         assert!(log.contains("--resume prior-session"));
+    }
+
+    #[tokio::test]
+    async fn claude_turn_passes_system_prompt_via_flag_not_the_user_message() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = write_stub_claude_agent(dir.path());
+        let agent = AgentSettings {
+            command: script,
+            args: vec![],
+        };
+        run_turn(
+            &agent,
+            "/usr/local/bin/hivemind",
+            "hello",
+            None,
+            Some("use layer \"personal\" and tag source:matrix"),
+        )
+        .await
+        .unwrap();
+        let log = std::fs::read_to_string(dir.path().join("args.log")).unwrap();
+        assert!(log.contains("--append-system-prompt"));
+        assert!(log.contains("use layer \"personal\" and tag source:matrix"));
     }
 
     #[tokio::test]
@@ -238,6 +271,7 @@ mod tests {
             "/usr/local/bin/hivemind",
             "remember X",
             Some("sess-1"),
+            None,
         )
         .await
         .unwrap();
@@ -259,7 +293,7 @@ mod tests {
             command: script.to_string_lossy().into_owned(),
             args: vec![],
         };
-        let err = run_turn(&agent, "/usr/local/bin/hivemind", "hi", None)
+        let err = run_turn(&agent, "/usr/local/bin/hivemind", "hi", None, None)
             .await
             .unwrap_err();
         assert!(err.contains("boom"));

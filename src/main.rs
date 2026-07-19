@@ -26,20 +26,34 @@ fn main() -> Result<()> {
         },
         Some(Command::Matrix { action }) => match action {
             cli::MatrixAction::Login => cli::cmd_matrix_login(),
-            cli::MatrixAction::Run => run_matrix(),
+            cli::MatrixAction::Run { debug } => run_matrix(debug),
             cli::MatrixAction::Status => cli::cmd_matrix_status(),
+            cli::MatrixAction::Send { user_id, message } => run_matrix_send(user_id, message),
         },
         Some(Command::Migrate) => cli::cmd_migrate(),
         Some(Command::SessionStart { json }) => cli::cmd_session_start(json),
     }
 }
 
+struct LocalTimer;
+
+impl tracing_subscriber::fmt::time::FormatTime for LocalTimer {
+    fn format_time(&self, w: &mut tracing_subscriber::fmt::format::Writer<'_>) -> std::fmt::Result {
+        write!(w, "{}", chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.6f%:z"))
+    }
+}
+
 fn init_tracing() {
+    init_tracing_with_default("hivemind=info,oxhivemind=info");
+}
+
+fn init_tracing_with_default(default_filter: &str) {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
+        .with_timer(LocalTimer)
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "hivemind=info".into()),
+                .unwrap_or_else(|_| default_filter.into()),
         )
         .init();
 }
@@ -139,13 +153,29 @@ async fn run_dashboard(open: bool) -> Result<()> {
 }
 
 #[tokio::main]
-async fn run_matrix() -> Result<()> {
-    init_tracing();
+async fn run_matrix(debug: bool) -> Result<()> {
+    if debug {
+        init_tracing_with_default("hivemind=debug,oxhivemind=debug");
+    } else {
+        init_tracing();
+    }
+    tracing::debug!("loading matrix config");
     let settings =
         config::load_matrix_settings(&config::global_config_path())?.ok_or_else(|| {
             anyhow::anyhow!("no [matrix] config found — run `hivemind matrix login` first")
         })?;
     let server_settings = config::load_server_settings(&config::global_config_path())?;
     let hivemind_bin = std::env::current_exe()?.to_string_lossy().into_owned();
+    tracing::debug!("starting matrix daemon");
     oxhivemind::matrix::daemon::run(settings, server_settings.agent, hivemind_bin).await
+}
+
+#[tokio::main]
+async fn run_matrix_send(user_id: String, message: String) -> Result<()> {
+    init_tracing_with_default("hivemind=debug,oxhivemind=debug");
+    let settings =
+        config::load_matrix_settings(&config::global_config_path())?.ok_or_else(|| {
+            anyhow::anyhow!("no [matrix] config found — run `hivemind matrix login` first")
+        })?;
+    oxhivemind::matrix::daemon::send_direct_message(&settings, &user_id, &message).await
 }

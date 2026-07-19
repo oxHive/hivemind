@@ -127,6 +127,7 @@ struct RawMatrix {
     allowed_users: Vec<String>,
     #[serde(default)]
     rooms: Vec<RawMatrixRoom>,
+    session_ttl_seconds: Option<u64>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -188,7 +189,12 @@ pub struct MatrixSettings {
     pub user_id: String,
     pub allowed_users: Vec<String>,
     pub rooms: Vec<MatrixRoomMapping>,
+    /// How long (in seconds) a room's agent session stays resumable after
+    /// its last message before the next message starts a fresh one.
+    pub session_ttl_seconds: u64,
 }
+
+pub const DEFAULT_SESSION_TTL_SECONDS: u64 = 120;
 
 #[derive(Debug, Default, Deserialize)]
 struct RawGlobal {
@@ -411,6 +417,10 @@ pub fn load_matrix_settings(global_path: &Path) -> Result<Option<MatrixSettings>
         user_id,
         allowed_users: raw.matrix.allowed_users,
         rooms,
+        session_ttl_seconds: raw
+            .matrix
+            .session_ttl_seconds
+            .unwrap_or(DEFAULT_SESSION_TTL_SECONDS),
     }))
 }
 
@@ -724,6 +734,7 @@ mod tests {
         assert_eq!(s.rooms[0].room_id, "!abc123:matrix.org");
         assert_eq!(s.rooms[0].alias.as_deref(), Some("hivemind-project"));
         assert_eq!(s.rooms[0].base_tags, vec!["project:hivemind".to_string()]);
+        assert_eq!(s.session_ttl_seconds, DEFAULT_SESSION_TTL_SECONDS);
     }
 
     #[test]
@@ -739,6 +750,22 @@ mod tests {
             .unwrap();
         assert!(s.allowed_users.is_empty());
         assert!(s.rooms.is_empty());
+        assert_eq!(s.session_ttl_seconds, DEFAULT_SESSION_TTL_SECONDS);
+    }
+
+    #[test]
+    fn matrix_settings_honors_configured_session_ttl() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "config.toml",
+            "[matrix]\nhomeserver_url=\"https://matrix.org\"\nuser_id=\"@bot:matrix.org\"\n\
+             session_ttl_seconds=30\n",
+        );
+        let s = load_matrix_settings(&tmp.path().join("config.toml"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(s.session_ttl_seconds, 30);
     }
 
     #[test]

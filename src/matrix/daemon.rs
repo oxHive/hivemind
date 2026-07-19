@@ -94,28 +94,127 @@ async fn mark_room_inactive(status_reply: &Arc<Mutex<StatusReply>>, room_id: &st
     }
 }
 
+/// Loads the saved session from the OS keyring (bounded by a timeout so a
+/// dead/unreachable Secret Service fails fast instead of hanging forever)
+/// and restores a logged-in [`matrix_sdk::Client`] from it.
+pub async fn restore_client(settings: &MatrixSettings) -> Result<matrix_sdk::Client> {
+    use matrix_sdk::Client;
+
+    tracing::debug!(user_id = %settings.user_id, "loading saved session from OS keyring");
+    let keyring_user_id = settings.user_id.clone();
+    let session_json = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        tokio::task::spawn_blocking(move || KeyringSessionStore.load(&keyring_user_id)),
+    )
+    .await
+    .map_err(|_| {
+        anyhow::anyhow!(
+            "timed out reading session from the OS keyring after 10s — is a keyring daemon \
+             running and unlocked? (e.g. `systemctl --user start gnome-keyring-daemon`)"
+        )
+    })???
+    .ok_or_else(|| anyhow::anyhow!("no saved session — run `hivemind matrix login` first"))?;
+    let session: matrix_sdk::authentication::matrix::MatrixSession =
+        serde_json::from_str(&session_json)?;
+    tracing::debug!("session loaded from keyring");
+
+    tracing::debug!(homeserver = %settings.homeserver_url, "building matrix client");
+    let client = Client::builder()
+        .homeserver_url(&settings.homeserver_url)
+        .sqlite_store(crate::db::xdg_data_dir().join("matrix-store"), None)
+        .build()
+        .await?;
+    tracing::debug!("client built, restoring session");
+    client.restore_session(session).await?;
+    tracing::info!(user_id = %settings.user_id, "matrix login succeeded, session restored");
+    Ok(client)
+}
+
+/// Marks a room as a DM with `user_id` in the bot's `m.direct` account data,
+/// so future calls to `Client::get_dm_room` find it instead of spawning a
+/// duplicate DM. Failures are logged, not fatal — the room is still usable.
+async fn mark_as_dm(client: &matrix_sdk::Client, room: &matrix_sdk::Room, user_id: &matrix_sdk::ruma::UserId) {
+    if let Err(e) = client
+        .account()
+        .mark_as_dm(room.room_id(), &[user_id.to_owned()])
+        .await
+    {
+        tracing::warn!(room_id = %room.room_id(), error = %e, "failed to mark room as DM");
+    }
+}
+
+/// Finds an existing DM with `user_id`: first via `m.direct` account data,
+/// then by joining a pending invite from that user if one exists, and only
+/// creates a brand-new DM room as a last resort. Without the invite check, a
+/// DM the bot was invited to but never joined would be invisible to
+/// `get_dm_room`, so every call would spawn a fresh duplicate room.
+async fn find_or_join_dm_room(
+    client: &matrix_sdk::Client,
+    user_id: &matrix_sdk::ruma::UserId,
+) -> Result<matrix_sdk::Room> {
+    if let Some(room) = client.get_dm_room(user_id) {
+        tracing::debug!(room_id = %room.room_id(), "found existing DM room");
+        return Ok(room);
+    }
+
+    for room in client.invited_rooms() {
+        if let Ok(invite) = room.invite_details().await
+            && invite.inviter_id == user_id
+        {
+            tracing::info!(room_id = %room.room_id(), sender = %user_id, "found pending invite from target user, joining");
+            room.join().await?;
+            mark_as_dm(client, &room, user_id).await;
+            return Ok(room);
+        }
+    }
+
+    tracing::debug!(to = %user_id, "no existing DM room, creating one");
+    let room = client.create_dm(user_id).await?;
+    mark_as_dm(client, &room, user_id).await;
+    Ok(room)
+}
+
+/// Sends a text message to the given user's DM room, creating the DM if one
+/// doesn't already exist. Used for one-off connectivity checks (`hivemind
+/// matrix send`) independent of the daemon's sync loop.
+pub async fn send_direct_message(
+    settings: &MatrixSettings,
+    to_user_id: &str,
+    message: &str,
+) -> Result<()> {
+    use matrix_sdk::ruma::UserId;
+    use matrix_sdk::ruma::events::room::message::RoomMessageEventContent;
+
+    let client = restore_client(settings).await?;
+    let user_id = <&UserId>::try_from(to_user_id)
+        .map_err(|e| anyhow::anyhow!("invalid user id {to_user_id:?}: {e}"))?;
+
+    tracing::debug!("running initial sync before sending");
+    client
+        .sync_once(matrix_sdk::config::SyncSettings::default())
+        .await?;
+
+    let room = find_or_join_dm_room(&client, user_id).await?;
+
+    tracing::debug!(room_id = %room.room_id(), "sending message");
+    room.send(RoomMessageEventContent::text_plain(message))
+        .await?;
+    tracing::info!(room_id = %room.room_id(), to = %user_id, "message sent");
+    Ok(())
+}
+
 pub async fn run(
     settings: MatrixSettings,
     agent: AgentSettings,
     hivemind_bin: String,
 ) -> Result<()> {
     use matrix_sdk::config::SyncSettings as MatrixSyncSettings;
+    use matrix_sdk::ruma::events::room::member::StrippedRoomMemberEvent;
     use matrix_sdk::ruma::events::room::message::{MessageType, OriginalSyncRoomMessageEvent};
-    use matrix_sdk::{Client, Room, RoomState};
+    use matrix_sdk::{Room, RoomState};
 
-    let store = KeyringSessionStore;
-    let session_json = store
-        .load(&settings.user_id)?
-        .ok_or_else(|| anyhow::anyhow!("no saved session — run `hivemind matrix login` first"))?;
-    let session: matrix_sdk::authentication::matrix::MatrixSession =
-        serde_json::from_str(&session_json)?;
-
-    let client = Client::builder()
-        .homeserver_url(&settings.homeserver_url)
-        .sqlite_store(crate::db::xdg_data_dir().join("matrix-store"), None)
-        .build()
-        .await?;
-    client.restore_session(session).await?;
+    let client = restore_client(&settings).await?;
+    tracing::debug!("starting initial sync");
     let _pid_guard = write_pidfile()?;
 
     let status_reply = Arc::new(Mutex::new(StatusReply {
@@ -142,11 +241,37 @@ pub async fn run(
         }
     });
 
-    let sessions = crate::matrix::session::SessionMap::new();
+    let sessions = crate::matrix::session::SessionMap::new(std::time::Duration::from_secs(
+        settings.session_ttl_seconds,
+    ));
     let bot_user_id = settings.user_id.clone();
     let settings = Arc::new(settings);
     let agent = Arc::new(agent);
     let hivemind_bin = Arc::new(hivemind_bin);
+
+    let invite_bot_user_id = bot_user_id.clone();
+    let invite_client = client.clone();
+    client.add_event_handler(move |room_member: StrippedRoomMemberEvent, room: Room| {
+        let bot_user_id = invite_bot_user_id.clone();
+        let client = invite_client.clone();
+        async move {
+            if room_member.state_key.as_str() != bot_user_id || room.state() != RoomState::Invited
+            {
+                return;
+            }
+            let is_direct = room_member.content.is_direct.unwrap_or(false);
+            tracing::info!(room_id = %room.room_id(), sender = %room_member.sender, is_direct, "invited to room, auto-joining");
+            match room.join().await {
+                Ok(()) => {
+                    tracing::info!(room_id = %room.room_id(), "joined room");
+                    if is_direct {
+                        mark_as_dm(&client, &room, &room_member.sender).await;
+                    }
+                }
+                Err(e) => tracing::warn!(room_id = %room.room_id(), error = %e, "failed to join invited room"),
+            }
+        }
+    });
 
     let handler_status_reply = status_reply.clone();
     client.add_event_handler(move |event: OriginalSyncRoomMessageEvent, room: Room| {
@@ -158,12 +283,24 @@ pub async fn run(
         let status_reply = handler_status_reply.clone();
         async move {
             if room.state() != RoomState::Joined {
+                tracing::debug!(
+                    room_id = %room.room_id(),
+                    state = ?room.state(),
+                    "ignoring message in room bot has not joined"
+                );
                 return;
             }
             let is_own_message = event.sender.as_str() == bot_user_id;
             let is_dm = room.is_direct().await.unwrap_or(false);
             let MessageType::Text(text) = &event.content.msgtype else { return };
             let mentions_bot = text.body.contains(&bot_user_id);
+            tracing::debug!(
+                room_id = %room.room_id(),
+                sender = %event.sender,
+                is_dm,
+                mentions_bot,
+                "message received"
+            );
             let decision = decide(
                 &settings,
                 room.room_id().as_str(),
@@ -173,8 +310,14 @@ pub async fn run(
                 mentions_bot,
             );
             if !decision.should_handle {
+                if is_dm && !is_own_message {
+                    tracing::debug!(sender = %event.sender, "DM from non-allowed user, ignoring");
+                } else {
+                    tracing::debug!(sender = %event.sender, "message not handled (no mention or own message)");
+                }
                 return;
             }
+            tracing::debug!(sender = %event.sender, room_id = %room.room_id(), "sender authorized, handling message");
             {
                 let mut r = status_reply.lock().await;
                 r.last_sync_at = Some(now_ts());
@@ -186,6 +329,7 @@ pub async fn run(
                 }
                 crate::matrix::commands::Command::Store(memory_text) => {
                     let target = crate::matrix::rooms::resolve_target(&settings, room.room_id().as_str(), is_dm);
+                    tracing::debug!(room_id = %room.room_id(), "storing memory");
                     match crate::matrix::store_direct::store_memory(&hivemind_bin, &memory_text, &target).await {
                         Ok(()) => {
                             mark_room_active(&status_reply, room.room_id().as_str()).await;
@@ -198,15 +342,26 @@ pub async fn run(
                 }
                 crate::matrix::commands::Command::Chat(message) => {
                     let target = crate::matrix::rooms::resolve_target(&settings, room.room_id().as_str(), is_dm);
-                    let prompt = format!("{}{message}", crate::matrix::rooms::context_prefix(&target));
+                    let system_prompt = crate::matrix::rooms::context_system_prompt(&target);
                     let resume = sessions.get(room.room_id().as_str()).await;
-                    match crate::matrix::agent::run_turn(&agent, &hivemind_bin, &prompt, resume.as_deref()).await {
+                    match &resume {
+                        Some(id) => tracing::debug!(room_id = %room.room_id(), session_id = %id, "resuming session"),
+                        None => tracing::debug!(room_id = %room.room_id(), "spawning new session"),
+                    }
+                    match crate::matrix::agent::run_turn(&agent, &hivemind_bin, &message, resume.as_deref(), Some(&system_prompt)).await {
                         Ok(result) => {
+                            tracing::debug!(
+                                room_id = %room.room_id(),
+                                session_id = %result.session_id,
+                                reply = %result.reply_text,
+                                "agent response"
+                            );
                             sessions.set(room.room_id().as_str(), result.session_id).await;
                             mark_room_active(&status_reply, room.room_id().as_str()).await;
                             let _ = room.send(matrix_sdk::ruma::events::room::message::RoomMessageEventContent::text_plain(result.reply_text)).await;
                         }
                         Err(e) => {
+                            tracing::debug!(room_id = %room.room_id(), error = %e, "agent turn failed");
                             sessions.reset(room.room_id().as_str()).await;
                             mark_room_inactive(&status_reply, room.room_id().as_str()).await;
                             let _ = room.send(matrix_sdk::ruma::events::room::message::RoomMessageEventContent::text_plain(format!("hivemind matrix hit an error: {e}"))).await;
@@ -241,6 +396,7 @@ mod tests {
                 alias: None,
                 base_tags: vec!["project:hivemind".into()],
             }],
+            session_ttl_seconds: crate::config::DEFAULT_SESSION_TTL_SECONDS,
         }
     }
 
