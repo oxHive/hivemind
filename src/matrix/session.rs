@@ -5,6 +5,12 @@ use tokio::sync::Mutex;
 #[derive(Clone)]
 pub struct SessionMap(Arc<Mutex<HashMap<String, String>>>);
 
+impl Default for SessionMap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SessionMap {
     pub fn new() -> Self {
         SessionMap(Arc::new(Mutex::new(HashMap::new())))

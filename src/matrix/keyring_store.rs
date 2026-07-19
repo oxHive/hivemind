@@ -37,6 +37,13 @@ impl SessionStore for KeyringSessionStore {
 pub struct FakeSessionStore(std::sync::Mutex<std::collections::HashMap<String, String>>);
 
 #[cfg(test)]
+impl Default for FakeSessionStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
 impl FakeSessionStore {
     pub fn new() -> Self {
         FakeSessionStore(std::sync::Mutex::new(std::collections::HashMap::new()))

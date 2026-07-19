@@ -1,4 +1,4 @@
-use crate::config::{MatrixRoomMapping, MatrixSettings};
+use crate::config::MatrixSettings;
 
 pub struct MemoryTarget {
     pub layer: &'static str,
@@ -41,6 +41,7 @@ pub fn context_prefix(target: &MemoryTarget) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::MatrixRoomMapping;
 
     fn settings_with_room(mapping: MatrixRoomMapping) -> MatrixSettings {
         MatrixSettings {
