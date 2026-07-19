@@ -3,12 +3,14 @@ import { computed } from 'vue'
 import { useUiStore } from '../../stores/ui.js'
 import { useFeedbackStore } from '../../stores/feedback.js'
 import { useGraphStore } from '../../stores/graph.js'
+import { useUpdateStore } from '../../stores/update.js'
 import StatusRow from './StatusRow.vue'
 import oxhiveMark from '../../assets/oxhive-mark.png'
 
 const ui = useUiStore()
 const feedback = useFeedbackStore()
 const graph = useGraphStore()
+const update = useUpdateStore()
 
 const feedbackCount = computed(() =>
   feedback.conflicts.length + feedback.feedbackItems.length
@@ -101,6 +103,19 @@ const syncDot = computed(() => {
             class="font-mono rounded-sm px-1.5 py-0.5"
             style="font-size:10px; background:var(--hm-warning-bg); color:var(--hm-warning)">
             {{ navBadgeCount(item.id) }}
+          </span>
+        </button>
+      </li>
+      <li v-if="update.available && update.platformSupported">
+        <button
+          @click="update.changelogOpen = true"
+          class="nav-item"
+        >
+          <span>Update available</span>
+          <span
+            class="font-mono rounded-sm px-1.5 py-0.5"
+            style="font-size:10px; background:var(--hm-warning-bg); color:var(--hm-warning)">
+            v{{ update.latestVersion }}
           </span>
         </button>
       </li>

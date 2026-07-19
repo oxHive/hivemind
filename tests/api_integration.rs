@@ -46,7 +46,17 @@ async fn test_app() -> (axum::Router, TempDir) {
         agent,
         "http://127.0.0.1:3456/mcp".into(),
     );
-    let router = oxhivemind::api::router(store, sync, "http://127.0.0.1:3457", events, suggest);
+    let update_state = Arc::new(tokio::sync::RwLock::new(
+        oxhivemind::update::UpdateState::new_idle(),
+    ));
+    let router = oxhivemind::api::router(
+        store,
+        sync,
+        "http://127.0.0.1:3457",
+        events,
+        suggest,
+        update_state,
+    );
     (router, dir)
 }
 
