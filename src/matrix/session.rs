@@ -12,7 +12,8 @@ struct Entry {
 /// absence of a configured `[matrix] session_ttl_seconds`. Past this, `get`
 /// treats it as detached and the next message starts a fresh agent session
 /// instead of resuming a stale one.
-const DEFAULT_SESSION_TTL: Duration = Duration::from_secs(crate::config::DEFAULT_SESSION_TTL_SECONDS);
+const DEFAULT_SESSION_TTL: Duration =
+    Duration::from_secs(crate::config::DEFAULT_SESSION_TTL_SECONDS);
 
 #[derive(Clone)]
 pub struct SessionMap {
