@@ -8,6 +8,7 @@ const rows = computed(() => [
   ['Version', ui.serverInfo?.version || '—'],
   ['Memories', ui.serverInfo?.memory_count ?? ui.serverInfo?.memoryCount ?? '—'],
   ['Storage', ui.serverInfo?.storage_path || ui.serverInfo?.storagePath || '—'],
+  ['Agent', ui.serverInfo?.agent?.kind || '—'],
 ])
 </script>
 

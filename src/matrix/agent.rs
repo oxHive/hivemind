@@ -1,4 +1,4 @@
-use crate::config::AgentSettings;
+use crate::config::{AgentKind, AgentSettings};
 use serde_json::{Value, json};
 use std::time::Duration;
 
@@ -17,19 +17,16 @@ pub async fn run_turn(
     resume: Option<&str>,
     system_prompt: Option<&str>,
 ) -> Result<TurnResult, String> {
-    let command_name = std::path::Path::new(&agent.command)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or(&agent.command);
-    if command_name == "opencode" {
-        // opencode's `run` subcommand has no per-invocation system-prompt
-        // flag, so this instruction can't be routed through a trusted
-        // channel here; it's silently dropped rather than spliced into the
-        // user-visible prompt, where it would be indistinguishable from
-        // attacker-controlled message text.
-        run_opencode_turn(agent, prompt, resume).await
-    } else {
-        run_claude_turn(agent, hivemind_bin, prompt, resume, system_prompt).await
+    match agent.kind {
+        AgentKind::OpenCode => {
+            // opencode's `run` subcommand has no per-invocation system-prompt
+            // flag, so this instruction can't be routed through a trusted
+            // channel here; it's silently dropped rather than spliced into the
+            // user-visible prompt, where it would be indistinguishable from
+            // attacker-controlled message text.
+            run_opencode_turn(agent, prompt, resume).await
+        }
+        AgentKind::Claude => run_claude_turn(agent, hivemind_bin, prompt, resume, system_prompt).await,
     }
 }
 
@@ -182,6 +179,7 @@ mod tests {
         let agent = AgentSettings {
             command: script,
             args: vec![],
+            kind: AgentKind::Claude,
         };
         let result = run_turn(&agent, "/usr/local/bin/hivemind", "remember X", None, None)
             .await
@@ -212,6 +210,7 @@ mod tests {
         let agent = AgentSettings {
             command: script,
             args: vec![],
+            kind: AgentKind::Claude,
         };
         run_turn(
             &agent,
@@ -233,6 +232,7 @@ mod tests {
         let agent = AgentSettings {
             command: script,
             args: vec![],
+            kind: AgentKind::Claude,
         };
         run_turn(
             &agent,
@@ -253,18 +253,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let script = write_stub_opencode_agent(dir.path());
         let agent = AgentSettings {
-            command: "opencode".to_string(),
+            command: script,
             args: vec![],
-        };
-        // Point at the stub via a wrapper AgentSettings whose command is the
-        // stub script but whose *name* still needs to read as "opencode" for
-        // dispatch — dispatch is keyed on the configured command's file stem.
-        let renamed = dir.path().join("opencode");
-        std::fs::copy(&script, &renamed).unwrap();
-        std::fs::set_permissions(&renamed, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let agent = AgentSettings {
-            command: renamed.to_string_lossy().into_owned(),
-            ..agent
+            kind: AgentKind::OpenCode,
         };
         let result = run_turn(
             &agent,
@@ -292,6 +283,7 @@ mod tests {
         let agent = AgentSettings {
             command: script.to_string_lossy().into_owned(),
             args: vec![],
+            kind: AgentKind::Claude,
         };
         let err = run_turn(&agent, "/usr/local/bin/hivemind", "hi", None, None)
             .await

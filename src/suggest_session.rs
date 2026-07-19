@@ -231,18 +231,12 @@ impl SuggestSessionManager {
 
     /// Runs one headless agent turn; returns the new session id.
     ///
-    /// Dispatches on the configured command's file stem, same convention as
-    /// `matrix::agent::run_turn` — Claude Code and OpenCode take different
+    /// Dispatches on `agent.kind` — Claude Code and OpenCode take different
     /// flags for prompting, JSON output, and MCP wiring.
     async fn run_turn(&self, prompt: &str, resume: Option<&str>) -> Result<String, String> {
-        let command_name = std::path::Path::new(&self.agent.command)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or(&self.agent.command);
-        if command_name == "opencode" {
-            self.run_opencode_turn(prompt, resume).await
-        } else {
-            self.run_claude_turn(prompt, resume).await
+        match self.agent.kind {
+            crate::config::AgentKind::OpenCode => self.run_opencode_turn(prompt, resume).await,
+            crate::config::AgentKind::Claude => self.run_claude_turn(prompt, resume).await,
         }
     }
 
@@ -417,6 +411,7 @@ mod tests {
         let agent = crate::config::AgentSettings {
             command: script.clone(),
             args: vec![],
+            kind: crate::config::AgentKind::Claude,
         };
         let mgr = SuggestSessionManager::new(
             Arc::clone(&store),
@@ -533,6 +528,7 @@ mod tests {
         let agent = crate::config::AgentSettings {
             command: script.to_string_lossy().into_owned(),
             args: vec![],
+            kind: crate::config::AgentKind::Claude,
         };
         let mgr =
             SuggestSessionManager::new(store, events, agent, "http://127.0.0.1:3456/mcp".into());
@@ -562,9 +558,7 @@ mod tests {
             })
             .await
             .unwrap();
-        // Dispatch is keyed on the configured command's file stem, so the
-        // stub must actually be named "opencode".
-        let script = dir.path().join("opencode");
+        let script = dir.path().join("stub-opencode.sh");
         std::fs::write(
             &script,
             "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$(dirname \"$0\")/args.log\"\necho '{\"session_id\":\"stub-oc-1\",\"result\":\"done\"}'\n",
@@ -576,6 +570,7 @@ mod tests {
         let agent = crate::config::AgentSettings {
             command: script.to_string_lossy().into_owned(),
             args: vec![],
+            kind: crate::config::AgentKind::OpenCode,
         };
         let mgr =
             SuggestSessionManager::new(store, events, agent, "http://127.0.0.1:3456/mcp".into());

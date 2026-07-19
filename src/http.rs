@@ -53,6 +53,7 @@ pub fn app_router(
         Arc::new(LocalSessionManager::default()),
         Default::default(),
     );
+    let agent_for_status = agent.clone();
     let suggest = SuggestSessionManager::new(store.clone(), events_tx.clone(), agent, mcp_url);
     api::router(
         store,
@@ -61,6 +62,7 @@ pub fn app_router(
         events_tx,
         suggest,
         update_state,
+        agent_for_status,
     )
     .nest_service("/mcp", mcp)
 }
@@ -452,6 +454,7 @@ mod tests {
         let agent = crate::config::AgentSettings {
             command: write_stub_agent(dir.path()),
             args: vec![],
+            kind: crate::config::AgentKind::Claude,
         };
         let app = app_router(
             store,

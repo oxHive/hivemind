@@ -43,6 +43,7 @@ fn test_suggest_manager(
     let agent = crate::config::AgentSettings {
         command: script,
         args: vec![],
+        kind: crate::config::AgentKind::Claude,
     };
     crate::suggest_session::SuggestSessionManager::new(
         store,
@@ -58,6 +59,10 @@ fn test_update_state() -> SharedUpdateState {
     ))
 }
 
+fn test_agent_settings() -> crate::config::AgentSettings {
+    crate::config::AgentSettings::default()
+}
+
 async fn test_router() -> (Router, TempDir) {
     let (store, dir) = test_store().await;
     let (events, _) = broadcast::channel(16);
@@ -69,6 +74,7 @@ async fn test_router() -> (Router, TempDir) {
         events,
         suggest,
         test_update_state(),
+        test_agent_settings(),
     );
     (r, dir)
 }
@@ -84,6 +90,7 @@ async fn test_router_with_events() -> (Router, broadcast::Receiver<Value>, TempD
         events,
         suggest,
         test_update_state(),
+        test_agent_settings(),
     );
     (r, rx, dir)
 }
@@ -99,6 +106,7 @@ async fn test_router_with_store() -> (Router, Arc<SqliteStore>, TempDir) {
         events,
         suggest,
         test_update_state(),
+        test_agent_settings(),
     );
     (r, store, dir)
 }
@@ -215,6 +223,8 @@ async fn status_reports_version_and_count() {
     assert_eq!(status["version"], env!("CARGO_PKG_VERSION"));
     assert_eq!(status["memory_count"], 1);
     assert_eq!(status["sync"]["enabled"], false);
+    assert_eq!(status["agent"]["kind"], "claude");
+    assert_eq!(status["agent"]["command"], "claude");
 }
 
 #[tokio::test]

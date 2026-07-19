@@ -123,6 +123,7 @@ struct RawUpdate {
 struct RawAgent {
     command: Option<String>,
     args: Option<Vec<String>>,
+    kind: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -182,10 +183,53 @@ impl Default for UpdateSettings {
     }
 }
 
+/// Which headless-agent CLI `hivemind suggest` / the Matrix bot shell out to.
+/// Explicit rather than sniffed from `command`'s file name, so a wrapper
+/// script or a renamed binary doesn't silently change which flags get used.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentKind {
+    Claude,
+    OpenCode,
+}
+
+impl AgentKind {
+    /// Back-compat default for configs written before `[agent] kind` existed:
+    /// guess from the command's file stem.
+    fn detect(command: &str) -> Self {
+        let name = std::path::Path::new(command)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(command);
+        if name.eq_ignore_ascii_case("opencode") {
+            AgentKind::OpenCode
+        } else {
+            AgentKind::Claude
+        }
+    }
+
+    fn parse(kind: &str) -> anyhow::Result<Self> {
+        match kind {
+            "claude" => Ok(AgentKind::Claude),
+            "opencode" => Ok(AgentKind::OpenCode),
+            other => {
+                anyhow::bail!("unknown [agent] kind \"{other}\" (expected \"claude\" or \"opencode\")")
+            }
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AgentKind::Claude => "claude",
+            AgentKind::OpenCode => "opencode",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentSettings {
     pub command: String,
     pub args: Vec<String>,
+    pub kind: AgentKind,
 }
 
 impl Default for AgentSettings {
@@ -193,6 +237,7 @@ impl Default for AgentSettings {
         AgentSettings {
             command: "claude".into(),
             args: Vec::new(),
+            kind: AgentKind::Claude,
         }
     }
 }
@@ -396,9 +441,15 @@ pub fn load_server_settings(global_path: &std::path::Path) -> anyhow::Result<Ser
         enabled: raw.update.enabled.unwrap_or(true),
         check_interval_seconds: raw.update.check_interval_seconds.unwrap_or(600),
     };
+    let agent_command = raw.agent.command.unwrap_or_else(|| "claude".into());
+    let agent_kind = match raw.agent.kind {
+        Some(k) => AgentKind::parse(&k)?,
+        None => AgentKind::detect(&agent_command),
+    };
     let agent = AgentSettings {
-        command: raw.agent.command.unwrap_or_else(|| "claude".into()),
+        command: agent_command,
         args: raw.agent.args.unwrap_or_default(),
+        kind: agent_kind,
     };
     Ok(ServerSettings {
         host,
@@ -736,6 +787,43 @@ mod tests {
         let s = load_server_settings(&tmp.path().join("no-global.toml")).unwrap();
         assert_eq!(s.agent.command, "claude");
         assert!(s.agent.args.is_empty());
+        assert_eq!(s.agent.kind, AgentKind::Claude);
+    }
+
+    #[test]
+    fn agent_kind_explicit_overrides_command_sniffing() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "config.toml",
+            "[agent]\ncommand=\"/opt/bin/my-claude-wrapper\"\nkind=\"claude\"\n",
+        );
+        let s = load_server_settings(&tmp.path().join("config.toml")).unwrap();
+        assert_eq!(s.agent.kind, AgentKind::Claude);
+    }
+
+    #[test]
+    fn agent_kind_defaults_to_opencode_when_command_looks_like_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "config.toml",
+            "[agent]\ncommand=\"opencode\"\n",
+        );
+        let s = load_server_settings(&tmp.path().join("config.toml")).unwrap();
+        assert_eq!(s.agent.kind, AgentKind::OpenCode);
+    }
+
+    #[test]
+    fn agent_kind_rejects_unknown_value() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "config.toml",
+            "[agent]\nkind=\"gpt\"\n",
+        );
+        let err = load_server_settings(&tmp.path().join("config.toml")).unwrap_err();
+        assert!(err.to_string().contains("unknown [agent] kind"));
     }
 
     #[test]

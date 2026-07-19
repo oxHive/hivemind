@@ -39,6 +39,7 @@ async fn test_app() -> (axum::Router, TempDir) {
     let agent = AgentSettings {
         command: script.to_string_lossy().into_owned(),
         args: vec![],
+        kind: oxhivemind::config::AgentKind::Claude,
     };
     let suggest = SuggestSessionManager::new(
         Arc::clone(&store),
@@ -56,6 +57,7 @@ async fn test_app() -> (axum::Router, TempDir) {
         events,
         suggest,
         update_state,
+        oxhivemind::config::AgentSettings::default(),
     );
     (router, dir)
 }

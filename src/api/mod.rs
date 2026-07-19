@@ -1,5 +1,5 @@
 use crate::{
-    config::SyncSettings,
+    config::{AgentSettings, SyncSettings},
     store::SqliteStore,
     suggest_session::{ReviseError, StartError, SuggestSessionManager},
     update::{SharedUpdateState, UpdateStatus},
@@ -75,6 +75,7 @@ fn localhost_origins(origin: &str) -> AllowOrigin {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn router(
     store: Store,
     sync: SyncSettings,
@@ -82,6 +83,7 @@ pub fn router(
     events: Events,
     suggest: Arc<SuggestSessionManager>,
     update_state: SharedUpdateState,
+    agent: AgentSettings,
 ) -> Router {
     Router::new()
         .route("/api/v1/memories", get(list_memories).post(create_memory))
@@ -135,6 +137,7 @@ pub fn router(
         .layer(Extension(events))
         .layer(Extension(suggest))
         .layer(Extension(update_state))
+        .layer(Extension(agent))
         .layer(
             CorsLayer::new()
                 .allow_origin(localhost_origins(dashboard_origin))

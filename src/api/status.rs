@@ -19,6 +19,7 @@ pub(super) async fn list_session_logs(
 pub(super) async fn server_status(
     State(store): State<Store>,
     Extension(sync): Extension<SyncSettings>,
+    Extension(agent): Extension<crate::config::AgentSettings>,
 ) -> Result<Json<Value>, ApiError> {
     let count = store.count().await?;
     let last_synced_at = store
@@ -34,6 +35,10 @@ pub(super) async fn server_status(
             "enabled": sync.enabled,
             "last_synced_at": last_synced_at,
             "conflict_count": conflict_count,
+        },
+        "agent": {
+            "kind": agent.kind.as_str(),
+            "command": agent.command,
         },
     })))
 }
