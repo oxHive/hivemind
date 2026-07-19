@@ -83,9 +83,20 @@ pub enum MatrixAction {
     /// Log into a Matrix account once; persists the session to the OS keyring
     Login,
     /// Run the Matrix bot daemon (requires `hivemind matrix login` first)
-    Run,
+    Run {
+        /// Print verbose connection/message logs to stderr
+        #[arg(long)]
+        debug: bool,
+    },
     /// Show whether the daemon is running and its sync/session state
     Status,
+    /// Send a one-off DM to a user (connectivity smoke test, no daemon needed)
+    Send {
+        /// Recipient's Matrix user ID (e.g. @oxgrad:matrix.org)
+        user_id: String,
+        /// Message text to send
+        message: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -829,11 +840,16 @@ fn exe_path() -> String {
 // ── matrix ────────────────────────────────────────────────────────────────
 
 pub fn cmd_matrix_login() -> Result<()> {
-    print!("Homeserver URL (e.g. https://matrix.org): ");
+    print!("Homeserver URL [https://matrix.org]: ");
     std::io::stdout().flush()?;
     let mut homeserver_url = String::new();
     std::io::stdin().read_line(&mut homeserver_url)?;
-    let homeserver_url = homeserver_url.trim().to_string();
+    let homeserver_url = homeserver_url.trim();
+    let homeserver_url = if homeserver_url.is_empty() {
+        "https://matrix.org".to_string()
+    } else {
+        homeserver_url.to_string()
+    };
 
     print!("User ID (e.g. @hivemind-bot:matrix.org): ");
     std::io::stdout().flush()?;
@@ -1441,6 +1457,20 @@ pub struct StatusData {
     pub sync_remote_url: String,
     pub registered_clients: Vec<String>,
     pub project: Option<ProjectStatus>,
+    pub matrix: MatrixStatusLine,
+}
+
+pub enum MatrixStatusLine {
+    /// No `[matrix]` section in the global config — matrix isn't set up.
+    NotConfigured,
+    /// Configured, but `hivemind matrix run` isn't currently up.
+    NotRunning,
+    Running {
+        user_id: String,
+        sync_state: String,
+        room_count: usize,
+        active_sessions: usize,
+    },
 }
 
 pub async fn build_status_data(
@@ -1468,6 +1498,22 @@ pub async fn build_status_data(
     }
     .to_string();
 
+    let matrix = match crate::config::load_matrix_settings(global_path)? {
+        None => MatrixStatusLine::NotConfigured,
+        Some(_) => {
+            let socket_path = crate::matrix::status::socket_path();
+            match crate::matrix::status::query_status(&socket_path).await {
+                Ok(reply) => MatrixStatusLine::Running {
+                    user_id: reply.user_id,
+                    sync_state: reply.sync_state,
+                    room_count: reply.rooms.len(),
+                    active_sessions: reply.rooms.iter().filter(|r| r.active_session).count(),
+                },
+                Err(_) => MatrixStatusLine::NotRunning,
+            }
+        }
+    };
+
     let mut data = StatusData {
         version,
         project_label,
@@ -1480,6 +1526,7 @@ pub async fn build_status_data(
         sync_remote_url: settings.sync.remote_url.clone(),
         registered_clients: registered_clients.iter().map(|s| s.to_string()).collect(),
         project: None,
+        matrix,
     };
 
     let (Some(root), Some(config)) = (root, config) else {
@@ -1556,6 +1603,25 @@ pub fn format_status_text(data: &StatusData) -> String {
         writeln!(out, "AI clients: none registered").unwrap();
     } else {
         writeln!(out, "AI clients: {}", data.registered_clients.join(", ")).unwrap();
+    }
+    match &data.matrix {
+        MatrixStatusLine::NotConfigured => {}
+        MatrixStatusLine::NotRunning => {
+            writeln!(out, "Matrix:     configured, not running (hivemind matrix run)").unwrap();
+        }
+        MatrixStatusLine::Running {
+            user_id,
+            sync_state,
+            room_count,
+            active_sessions,
+        } => {
+            writeln!(
+                out,
+                "Matrix:     {user_id} ({sync_state}), {room_count} room(s), \
+                 {active_sessions} active session(s)"
+            )
+            .unwrap();
+        }
     }
     writeln!(out).unwrap();
 
@@ -1677,8 +1743,19 @@ mod tests {
         assert!(matches!(
             cli.command,
             Some(Command::Matrix {
-                action: MatrixAction::Run
+                action: MatrixAction::Run { debug: false }
             })
+        ));
+    }
+
+    #[test]
+    fn parses_matrix_send_subcommand() {
+        let cli = Cli::parse_from(["hivemind", "matrix", "send", "@oxgrad:matrix.org", "hi"]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Matrix {
+                action: MatrixAction::Send { user_id, message }
+            }) if user_id == "@oxgrad:matrix.org" && message == "hi"
         ));
     }
 

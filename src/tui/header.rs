@@ -101,6 +101,7 @@ mod tests {
             sync_remote_url: String::new(),
             registered_clients: vec!["claude".to_string(), "opencode".to_string()],
             project: None,
+            matrix: crate::cli::MatrixStatusLine::NotConfigured,
         }
     }
 

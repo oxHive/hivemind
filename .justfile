@@ -2,10 +2,22 @@ mod dashboard
 
 import 'recipes/release.just'
 import 'recipes/cargo.just'
+import 'recipes/keyring.just'
 
 _default:
   @just --choose
 
+matrix-login:
+  just run "matrix login"
+
+matrix-run:
+  just run "matrix run --debug"
+
+matrix-status:
+  just run "matrix status"
+
+matrix-test-send:
+  cargo run -- matrix send @oxgrad:matrix.org "e2e test from oxley"
 
 up:
   just run up
