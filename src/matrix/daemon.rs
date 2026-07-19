@@ -133,7 +133,11 @@ pub async fn restore_client(settings: &MatrixSettings) -> Result<matrix_sdk::Cli
 /// Marks a room as a DM with `user_id` in the bot's `m.direct` account data,
 /// so future calls to `Client::get_dm_room` find it instead of spawning a
 /// duplicate DM. Failures are logged, not fatal — the room is still usable.
-async fn mark_as_dm(client: &matrix_sdk::Client, room: &matrix_sdk::Room, user_id: &matrix_sdk::ruma::UserId) {
+async fn mark_as_dm(
+    client: &matrix_sdk::Client,
+    room: &matrix_sdk::Room,
+    user_id: &matrix_sdk::ruma::UserId,
+) {
     if let Err(e) = client
         .account()
         .mark_as_dm(room.room_id(), &[user_id.to_owned()])
