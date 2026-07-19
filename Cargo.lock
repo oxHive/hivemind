@@ -3531,7 +3531,7 @@ dependencies = [
 
 [[package]]
 name = "oxhivemind"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "axum 0.8.9",

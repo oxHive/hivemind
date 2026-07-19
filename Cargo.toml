@@ -1,6 +1,6 @@
 [package]
 name = "oxhivemind"
-version = "0.9.0"
+version = "0.10.0"
 edition = "2024"
 description = "A persistent memory MCP server for AI agents"
 repository = "https://github.com/oxhive/hivemind"
