@@ -96,15 +96,27 @@ fn service_install_unit_linux(
     }
 
     let enable = std::process::Command::new("systemctl")
-        .args(["--user", "enable", "--now", unit_name])
+        .args(["--user", "enable", unit_name])
         .status();
-    match enable {
+    if !matches!(enable, Ok(s) if s.success()) {
+        println!("Warning: could not enable {unit_name} automatically.");
+        println!("Run: systemctl --user enable {unit_name}");
+    }
+
+    // `restart` (rather than `enable --now`) so a unit that's already active
+    // with different ExecStart args (e.g. re-running install --dashboard
+    // after a headless install) actually picks up the rewritten unit file
+    // instead of systemd treating `start` on an active unit as a no-op.
+    let restart = std::process::Command::new("systemctl")
+        .args(["--user", "restart", unit_name])
+        .status();
+    match restart {
         Ok(s) if s.success() => {
             println!("{unit_name} service enabled and started.");
         }
         _ => {
-            println!("Warning: could not enable/start {unit_name} automatically.");
-            println!("Run: systemctl --user enable --now {unit_name}");
+            println!("Warning: could not start {unit_name} automatically.");
+            println!("Run: systemctl --user restart {unit_name}");
         }
     }
     Ok(())
@@ -291,6 +303,14 @@ fn service_install_unit_macos(label: &str, exec_args: &[&str], description: &str
     std::fs::create_dir_all(plist_path.parent().unwrap())?;
     std::fs::write(&plist_path, &plist)?;
     println!("Plist written: {}", plist_path.display());
+
+    // Unload first (ignore failure — fine if it wasn't loaded) so re-running
+    // install with different args (e.g. --dashboard after a headless install)
+    // actually restarts the job with the rewritten plist, instead of
+    // `launchctl load` no-op'ing against an already-loaded label.
+    let _ = std::process::Command::new("launchctl")
+        .args(["unload", "-w", plist_path.to_str().unwrap()])
+        .status();
 
     let load = std::process::Command::new("launchctl")
         .args(["load", "-w", plist_path.to_str().unwrap()])
