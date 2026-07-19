@@ -8,9 +8,11 @@ import { useTagSettingsStore } from './stores/tagSettings.js'
 import { useThemeStore } from './stores/theme.js'
 import { useAnalyticsStore } from './stores/analytics.js'
 import { useSuggestStore } from './stores/suggest.js'
+import { useUpdateStore } from './stores/update.js'
 import { BASE } from './api/client.js'
 import AppSidebar from './components/sidebar/AppSidebar.vue'
 import SuggestPanel from './components/graph/SuggestPanel.vue'
+import UpdateModal from './components/update/UpdateModal.vue'
 import Toast from './components/shared/Toast.vue'
 import AnalyticsView from './views/AnalyticsView.vue'
 import MemoriesView from './views/MemoriesView.vue'
@@ -25,6 +27,7 @@ const fb = useFeedbackStore()
 const tagSettings = useTagSettingsStore()
 const analytics = useAnalyticsStore()
 const suggest = useSuggestStore()
+const update = useUpdateStore()
 useThemeStore() // applies data-theme to <html> as soon as the store is created
 
 const VIEWS = ['analytics', 'memories', 'graph', 'feedback', 'settings']
@@ -54,6 +57,7 @@ onMounted(async () => {
       tagSettings.fetchNamespaces(),
       analytics.fetchSessionLogs(),
       suggest.hydrate(),
+      update.refresh(),
     ])
   }
 
@@ -71,6 +75,9 @@ onMounted(async () => {
       if (data.type === 'changed' || data.type === 'suggest_session') {
         memories.refreshSilently()
         graph.fetchEdges()
+      }
+      if (data.type === 'update_available' || data.type === 'update_progress' || data.type === 'update_failed') {
+        update.handleEvent(data)
       }
     }
   }
@@ -118,6 +125,10 @@ onBeforeUnmount(() => {
       <!-- Global: available from any page whenever there are pending
            suggestions to review, not just the Graph view. -->
       <SuggestPanel v-if="suggest.panelOpen" />
+      <UpdateModal
+        v-if="update.changelogOpen || update.status === 'updating'"
+        @close="update.changelogOpen = false"
+      />
     </template>
 
     <Toast />

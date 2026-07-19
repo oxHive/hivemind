@@ -4,6 +4,7 @@ use crate::{
     server::HiveMind,
     store::SqliteStore,
     suggest_session::SuggestSessionManager,
+    update::SharedUpdateState,
 };
 use anyhow::Result;
 use axum::{
@@ -22,6 +23,7 @@ use std::sync::Arc;
 static DASHBOARD: Dir = include_dir!("$CARGO_MANIFEST_DIR/dashboard/dist");
 static PLACEHOLDER_HTML: &str = include_str!("dashboard_placeholder.html");
 
+#[allow(clippy::too_many_arguments)]
 pub fn app_router(
     store: Arc<SqliteStore>,
     sync: SyncSettings,
@@ -30,6 +32,7 @@ pub fn app_router(
     events_tx: tokio::sync::broadcast::Sender<serde_json::Value>,
     agent: AgentSettings,
     mcp_url: String,
+    update_state: SharedUpdateState,
 ) -> Router {
     // Fires whenever a memory or edge is created/updated/deleted, either via
     // an MCP tool call (below) or the REST API (api::router) — the dashboard
@@ -51,7 +54,15 @@ pub fn app_router(
         Default::default(),
     );
     let suggest = SuggestSessionManager::new(store.clone(), events_tx.clone(), agent, mcp_url);
-    api::router(store, sync, dashboard_origin, events_tx, suggest).nest_service("/mcp", mcp)
+    api::router(
+        store,
+        sync,
+        dashboard_origin,
+        events_tx,
+        suggest,
+        update_state,
+    )
+    .nest_service("/mcp", mcp)
 }
 
 pub fn dashboard_router(api_url: &str) -> Router {
@@ -151,6 +162,25 @@ impl Drop for PidGuard {
     }
 }
 
+/// Binds a `TcpListener`, retrying briefly on `AddrInUse`. After an in-place
+/// `exec()` self-update restart, the old process's listening socket (marked
+/// `CLOEXEC`) closes the instant `exec()` runs, and the new process image
+/// re-binds fresh — this absorbs the small window where the OS hasn't fully
+/// released the port yet.
+async fn bind_with_retry(host: &str, port: u16) -> Result<tokio::net::TcpListener> {
+    let mut attempt = 0;
+    loop {
+        match tokio::net::TcpListener::bind((host, port)).await {
+            Ok(listener) => return Ok(listener),
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse && attempt < 10 => {
+                attempt += 1;
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+}
+
 /// Records this process's PID so `hivemind status`'s `k` shortcut (a
 /// separate process, with no other way to identify the server) can find and
 /// signal it.
@@ -176,6 +206,17 @@ pub async fn run_up(
         events_tx.clone(),
         std::time::Duration::from_secs(2),
     );
+    let update_state: SharedUpdateState = Arc::new(tokio::sync::RwLock::new(
+        crate::update::UpdateState::new_idle(),
+    ));
+    if settings.update.enabled {
+        tokio::spawn(crate::update::run_update_check_loop(
+            update_state.clone(),
+            Arc::new(crate::update::GitHubVersionSource::new()),
+            settings.update.check_interval_seconds,
+            events_tx.clone(),
+        ));
+    }
     let mcp_host = match settings.host.as_str() {
         "0.0.0.0" | "::" => "127.0.0.1",
         h => h,
@@ -189,6 +230,7 @@ pub async fn run_up(
         events_tx.clone(),
         settings.agent.clone(),
         mcp_url.clone(),
+        update_state,
     );
 
     if !matches!(settings.host.as_str(), "127.0.0.1" | "localhost" | "::1") {
@@ -200,7 +242,7 @@ pub async fn run_up(
         );
     }
 
-    let listener = tokio::net::TcpListener::bind((settings.host.as_str(), settings.port)).await?;
+    let listener = bind_with_retry(settings.host.as_str(), settings.port).await?;
     let _pid_guard = write_pidfile()?;
     tracing::info!(
         "MCP endpoint:  http://{}:{}/mcp",
@@ -231,8 +273,7 @@ pub async fn run_up(
         }
         let dash = dashboard_router(&settings.api_url);
         let dash_listener =
-            tokio::net::TcpListener::bind((settings.host.as_str(), settings.dashboard_port))
-                .await?;
+            bind_with_retry(settings.host.as_str(), settings.dashboard_port).await?;
         tracing::info!(
             "Dashboard:     http://{}:{}",
             settings.host,
@@ -420,6 +461,9 @@ mod tests {
             events_tx,
             agent,
             "http://127.0.0.1:3456/mcp".into(),
+            std::sync::Arc::new(tokio::sync::RwLock::new(
+                crate::update::UpdateState::new_idle(),
+            )),
         );
         let resp = app
             .oneshot(

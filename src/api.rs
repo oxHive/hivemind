@@ -2,6 +2,7 @@ use crate::{
     config::SyncSettings,
     store::SqliteStore,
     suggest_session::{ReviseError, StartError, SuggestSessionManager},
+    update::{SharedUpdateState, UpdateStatus},
 };
 use axum::{
     Json, Router,
@@ -80,6 +81,7 @@ pub fn router(
     dashboard_origin: &str,
     events: Events,
     suggest: Arc<SuggestSessionManager>,
+    update_state: SharedUpdateState,
 ) -> Router {
     Router::new()
         .route("/api/v1/memories", get(list_memories).post(create_memory))
@@ -117,6 +119,8 @@ pub fn router(
         .route("/api/v1/session-logs", get(list_session_logs))
         .route("/api/v1/status", get(server_status))
         .route("/api/v1/events", get(sse_events))
+        .route("/api/v1/update", get(get_update_state))
+        .route("/api/v1/update/apply", post(apply_update))
         .route("/api/v1/suggest-sessions", post(start_suggest_session))
         .route(
             "/api/v1/suggest-sessions/current",
@@ -130,6 +134,7 @@ pub fn router(
         .layer(Extension(sync))
         .layer(Extension(events))
         .layer(Extension(suggest))
+        .layer(Extension(update_state))
         .layer(
             CorsLayer::new()
                 .allow_origin(localhost_origins(dashboard_origin))
@@ -608,6 +613,51 @@ async fn server_status(
     })))
 }
 
+async fn get_update_state(
+    Extension(update_state): Extension<SharedUpdateState>,
+) -> Result<Json<Value>, ApiError> {
+    let s = update_state.read().await;
+    Ok(Json(
+        serde_json::to_value(&*s).unwrap_or_else(|_| json!({})),
+    ))
+}
+
+async fn apply_update(
+    Extension(update_state): Extension<SharedUpdateState>,
+    Extension(events): Extension<Events>,
+) -> Result<Json<Value>, ApiError> {
+    {
+        let mut s = update_state.write().await;
+        if s.status == UpdateStatus::Updating {
+            return Err(ApiError(
+                StatusCode::CONFLICT,
+                "update already in progress".into(),
+            ));
+        }
+        s.status = UpdateStatus::Updating;
+        s.update_started_at = Some(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64,
+        );
+        s.error = None;
+    }
+    let _ = events.send(json!({
+        "type": "update_progress",
+        "status": "updating",
+        "started_at": update_state.read().await.update_started_at,
+    }));
+
+    let state = update_state.clone();
+    let events2 = events.clone();
+    tokio::spawn(async move {
+        crate::update::run_update(state, events2).await;
+    });
+
+    Ok(Json(json!({"status": "updating"})))
+}
+
 // --- conflict resolution ---
 
 #[derive(Deserialize)]
@@ -786,6 +836,12 @@ mod tests {
         )
     }
 
+    fn test_update_state() -> SharedUpdateState {
+        Arc::new(tokio::sync::RwLock::new(
+            crate::update::UpdateState::new_idle(),
+        ))
+    }
+
     async fn test_router() -> (Router, TempDir) {
         let (store, dir) = test_store().await;
         let (events, _) = broadcast::channel(16);
@@ -796,6 +852,7 @@ mod tests {
             "http://127.0.0.1:3457",
             events,
             suggest,
+            test_update_state(),
         );
         (r, dir)
     }
@@ -810,6 +867,7 @@ mod tests {
             "http://127.0.0.1:3457",
             events,
             suggest,
+            test_update_state(),
         );
         (r, rx, dir)
     }
@@ -824,6 +882,7 @@ mod tests {
             "http://127.0.0.1:3457",
             events,
             suggest,
+            test_update_state(),
         );
         (r, store, dir)
     }

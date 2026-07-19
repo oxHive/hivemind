@@ -114,6 +114,12 @@ struct RawSync {
 }
 
 #[derive(Debug, Default, Deserialize)]
+struct RawUpdate {
+    enabled: Option<bool>,
+    check_interval_seconds: Option<u64>,
+}
+
+#[derive(Debug, Default, Deserialize)]
 struct RawAgent {
     command: Option<String>,
     args: Option<Vec<String>>,
@@ -157,6 +163,21 @@ impl Default for SyncSettings {
             interval_seconds: 300,
             sync_on_store: true,
             sync_on_startup: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpdateSettings {
+    pub enabled: bool,
+    pub check_interval_seconds: u64,
+}
+
+impl Default for UpdateSettings {
+    fn default() -> Self {
+        UpdateSettings {
+            enabled: true,
+            check_interval_seconds: 600,
         }
     }
 }
@@ -206,6 +227,8 @@ struct RawGlobal {
     dashboard: RawDashboard,
     #[serde(default)]
     sync: RawSync,
+    #[serde(default)]
+    update: RawUpdate,
     #[serde(default)]
     agent: RawAgent,
     #[serde(default)]
@@ -333,6 +356,7 @@ pub struct ServerSettings {
     /// via a custom hostname (e.g. `http://pi.local:3457`).
     pub cors_origin: String,
     pub sync: SyncSettings,
+    pub update: UpdateSettings,
     pub agent: AgentSettings,
 }
 
@@ -368,6 +392,10 @@ pub fn load_server_settings(global_path: &std::path::Path) -> anyhow::Result<Ser
         sync_on_store: raw.sync.sync_on_store.unwrap_or(true),
         sync_on_startup: raw.sync.sync_on_startup.unwrap_or(true),
     };
+    let update = UpdateSettings {
+        enabled: raw.update.enabled.unwrap_or(true),
+        check_interval_seconds: raw.update.check_interval_seconds.unwrap_or(600),
+    };
     let agent = AgentSettings {
         command: raw.agent.command.unwrap_or_else(|| "claude".into()),
         args: raw.agent.args.unwrap_or_default(),
@@ -379,6 +407,7 @@ pub fn load_server_settings(global_path: &std::path::Path) -> anyhow::Result<Ser
         api_url,
         cors_origin,
         sync,
+        update,
         agent,
     })
 }
@@ -613,6 +642,27 @@ mod tests {
         assert_eq!(s.sync.api_key, "secret");
         assert_eq!(s.sync.interval_seconds, 60);
         assert!(!s.sync.sync_on_store);
+    }
+
+    #[test]
+    fn update_settings_defaults_when_global_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let s = load_server_settings(&tmp.path().join("no-global.toml")).unwrap();
+        assert!(s.update.enabled);
+        assert_eq!(s.update.check_interval_seconds, 600);
+    }
+
+    #[test]
+    fn update_settings_reads_from_global_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "config.toml",
+            "[update]\nenabled=false\ncheck_interval_seconds=120\n",
+        );
+        let s = load_server_settings(&tmp.path().join("config.toml")).unwrap();
+        assert!(!s.update.enabled);
+        assert_eq!(s.update.check_interval_seconds, 120);
     }
 
     #[test]

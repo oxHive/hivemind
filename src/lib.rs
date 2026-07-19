@@ -15,3 +15,4 @@ pub mod tag_query;
 #[cfg(test)]
 mod test_env_lock;
 pub mod tui;
+pub mod update;
