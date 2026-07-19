@@ -7,9 +7,10 @@ pub enum Command {
 
 pub fn parse(message: &str) -> Command {
     let trimmed = message.trim_end();
-    let Some(rest) = trimmed.strip_prefix("!hm ").or_else(|| {
-        if trimmed == "!hm" { Some("") } else { None }
-    }) else {
+    let Some(rest) = trimmed
+        .strip_prefix("!hm ")
+        .or_else(|| if trimmed == "!hm" { Some("") } else { None })
+    else {
         return Command::Chat(message.to_string());
     };
     let rest = rest.trim();
@@ -31,7 +32,10 @@ mod tests {
 
     #[test]
     fn plain_message_is_chat() {
-        assert_eq!(parse("what's my postgres preference?"), Command::Chat("what's my postgres preference?".to_string()));
+        assert_eq!(
+            parse("what's my postgres preference?"),
+            Command::Chat("what's my postgres preference?".to_string())
+        );
     }
 
     #[test]
@@ -57,12 +61,18 @@ mod tests {
         // Empty payload is ambiguous/useless as a memory — treat the whole
         // thing as an ordinary chat message instead of storing "".
         assert_eq!(parse("!hm store"), Command::Chat("!hm store".to_string()));
-        assert_eq!(parse("!hm store   "), Command::Chat("!hm store   ".to_string()));
+        assert_eq!(
+            parse("!hm store   "),
+            Command::Chat("!hm store   ".to_string())
+        );
     }
 
     #[test]
     fn unknown_hm_subcommand_falls_back_to_chat() {
-        assert_eq!(parse("!hm frobnicate"), Command::Chat("!hm frobnicate".to_string()));
+        assert_eq!(
+            parse("!hm frobnicate"),
+            Command::Chat("!hm frobnicate".to_string())
+        );
     }
 
     #[test]

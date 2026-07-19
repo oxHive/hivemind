@@ -90,7 +90,10 @@ mod tests {
         assert_eq!(target.layer, "workspace");
         assert_eq!(
             target.tags,
-            vec!["room:!unmapped:matrix.org".to_string(), "source:matrix".to_string()]
+            vec![
+                "room:!unmapped:matrix.org".to_string(),
+                "source:matrix".to_string()
+            ]
         );
     }
 

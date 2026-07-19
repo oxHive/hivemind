@@ -437,7 +437,10 @@ pub fn write_matrix_login(global_path: &Path, homeserver_url: &str, user_id: &st
         "homeserver_url".to_string(),
         toml::Value::String(homeserver_url.to_string()),
     );
-    matrix_table.insert("user_id".to_string(), toml::Value::String(user_id.to_string()));
+    matrix_table.insert(
+        "user_id".to_string(),
+        toml::Value::String(user_id.to_string()),
+    );
     if let Some(dir) = global_path.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -741,7 +744,11 @@ mod tests {
     #[test]
     fn matrix_settings_errors_when_homeserver_url_missing() {
         let tmp = tempfile::tempdir().unwrap();
-        write(tmp.path(), "config.toml", "[matrix]\nuser_id=\"@bot:matrix.org\"\n");
+        write(
+            tmp.path(),
+            "config.toml",
+            "[matrix]\nuser_id=\"@bot:matrix.org\"\n",
+        );
         let err = load_matrix_settings(&tmp.path().join("config.toml")).unwrap_err();
         assert!(err.to_string().contains("homeserver_url"));
     }
@@ -772,9 +779,16 @@ mod tests {
         let s = load_matrix_settings(&path).unwrap().unwrap();
         assert_eq!(s.homeserver_url, "https://matrix.org");
         assert_eq!(s.user_id, "@bot:matrix.org");
-        assert_eq!(s.allowed_users, vec!["@you:matrix.org".to_string()], "room mappings/allowlist survive a re-login");
+        assert_eq!(
+            s.allowed_users,
+            vec!["@you:matrix.org".to_string()],
+            "room mappings/allowlist survive a re-login"
+        );
         assert_eq!(s.rooms.len(), 1);
         let raw = std::fs::read_to_string(&path).unwrap();
-        assert!(raw.contains("max_inject_tokens"), "unrelated [defaults] section survives");
+        assert!(
+            raw.contains("max_inject_tokens"),
+            "unrelated [defaults] section survives"
+        );
     }
 }

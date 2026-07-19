@@ -46,7 +46,10 @@ impl FakeSessionStore {
 #[cfg(test)]
 impl SessionStore for FakeSessionStore {
     fn save(&self, user_id: &str, session_json: &str) -> Result<()> {
-        self.0.lock().unwrap().insert(user_id.to_string(), session_json.to_string());
+        self.0
+            .lock()
+            .unwrap()
+            .insert(user_id.to_string(), session_json.to_string());
         Ok(())
     }
 
@@ -73,7 +76,9 @@ mod tests {
     #[test]
     fn save_then_load_round_trips() {
         let store = FakeSessionStore::new();
-        store.save("@bot:matrix.org", "{\"token\":\"abc\"}").unwrap();
+        store
+            .save("@bot:matrix.org", "{\"token\":\"abc\"}")
+            .unwrap();
         assert_eq!(
             store.load("@bot:matrix.org").unwrap(),
             Some("{\"token\":\"abc\"}".to_string())
@@ -99,7 +104,13 @@ mod tests {
         let store = FakeSessionStore::new();
         store.save("@a:matrix.org", "session-a").unwrap();
         store.save("@b:matrix.org", "session-b").unwrap();
-        assert_eq!(store.load("@a:matrix.org").unwrap(), Some("session-a".to_string()));
-        assert_eq!(store.load("@b:matrix.org").unwrap(), Some("session-b".to_string()));
+        assert_eq!(
+            store.load("@a:matrix.org").unwrap(),
+            Some("session-a".to_string())
+        );
+        assert_eq!(
+            store.load("@b:matrix.org").unwrap(),
+            Some("session-b".to_string())
+        );
     }
 }
