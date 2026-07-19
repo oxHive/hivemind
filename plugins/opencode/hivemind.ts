@@ -82,6 +82,7 @@ export default (async ({ client, directory, $ }) => {
     },
 
     "experimental.chat.system.transform": async (_input, output) => {
+      if (!output.content) output.content = []
       const configPath = resolve(directory, ".hivemind.toml")
       if (!existsSync(configPath)) {
         output.content.push(
