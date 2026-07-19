@@ -230,7 +230,23 @@ impl SuggestSessionManager {
     }
 
     /// Runs one headless agent turn; returns the new session id.
+    ///
+    /// Dispatches on the configured command's file stem, same convention as
+    /// `matrix::agent::run_turn` — Claude Code and OpenCode take different
+    /// flags for prompting, JSON output, and MCP wiring.
     async fn run_turn(&self, prompt: &str, resume: Option<&str>) -> Result<String, String> {
+        let command_name = std::path::Path::new(&self.agent.command)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&self.agent.command);
+        if command_name == "opencode" {
+            self.run_opencode_turn(prompt, resume).await
+        } else {
+            self.run_claude_turn(prompt, resume).await
+        }
+    }
+
+    async fn run_claude_turn(&self, prompt: &str, resume: Option<&str>) -> Result<String, String> {
         let mcp_config = json!({
             "mcpServers": { "hivemind": { "type": "http", "url": self.mcp_url } }
         })
@@ -254,9 +270,57 @@ impl SuggestSessionManager {
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true);
 
+        let out = Self::spawn_and_wait(cmd, &self.agent.command).await?;
+        let v: Value =
+            serde_json::from_str(&out).map_err(|e| format!("unparseable agent output: {e}"))?;
+        v.get("session_id")
+            .and_then(|s| s.as_str())
+            .map(String::from)
+            .ok_or_else(|| "agent output missing session_id".to_string())
+    }
+
+    // OpenCode's `run` has no per-invocation `--mcp-config` flag (MCP servers
+    // and per-tool permissions are only configurable via `opencode.json` /
+    // `OPENCODE_CONFIG`, not CLI args), so — same tradeoff as
+    // `matrix::agent::run_opencode_turn` — this requires the user to have
+    // pre-configured an OpenCode agent profile named "hivemind-suggest" that
+    // wires up the hivemind MCP server (this `mcp_url`) and allows only
+    // memory_store_edge/memory_update_edge/memory_get_edges.
+    async fn run_opencode_turn(
+        &self,
+        prompt: &str,
+        resume: Option<&str>,
+    ) -> Result<String, String> {
+        let mut cmd = tokio::process::Command::new(&self.agent.command);
+        cmd.args(&self.agent.args).arg("run").arg(prompt);
+        if let Some(id) = resume {
+            cmd.arg("-s").arg(id);
+        }
+        cmd.arg("--agent")
+            .arg("hivemind-suggest")
+            .arg("--format")
+            .arg("json")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true);
+
+        let out = Self::spawn_and_wait(cmd, &self.agent.command).await?;
+        let v: Value =
+            serde_json::from_str(&out).map_err(|e| format!("unparseable agent output: {e}"))?;
+        v.get("session_id")
+            .and_then(|s| s.as_str())
+            .map(String::from)
+            .ok_or_else(|| "agent output missing session_id".to_string())
+    }
+
+    async fn spawn_and_wait(
+        mut cmd: tokio::process::Command,
+        command_name: &str,
+    ) -> Result<String, String> {
         let child = cmd
             .spawn()
-            .map_err(|e| format!("failed to spawn {}: {e}", self.agent.command))?;
+            .map_err(|e| format!("failed to spawn {command_name}: {e}"))?;
         let out = tokio::time::timeout(TURN_TIMEOUT, child.wait_with_output())
             .await
             .map_err(|_| format!("agent timed out after {}s", TURN_TIMEOUT.as_secs()))?
@@ -270,19 +334,14 @@ impl SuggestSessionManager {
             ));
         }
         let stdout = String::from_utf8_lossy(&out.stdout);
-        // `claude -p --output-format json` prints a single JSON object; take the
-        // last non-empty line to survive any leading noise on stdout.
-        let line = stdout
+        // Both CLIs print a single JSON object on success; take the last
+        // non-empty line to survive any leading noise on stdout.
+        stdout
             .lines()
             .rev()
             .find(|l| !l.trim().is_empty())
-            .ok_or_else(|| "agent produced no output".to_string())?;
-        let v: Value =
-            serde_json::from_str(line).map_err(|e| format!("unparseable agent output: {e}"))?;
-        v.get("session_id")
-            .and_then(|s| s.as_str())
-            .map(String::from)
-            .ok_or_else(|| "agent output missing session_id".to_string())
+            .map(str::to_string)
+            .ok_or_else(|| "agent produced no output".to_string())
     }
 }
 
@@ -485,5 +544,55 @@ mod tests {
             .unwrap();
         assert_eq!(evt["state"], "error");
         assert!(evt["message"].as_str().unwrap().contains("boom"));
+    }
+
+    #[tokio::test]
+    async fn opencode_agent_uses_run_and_agent_profile_flags() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, _db_dir) = test_store().await;
+        store
+            .store(&NewMemoryRow {
+                id: "mem_a",
+                title: "A",
+                content: "content a",
+                tags: &[],
+                token_count: None,
+                layer: "workspace",
+                memory_type: "project",
+            })
+            .await
+            .unwrap();
+        // Dispatch is keyed on the configured command's file stem, so the
+        // stub must actually be named "opencode".
+        let script = dir.path().join("opencode");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$(dirname \"$0\")/args.log\"\necho '{\"session_id\":\"stub-oc-1\",\"result\":\"done\"}'\n",
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let (events, mut rx) = broadcast::channel::<Value>(32);
+        let agent = crate::config::AgentSettings {
+            command: script.to_string_lossy().into_owned(),
+            args: vec![],
+        };
+        let mgr =
+            SuggestSessionManager::new(store, events, agent, "http://127.0.0.1:3456/mcp".into());
+        mgr.start().await.unwrap();
+        assert_eq!(next_state(&mut rx).await, "started");
+        assert_eq!(next_state(&mut rx).await, "suggestions_ready");
+        let log = std::fs::read_to_string(dir.path().join("args.log")).unwrap();
+        assert!(log.contains("run"));
+        assert!(log.contains("--agent hivemind-suggest"));
+        assert!(log.contains("--format json"));
+        assert!(
+            !log.contains("--mcp-config"),
+            "opencode has no --mcp-config flag; MCP wiring is via the pre-configured agent profile"
+        );
+        assert!(
+            !log.contains("-s "),
+            "first turn must not pass a resume session id"
+        );
     }
 }
