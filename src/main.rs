@@ -24,6 +24,11 @@ fn main() -> Result<()> {
             ServiceAction::Uninstall => cli::cmd_service_uninstall(),
             ServiceAction::Status => cli::cmd_service_status(),
         },
+        Some(Command::Matrix { action }) => match action {
+            cli::MatrixAction::Login => cli::cmd_matrix_login(),
+            cli::MatrixAction::Run => run_matrix(),
+            cli::MatrixAction::Status => cli::cmd_matrix_status(),
+        },
         Some(Command::Migrate) => cli::cmd_migrate(),
         Some(Command::SessionStart { json }) => cli::cmd_session_start(json),
     }
@@ -131,4 +136,16 @@ async fn run_dashboard(open: bool) -> Result<()> {
     init_tracing();
     let settings = config::load_server_settings(&config::global_config_path())?;
     http::run_dashboard(&settings, open).await
+}
+
+#[tokio::main]
+async fn run_matrix() -> Result<()> {
+    init_tracing();
+    let settings =
+        config::load_matrix_settings(&config::global_config_path())?.ok_or_else(|| {
+            anyhow::anyhow!("no [matrix] config found — run `hivemind matrix login` first")
+        })?;
+    let server_settings = config::load_server_settings(&config::global_config_path())?;
+    let hivemind_bin = std::env::current_exe()?.to_string_lossy().into_owned();
+    oxhivemind::matrix::daemon::run(settings, server_settings.agent, hivemind_bin).await
 }

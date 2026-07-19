@@ -53,6 +53,11 @@ pub enum Command {
         #[command(subcommand)]
         action: ServiceAction,
     },
+    /// Matrix chat interface: capture/recall HiveMind memories from a room or DM
+    Matrix {
+        #[command(subcommand)]
+        action: MatrixAction,
+    },
     /// Migrate the database from the legacy ~/.hivemind/ path to XDG data dir
     Migrate,
     /// Print the session-start memory context for the current project (for hooks and scripts)
@@ -70,6 +75,16 @@ pub enum ServiceAction {
     /// Stop and remove the HiveMind background service
     Uninstall,
     /// Show the status of the HiveMind background service
+    Status,
+}
+
+#[derive(Subcommand)]
+pub enum MatrixAction {
+    /// Log into a Matrix account once; persists the session to the OS keyring
+    Login,
+    /// Run the Matrix bot daemon (requires `hivemind matrix login` first)
+    Run,
+    /// Show whether the daemon is running and its sync/session state
     Status,
 }
 
@@ -478,30 +493,43 @@ fn systemd_unit_dir() -> PathBuf {
 }
 
 #[cfg(target_os = "linux")]
-fn systemd_unit_path() -> PathBuf {
-    systemd_unit_dir().join("hivemind.service")
+fn systemd_unit_path(unit_name: &str) -> PathBuf {
+    systemd_unit_dir().join(format!("{unit_name}.service"))
 }
 
 #[cfg(target_os = "linux")]
-fn service_install_linux() -> Result<()> {
-    let exe = std::env::current_exe()?;
-    let unit = format!(
+fn systemd_unit_content(description: &str, exe: &Path, exec_args: &[&str]) -> String {
+    let mut exec = exe.display().to_string();
+    for arg in exec_args {
+        exec.push(' ');
+        exec.push_str(arg);
+    }
+    format!(
         "[Unit]\n\
-         Description=HiveMind MCP memory server\n\
+         Description={description}\n\
          After=network.target\n\
          \n\
          [Service]\n\
          Type=simple\n\
-         ExecStart={exe}\n\
+         ExecStart={exec}\n\
          Restart=on-failure\n\
          RestartSec=5\n\
          \n\
          [Install]\n\
-         WantedBy=default.target\n",
-        exe = exe.display()
-    );
+         WantedBy=default.target\n"
+    )
+}
 
-    let unit_path = systemd_unit_path();
+#[cfg(target_os = "linux")]
+fn service_install_unit_linux(
+    unit_name: &str,
+    description: &str,
+    exec_args: &[&str],
+) -> Result<()> {
+    let exe = std::env::current_exe()?;
+    let unit = systemd_unit_content(description, &exe, exec_args);
+
+    let unit_path = systemd_unit_path(unit_name);
     std::fs::create_dir_all(unit_path.parent().unwrap())?;
     std::fs::write(&unit_path, &unit)?;
     println!("Unit file written: {}", unit_path.display());
@@ -518,16 +546,64 @@ fn service_install_linux() -> Result<()> {
     }
 
     let enable = std::process::Command::new("systemctl")
-        .args(["--user", "enable", "--now", "hivemind"])
+        .args(["--user", "enable", "--now", unit_name])
         .status();
     match enable {
         Ok(s) if s.success() => {
-            println!("HiveMind service enabled and started.");
+            println!("{unit_name} service enabled and started.");
         }
         _ => {
-            println!("Warning: could not enable/start the service automatically.");
-            println!("Run: systemctl --user enable --now hivemind");
+            println!("Warning: could not enable/start {unit_name} automatically.");
+            println!("Run: systemctl --user enable --now {unit_name}");
         }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn service_uninstall_unit_linux(unit_name: &str) -> Result<()> {
+    let _ = std::process::Command::new("systemctl")
+        .args(["--user", "disable", "--now", unit_name])
+        .status();
+
+    let unit_path = systemd_unit_path(unit_name);
+    if unit_path.exists() {
+        std::fs::remove_file(&unit_path)?;
+        println!("Removed: {}", unit_path.display());
+    } else {
+        println!("Unit file for {unit_name} not found — nothing to remove.");
+    }
+
+    let _ = std::process::Command::new("systemctl")
+        .args(["--user", "daemon-reload"])
+        .status();
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn service_status_unit_linux(unit_name: &str) -> Result<()> {
+    let status = std::process::Command::new("systemctl")
+        .args(["--user", "status", unit_name])
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("{unit_name} is not running or not installed");
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn service_install_linux() -> Result<()> {
+    service_install_unit_linux("hivemind", "HiveMind MCP memory server", &[])?;
+    if crate::config::load_matrix_settings(&crate::config::global_config_path())
+        .ok()
+        .flatten()
+        .is_some()
+    {
+        service_install_unit_linux(
+            "hivemind-matrix",
+            "HiveMind Matrix chat bot",
+            &["matrix", "run"],
+        )?;
     }
 
     println!();
@@ -538,21 +614,10 @@ fn service_install_linux() -> Result<()> {
 
 #[cfg(target_os = "linux")]
 fn service_uninstall_linux() -> Result<()> {
-    let _ = std::process::Command::new("systemctl")
-        .args(["--user", "disable", "--now", "hivemind"])
-        .status();
-
-    let unit_path = systemd_unit_path();
-    if unit_path.exists() {
-        std::fs::remove_file(&unit_path)?;
-        println!("Removed: {}", unit_path.display());
-    } else {
-        println!("Unit file not found — nothing to remove.");
+    service_uninstall_unit_linux("hivemind")?;
+    if systemd_unit_path("hivemind-matrix").exists() {
+        service_uninstall_unit_linux("hivemind-matrix")?;
     }
-
-    let _ = std::process::Command::new("systemctl")
-        .args(["--user", "daemon-reload"])
-        .status();
 
     println!("HiveMind service uninstalled.");
     Ok(())
@@ -560,13 +625,42 @@ fn service_uninstall_linux() -> Result<()> {
 
 #[cfg(target_os = "linux")]
 fn service_status_linux() -> Result<()> {
-    let status = std::process::Command::new("systemctl")
-        .args(["--user", "status", "hivemind"])
-        .status()?;
-    if !status.success() {
-        anyhow::bail!("service is not running or not installed");
+    service_status_unit_linux("hivemind")?;
+    if systemd_unit_path("hivemind-matrix").exists() {
+        service_status_unit_linux("hivemind-matrix")?;
     }
     Ok(())
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod matrix_service_tests {
+    use super::*;
+
+    #[test]
+    fn systemd_unit_content_for_matrix_names_the_unit_and_subcommand() {
+        let content = systemd_unit_content(
+            "HiveMind Matrix chat bot",
+            &std::path::PathBuf::from("/usr/local/bin/hivemind"),
+            &["matrix", "run"],
+        );
+        assert!(content.contains("Description=HiveMind Matrix chat bot"));
+        assert!(content.contains("ExecStart=/usr/local/bin/hivemind matrix run"));
+        assert!(content.contains("WantedBy=default.target"));
+    }
+
+    #[test]
+    fn systemd_unit_content_for_up_matches_existing_bare_invocation() {
+        // Preserves exact current behavior: the `up` unit has always run the
+        // bare binary (stdio MCP mode), zero args — not `up --headless` as
+        // one might expect. Not this task's job to change that; just don't
+        // silently break it while adding the parameterization.
+        let content = systemd_unit_content(
+            "HiveMind MCP memory server",
+            &std::path::PathBuf::from("/usr/local/bin/hivemind"),
+            &[],
+        );
+        assert!(content.contains("ExecStart=/usr/local/bin/hivemind\n"));
+    }
 }
 
 // ── macOS / launchd ───────────────────────────────────────────────────────────
@@ -575,18 +669,26 @@ fn service_status_linux() -> Result<()> {
 const LAUNCH_AGENT_LABEL: &str = "com.oxhive.hivemind";
 
 #[cfg(target_os = "macos")]
-fn launch_agent_path() -> PathBuf {
+const MATRIX_LAUNCH_AGENT_LABEL: &str = "com.oxhive.hivemind-matrix";
+
+#[cfg(target_os = "macos")]
+fn launch_agent_path(label: &str) -> PathBuf {
     home_dir()
         .join("Library")
         .join("LaunchAgents")
-        .join(format!("{LAUNCH_AGENT_LABEL}.plist"))
+        .join(format!("{label}.plist"))
 }
 
 #[cfg(target_os = "macos")]
-fn service_install_macos() -> Result<()> {
-    let exe = std::env::current_exe()?;
-    let plist_path = launch_agent_path();
-    let plist = format!(
+fn launch_agent_plist_content(label: &str, exe: &Path, exec_args: &[&str]) -> String {
+    let mut program_arguments = format!("<string>{}</string>\n", exe.display());
+    for arg in exec_args {
+        program_arguments.push_str("             <string>");
+        program_arguments.push_str(arg);
+        program_arguments.push_str("</string>\n");
+    }
+    let log_dir = home_dir().join("Library").join("Logs");
+    format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
          <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \
          \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
@@ -596,9 +698,7 @@ fn service_install_macos() -> Result<()> {
            <string>{label}</string>\n\
            <key>ProgramArguments</key>\n\
            <array>\n\
-             <string>{exe}</string>\n\
-             <string>up</string>\n\
-             <string>--headless</string>\n\
+             {program_arguments}\
            </array>\n\
            <key>RunAtLoad</key>\n\
            <true/>\n\
@@ -610,10 +710,15 @@ fn service_install_macos() -> Result<()> {
            <string>{log_dir}/hivemind.log</string>\n\
          </dict>\n\
          </plist>\n",
-        label = LAUNCH_AGENT_LABEL,
-        exe = exe.display(),
-        log_dir = home_dir().join("Library").join("Logs").display(),
-    );
+        log_dir = log_dir.display(),
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn service_install_unit_macos(label: &str, exec_args: &[&str], description: &str) -> Result<()> {
+    let exe = std::env::current_exe()?;
+    let plist_path = launch_agent_path(label);
+    let plist = launch_agent_plist_content(label, &exe, exec_args);
 
     std::fs::create_dir_all(plist_path.parent().unwrap())?;
     std::fs::write(&plist_path, &plist)?;
@@ -624,12 +729,65 @@ fn service_install_macos() -> Result<()> {
         .status();
     match load {
         Ok(s) if s.success() => {
-            println!("HiveMind service loaded and started.");
+            println!("{description} loaded and started.");
         }
         _ => {
             println!("Warning: launchctl load failed — run manually:");
             println!("  launchctl load -w {}", plist_path.display());
         }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn service_uninstall_unit_macos(label: &str) -> Result<()> {
+    let plist_path = launch_agent_path(label);
+
+    let _ = std::process::Command::new("launchctl")
+        .args(["unload", "-w", plist_path.to_str().unwrap()])
+        .status();
+
+    if plist_path.exists() {
+        std::fs::remove_file(&plist_path)?;
+        println!("Removed: {}", plist_path.display());
+    } else {
+        println!("Plist for {label} not found — nothing to remove.");
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn service_status_unit_macos(label: &str) -> Result<()> {
+    let output = std::process::Command::new("launchctl")
+        .args(["list", label])
+        .output()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if output.status.success() && !stdout.trim().is_empty() {
+        print!("{stdout}");
+    } else {
+        println!("{label} is not loaded.");
+        println!("Run: hivemind service install");
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn service_install_macos() -> Result<()> {
+    service_install_unit_macos(
+        LAUNCH_AGENT_LABEL,
+        &["up", "--headless"],
+        "HiveMind service",
+    )?;
+    if crate::config::load_matrix_settings(&crate::config::global_config_path())
+        .ok()
+        .flatten()
+        .is_some()
+    {
+        service_install_unit_macos(
+            MATRIX_LAUNCH_AGENT_LABEL,
+            &["matrix", "run"],
+            "HiveMind Matrix chat bot",
+        )?;
     }
 
     println!();
@@ -641,17 +799,9 @@ fn service_install_macos() -> Result<()> {
 
 #[cfg(target_os = "macos")]
 fn service_uninstall_macos() -> Result<()> {
-    let plist_path = launch_agent_path();
-
-    let _ = std::process::Command::new("launchctl")
-        .args(["unload", "-w", plist_path.to_str().unwrap()])
-        .status();
-
-    if plist_path.exists() {
-        std::fs::remove_file(&plist_path)?;
-        println!("Removed: {}", plist_path.display());
-    } else {
-        println!("Plist not found — nothing to remove.");
+    service_uninstall_unit_macos(LAUNCH_AGENT_LABEL)?;
+    if launch_agent_path(MATRIX_LAUNCH_AGENT_LABEL).exists() {
+        service_uninstall_unit_macos(MATRIX_LAUNCH_AGENT_LABEL)?;
     }
 
     println!("HiveMind service uninstalled.");
@@ -660,15 +810,9 @@ fn service_uninstall_macos() -> Result<()> {
 
 #[cfg(target_os = "macos")]
 fn service_status_macos() -> Result<()> {
-    let output = std::process::Command::new("launchctl")
-        .args(["list", LAUNCH_AGENT_LABEL])
-        .output()?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    if output.status.success() && !stdout.trim().is_empty() {
-        print!("{stdout}");
-    } else {
-        println!("HiveMind service is not loaded.");
-        println!("Run: hivemind service install");
+    service_status_unit_macos(LAUNCH_AGENT_LABEL)?;
+    if launch_agent_path(MATRIX_LAUNCH_AGENT_LABEL).exists() {
+        service_status_unit_macos(MATRIX_LAUNCH_AGENT_LABEL)?;
     }
     Ok(())
 }
@@ -680,6 +824,101 @@ fn exe_path() -> String {
         .ok()
         .and_then(|p| p.to_str().map(String::from))
         .unwrap_or_else(|| "hivemind".to_string())
+}
+
+// ── matrix ────────────────────────────────────────────────────────────────
+
+pub fn cmd_matrix_login() -> Result<()> {
+    print!("Homeserver URL (e.g. https://matrix.org): ");
+    std::io::stdout().flush()?;
+    let mut homeserver_url = String::new();
+    std::io::stdin().read_line(&mut homeserver_url)?;
+    let homeserver_url = homeserver_url.trim().to_string();
+
+    print!("User ID (e.g. @hivemind-bot:matrix.org): ");
+    std::io::stdout().flush()?;
+    let mut user_id = String::new();
+    std::io::stdin().read_line(&mut user_id)?;
+    let user_id = user_id.trim().to_string();
+
+    let password = rpassword::prompt_password("Password: ")?;
+
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(async {
+            let client = matrix_sdk::Client::builder()
+                .homeserver_url(&homeserver_url)
+                .sqlite_store(crate::db::xdg_data_dir().join("matrix-store"), None)
+                .build()
+                .await?;
+            let response = client
+                .matrix_auth()
+                .login_username(&user_id, &password)
+                .initial_device_display_name("HiveMind bot")
+                .await?;
+            drop(password);
+            let session = client
+                .matrix_auth()
+                .session()
+                .ok_or_else(|| anyhow::anyhow!("login succeeded but no session was created"))?;
+            let session_json = serde_json::to_string(&session)?;
+            let store = crate::matrix::keyring_store::KeyringSessionStore;
+            crate::matrix::login::persist_login(
+                &homeserver_url,
+                &user_id,
+                &session_json,
+                &store,
+                &crate::config::global_config_path(),
+            )?;
+            println!(
+                "Logged in as {} (device {}).",
+                response.user_id, response.device_id
+            );
+            println!(
+                "Session saved to the OS keyring. Run `hivemind matrix run` to start the bot."
+            );
+            anyhow::Ok(())
+        })
+}
+
+pub fn cmd_matrix_status() -> Result<()> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(async {
+            let socket_path = crate::matrix::status::socket_path();
+            match crate::matrix::status::query_status(&socket_path).await {
+                Ok(reply) => {
+                    println!("logged_in:  {}", reply.logged_in);
+                    println!("user_id:    {}", reply.user_id);
+                    println!("sync_state: {}", reply.sync_state);
+                    if let Some(t) = &reply.last_sync_at {
+                        println!("last_sync:  {t}");
+                    }
+                    if reply.rooms.is_empty() {
+                        println!("rooms:      (none)");
+                    } else {
+                        println!("rooms:");
+                        for room in &reply.rooms {
+                            let label = room.alias.as_deref().unwrap_or(&room.room_id);
+                            let session = if room.active_session { "active session" } else { "no active session" };
+                            println!("  {label}  ({session})");
+                        }
+                    }
+                    Ok(())
+                }
+                Err(crate::matrix::status::QueryError::NotRunning) => {
+                    println!("hivemind matrix is not running.");
+                    println!("Start it with: hivemind matrix run");
+                    Ok(())
+                }
+                Err(crate::matrix::status::QueryError::Protocol(msg)) => {
+                    println!("hivemind matrix appears to be running but returned invalid status data: {msg}");
+                    Ok(())
+                }
+            }
+        })
 }
 
 pub fn cmd_mcp_install(client: &str) -> Result<()> {
@@ -1419,6 +1658,39 @@ mod tests {
             Some(Command::Status { plain }) => assert!(plain),
             _ => panic!("expected Status command"),
         }
+    }
+
+    #[test]
+    fn parses_matrix_login_subcommand() {
+        let cli = Cli::parse_from(["hivemind", "matrix", "login"]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Matrix {
+                action: MatrixAction::Login
+            })
+        ));
+    }
+
+    #[test]
+    fn parses_matrix_run_subcommand() {
+        let cli = Cli::parse_from(["hivemind", "matrix", "run"]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Matrix {
+                action: MatrixAction::Run
+            })
+        ));
+    }
+
+    #[test]
+    fn parses_matrix_status_subcommand() {
+        let cli = Cli::parse_from(["hivemind", "matrix", "status"]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Matrix {
+                action: MatrixAction::Status
+            })
+        ));
     }
 
     #[test]

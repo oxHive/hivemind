@@ -4,6 +4,7 @@ pub mod cli;
 pub mod config;
 pub mod db;
 pub mod http;
+pub mod matrix;
 pub mod model;
 pub mod server;
 pub mod session;

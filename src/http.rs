@@ -155,7 +155,7 @@ impl Drop for PidGuard {
 /// separate process, with no other way to identify the server) can find and
 /// signal it.
 fn write_pidfile() -> Result<PidGuard> {
-    let path = crate::db::pidfile_path();
+    let path = crate::db::up_pidfile_path();
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }

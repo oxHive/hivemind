@@ -119,6 +119,24 @@ struct RawAgent {
     args: Option<Vec<String>>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct RawMatrix {
+    homeserver_url: Option<String>,
+    user_id: Option<String>,
+    #[serde(default)]
+    allowed_users: Vec<String>,
+    #[serde(default)]
+    rooms: Vec<RawMatrixRoom>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawMatrixRoom {
+    room_id: Option<String>,
+    alias: Option<String>,
+    #[serde(default)]
+    base_tags: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyncSettings {
     pub enabled: bool,
@@ -157,6 +175,21 @@ impl Default for AgentSettings {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatrixRoomMapping {
+    pub room_id: String,
+    pub alias: Option<String>,
+    pub base_tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatrixSettings {
+    pub homeserver_url: String,
+    pub user_id: String,
+    pub allowed_users: Vec<String>,
+    pub rooms: Vec<MatrixRoomMapping>,
+}
+
 #[derive(Debug, Default, Deserialize)]
 struct RawGlobal {
     #[serde(default)]
@@ -169,6 +202,8 @@ struct RawGlobal {
     sync: RawSync,
     #[serde(default)]
     agent: RawAgent,
+    #[serde(default)]
+    matrix: RawMatrix,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -340,6 +375,77 @@ pub fn load_server_settings(global_path: &std::path::Path) -> anyhow::Result<Ser
         sync,
         agent,
     })
+}
+
+pub fn load_matrix_settings(global_path: &Path) -> Result<Option<MatrixSettings>> {
+    if !global_path.is_file() {
+        return Ok(None);
+    }
+    let raw: RawGlobal = toml::from_str(&std::fs::read_to_string(global_path)?)
+        .with_context(|| format!("parsing {}", global_path.display()))?;
+    if raw.matrix.homeserver_url.is_none() && raw.matrix.user_id.is_none() {
+        return Ok(None);
+    }
+    let homeserver_url = raw
+        .matrix
+        .homeserver_url
+        .ok_or_else(|| anyhow::anyhow!("[matrix] is present but homeserver_url is missing"))?;
+    let user_id = raw
+        .matrix
+        .user_id
+        .ok_or_else(|| anyhow::anyhow!("[matrix] is present but user_id is missing"))?;
+    let rooms = raw
+        .matrix
+        .rooms
+        .into_iter()
+        .filter_map(|r| {
+            r.room_id.map(|room_id| MatrixRoomMapping {
+                room_id,
+                alias: r.alias,
+                base_tags: r.base_tags,
+            })
+        })
+        .collect();
+    Ok(Some(MatrixSettings {
+        homeserver_url,
+        user_id,
+        allowed_users: raw.matrix.allowed_users,
+        rooms,
+    }))
+}
+
+/// Writes `homeserver_url`/`user_id` into the global config's `[matrix]` table,
+/// preserving every other section and any existing `allowed_users`/`[[matrix.rooms]]`.
+/// Used by `hivemind matrix login` after a successful login.
+pub fn write_matrix_login(global_path: &Path, homeserver_url: &str, user_id: &str) -> Result<()> {
+    let mut doc: toml::Value = if global_path.is_file() {
+        toml::from_str(&std::fs::read_to_string(global_path)?)
+            .with_context(|| format!("parsing {}", global_path.display()))?
+    } else {
+        toml::Value::Table(toml::map::Map::new())
+    };
+    let table = doc
+        .as_table_mut()
+        .ok_or_else(|| anyhow::anyhow!("global config root is not a table"))?;
+    let matrix = table
+        .entry("matrix")
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+    let matrix_table = matrix
+        .as_table_mut()
+        .ok_or_else(|| anyhow::anyhow!("[matrix] is not a table"))?;
+    matrix_table.insert(
+        "homeserver_url".to_string(),
+        toml::Value::String(homeserver_url.to_string()),
+    );
+    matrix_table.insert(
+        "user_id".to_string(),
+        toml::Value::String(user_id.to_string()),
+    );
+    if let Some(dir) = global_path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(global_path, toml::to_string_pretty(&doc)?)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -583,5 +689,106 @@ mod tests {
         let s = load_server_settings(&tmp.path().join("config.toml")).unwrap();
         assert_eq!(s.agent.command, "/usr/local/bin/claude");
         assert_eq!(s.agent.args, vec!["--model", "opus"]);
+    }
+
+    #[test]
+    fn matrix_settings_none_when_absent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let s = load_matrix_settings(&tmp.path().join("no-global.toml")).unwrap();
+        assert!(s.is_none());
+    }
+
+    #[test]
+    fn matrix_settings_parses_full_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "config.toml",
+            "[matrix]\n\
+             homeserver_url=\"https://matrix.org\"\n\
+             user_id=\"@hivemind-bot:matrix.org\"\n\
+             allowed_users=[\"@you:matrix.org\"]\n\
+             \n\
+             [[matrix.rooms]]\n\
+             room_id=\"!abc123:matrix.org\"\n\
+             alias=\"hivemind-project\"\n\
+             base_tags=[\"project:hivemind\"]\n",
+        );
+        let s = load_matrix_settings(&tmp.path().join("config.toml"))
+            .unwrap()
+            .expect("matrix settings should be present");
+        assert_eq!(s.homeserver_url, "https://matrix.org");
+        assert_eq!(s.user_id, "@hivemind-bot:matrix.org");
+        assert_eq!(s.allowed_users, vec!["@you:matrix.org".to_string()]);
+        assert_eq!(s.rooms.len(), 1);
+        assert_eq!(s.rooms[0].room_id, "!abc123:matrix.org");
+        assert_eq!(s.rooms[0].alias.as_deref(), Some("hivemind-project"));
+        assert_eq!(s.rooms[0].base_tags, vec!["project:hivemind".to_string()]);
+    }
+
+    #[test]
+    fn matrix_settings_defaults_allowed_users_and_rooms_to_empty() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "config.toml",
+            "[matrix]\nhomeserver_url=\"https://matrix.org\"\nuser_id=\"@bot:matrix.org\"\n",
+        );
+        let s = load_matrix_settings(&tmp.path().join("config.toml"))
+            .unwrap()
+            .unwrap();
+        assert!(s.allowed_users.is_empty());
+        assert!(s.rooms.is_empty());
+    }
+
+    #[test]
+    fn matrix_settings_errors_when_homeserver_url_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "config.toml",
+            "[matrix]\nuser_id=\"@bot:matrix.org\"\n",
+        );
+        let err = load_matrix_settings(&tmp.path().join("config.toml")).unwrap_err();
+        assert!(err.to_string().contains("homeserver_url"));
+    }
+
+    #[test]
+    fn write_matrix_login_creates_new_matrix_section() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+        write_matrix_login(&path, "https://matrix.org", "@bot:matrix.org").unwrap();
+        let s = load_matrix_settings(&path).unwrap().unwrap();
+        assert_eq!(s.homeserver_url, "https://matrix.org");
+        assert_eq!(s.user_id, "@bot:matrix.org");
+    }
+
+    #[test]
+    fn write_matrix_login_preserves_other_sections_and_room_mappings() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+        write(
+            tmp.path(),
+            "config.toml",
+            "[defaults]\nmax_inject_tokens=1500\n\
+             [matrix]\nhomeserver_url=\"https://old.example\"\nuser_id=\"@old:example\"\n\
+             allowed_users=[\"@you:matrix.org\"]\n\
+             [[matrix.rooms]]\nroom_id=\"!abc:matrix.org\"\nbase_tags=[\"project:hivemind\"]\n",
+        );
+        write_matrix_login(&path, "https://matrix.org", "@bot:matrix.org").unwrap();
+        let s = load_matrix_settings(&path).unwrap().unwrap();
+        assert_eq!(s.homeserver_url, "https://matrix.org");
+        assert_eq!(s.user_id, "@bot:matrix.org");
+        assert_eq!(
+            s.allowed_users,
+            vec!["@you:matrix.org".to_string()],
+            "room mappings/allowlist survive a re-login"
+        );
+        assert_eq!(s.rooms.len(), 1);
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            raw.contains("max_inject_tokens"),
+            "unrelated [defaults] section survives"
+        );
     }
 }
