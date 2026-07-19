@@ -1,5 +1,6 @@
 use super::*;
 use std::fs;
+use std::path::Path;
 
 #[test]
 fn status_plain_flag_parses() {
