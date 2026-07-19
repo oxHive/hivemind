@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useMemoriesStore } from '../../stores/memories.js'
 import { useUiStore } from '../../stores/ui.js'
 import { useGraphStore } from '../../stores/graph.js'
@@ -10,7 +10,7 @@ import DeleteConfirmModal from './DeleteConfirmModal.vue'
 import MarkdownContent from '../shared/MarkdownContent.vue'
 import ConfirmModal from '../shared/ConfirmModal.vue'
 import CopyIdButton from '../shared/CopyIdButton.vue'
-import { fmtDate } from '../../lib/format.js'
+import { fmtDate, slugify } from '../../lib/format.js'
 import { createFeedback } from '../../api/feedback.js'
 import { caretCoords } from '../../lib/caret.js'
 import { diffPreview } from '../../lib/mention.js'
@@ -23,6 +23,30 @@ const showDeleteModal = ref(false)
 const showResetModal = ref(false)
 const flagOpen = ref(false)
 const contentView = ref('markdown') // 'markdown' | 'raw'
+
+// New memories start in Raw view — there's no saved markdown to preview yet.
+watch(() => memories.creatingNew, (isNew) => {
+  if (isNew) contentView.value = 'raw'
+})
+
+// Downloading only makes sense for a memory that's actually saved on the
+// server with no unsaved edits in flight — a new/unsaved draft has nothing
+// durable to export yet.
+const canDownload = computed(() => !!memories.selected && !memories.creatingNew && !memories.dirty)
+
+function downloadMarkdown() {
+  if (!canDownload.value) return
+  const mem = memories.selected
+  const blob = new Blob([mem.content], { type: 'text/markdown;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${slugify(mem.title) || mem.id}.md`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
 
 const contentEl = ref(null)
 const mention = ref(null) // { start, query, top, left } | null
@@ -191,6 +215,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
           <CopyIdButton v-if="!memories.creatingNew" :id="memories.selected.id" />
         </span>
         <div v-if="memories.selected" class="flex gap-1">
+          <button class="hm-btn hm-btn-ghost hm-btn-sm"
+            :disabled="!canDownload"
+            :title="memories.dirty ? 'Save changes before downloading' : 'Download as Markdown'"
+            @click="downloadMarkdown">
+            Download .md
+          </button>
           <div class="relative">
             <button class="hm-btn hm-btn-ghost hm-btn-sm" style="font-size:15px" title="Flag for review"
               @click="flagOpen = !flagOpen" @keydown.esc="flagOpen = false">⚑</button>
