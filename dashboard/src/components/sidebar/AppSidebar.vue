@@ -106,10 +106,15 @@ const syncDot = computed(() => {
           </span>
         </button>
       </li>
-      <li v-if="update.available && update.platformSupported">
+    </ul>
+
+    <!-- Update available + status (push to bottom) -->
+    <div class="mt-auto">
+      <div v-if="update.available && update.platformSupported" class="px-2 pb-2">
         <button
           @click="update.changelogOpen = true"
           class="nav-item"
+          style="border-radius:6px"
         >
           <span>Update available</span>
           <span
@@ -118,21 +123,19 @@ const syncDot = computed(() => {
             v{{ update.latestVersion }}
           </span>
         </button>
-      </li>
-    </ul>
-
-    <!-- Status (push to bottom) -->
-    <div class="mt-auto px-5 pb-5 pt-4"
-      style="border-top:0.5px solid var(--hm-border-subtle)">
-      <StatusRow v-if="syncStatusText" :dot="syncDot" :text="syncStatusText" />
-      <StatusRow
-        v-if="(syncInfo?.conflict_count ?? 0) > 0"
-        dot="amber"
-        :text="`${syncInfo.conflict_count} conflict${syncInfo.conflict_count > 1 ? 's' : ''} need review`"
-        :class="{ 'mt-1': syncStatusText }"
-      />
-      <StatusRow :dot="statusDot" :text="statusText" :class="{ 'mt-1': syncStatusText || (syncInfo?.conflict_count ?? 0) > 0 }" />
-      <StatusRow dot="gray" :text="`${memoryCount} memories`" class="mt-1" />
+      </div>
+      <div class="px-5 pb-5 pt-4"
+        style="border-top:0.5px solid var(--hm-border-subtle)">
+        <StatusRow v-if="syncStatusText" :dot="syncDot" :text="syncStatusText" />
+        <StatusRow
+          v-if="(syncInfo?.conflict_count ?? 0) > 0"
+          dot="amber"
+          :text="`${syncInfo.conflict_count} conflict${syncInfo.conflict_count > 1 ? 's' : ''} need review`"
+          :class="{ 'mt-1': syncStatusText }"
+        />
+        <StatusRow :dot="statusDot" :text="statusText" :class="{ 'mt-1': syncStatusText || (syncInfo?.conflict_count ?? 0) > 0 }" />
+        <StatusRow dot="gray" :text="`${memoryCount} memories`" class="mt-1" />
+      </div>
     </div>
 
     <!-- Footer -->
