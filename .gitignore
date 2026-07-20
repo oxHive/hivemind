@@ -8,3 +8,8 @@
 plugins/opencode/hivemind.js
 plugins/opencode/hivemind.d.ts
 plugins/opencode/node_modules/
+
+# skills
+skills-lock.json
+.claude/skills
+.agents/skills
