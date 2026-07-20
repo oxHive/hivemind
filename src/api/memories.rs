@@ -113,6 +113,45 @@ pub(super) async fn patch_memory(
     Ok(Json(entry_json(&entry)))
 }
 
+#[derive(Deserialize)]
+pub(super) struct TagsBody {
+    tags: Vec<String>,
+}
+
+pub(super) async fn add_memory_tags(
+    State(store): State<Store>,
+    Extension(events): Extension<Events>,
+    Path(id): Path<String>,
+    Json(b): Json<TagsBody>,
+) -> Result<Json<Value>, ApiError> {
+    if !store.add_tags(&id, &b.tags).await? {
+        return Err(not_found(format!("no memory {id}")));
+    }
+    let entry = store
+        .recall_by_id(&id)
+        .await?
+        .ok_or_else(|| not_found(format!("no memory {id}")))?;
+    let _ = events.send(json!({ "type": "changed" }));
+    Ok(Json(entry_json(&entry)))
+}
+
+pub(super) async fn remove_memory_tags(
+    State(store): State<Store>,
+    Extension(events): Extension<Events>,
+    Path(id): Path<String>,
+    Json(b): Json<TagsBody>,
+) -> Result<Json<Value>, ApiError> {
+    if !store.remove_tags(&id, &b.tags).await? {
+        return Err(not_found(format!("no memory {id}")));
+    }
+    let entry = store
+        .recall_by_id(&id)
+        .await?
+        .ok_or_else(|| not_found(format!("no memory {id}")))?;
+    let _ = events.send(json!({ "type": "changed" }));
+    Ok(Json(entry_json(&entry)))
+}
+
 pub(super) async fn delete_memory(
     State(store): State<Store>,
     Extension(events): Extension<Events>,
@@ -147,7 +186,15 @@ pub(super) async fn search(
     Query(p): Query<SearchParams>,
 ) -> Result<Json<Value>, ApiError> {
     let limit = p.limit.unwrap_or(20).clamp(1, 50);
-    let hits = store.search(&p.q, limit).await?;
+    let hits = if crate::tag_query::looks_like_tag_expr(&p.q) {
+        let expr = crate::tag_query::parse(&p.q)
+            .map_err(|e| ApiError(StatusCode::UNPROCESSABLE_ENTITY, e.to_string()))?;
+        let mut matches = store.find_by_tag_expr(&expr).await?;
+        matches.truncate(limit as usize);
+        matches
+    } else {
+        store.search(&p.q, limit).await?
+    };
     let results: Vec<_> = hits.iter().map(entry_json).collect();
     Ok(Json(json!({ "count": results.len(), "results": results })))
 }

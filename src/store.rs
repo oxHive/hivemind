@@ -198,16 +198,59 @@ pub(crate) fn fts_quote(query: &str) -> String {
         .join(" ")
 }
 
-/// A memory may have at most one tag in the `project` namespace — this is
-/// the only namespace with this restriction (see the tag-namespace-system
-/// design spec); all others allow multiple values per memory.
-fn validate_single_project_tag(tags: &[String]) -> Result<()> {
-    let project_tag_count = tags
+/// Rejects tags that are empty/whitespace-only or unreasonably long.
+const MAX_TAG_LEN: usize = 128;
+
+fn validate_tag_format(tags: &[String]) -> Result<()> {
+    for t in tags {
+        if t.trim().is_empty() {
+            return Err(anyhow!("tag must not be empty or whitespace-only"));
+        }
+        if t.len() > MAX_TAG_LEN {
+            return Err(anyhow!("tag exceeds max length of {MAX_TAG_LEN} chars: {t:?}"));
+        }
+    }
+    Ok(())
+}
+
+/// Namespaces marked `single_value: true` in the `tag_namespaces` registry
+/// (see `api::settings::default_tag_namespaces`) may have at most one tag
+/// per memory. Falls back to `["project"]` when no registry is stored yet
+/// or it fails to parse, preserving the original hardcoded behavior.
+async fn singleton_namespaces(store: &SqliteStore) -> Vec<String> {
+    let raw = match store.get_meta("tag_namespaces").await {
+        Ok(Some(s)) => s,
+        _ => return vec!["project".to_string()],
+    };
+    let parsed: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(_) => return vec!["project".to_string()],
+    };
+    let Some(obj) = parsed.as_object() else {
+        return vec!["project".to_string()];
+    };
+    let singletons: Vec<String> = obj
         .iter()
-        .filter(|t| t.to_lowercase().starts_with("project:"))
-        .count();
-    if project_tag_count > 1 {
-        return Err(anyhow!("a memory can have at most one project:* tag"));
+        .filter(|(_, v)| v.get("single_value").and_then(|b| b.as_bool()) == Some(true))
+        .map(|(k, _)| k.to_lowercase())
+        .collect();
+    if singletons.is_empty() {
+        vec!["project".to_string()]
+    } else {
+        singletons
+    }
+}
+
+async fn validate_namespace_cardinality(store: &SqliteStore, tags: &[String]) -> Result<()> {
+    for ns in singleton_namespaces(store).await {
+        let prefix = format!("{ns}:");
+        let count = tags
+            .iter()
+            .filter(|t| t.to_lowercase().starts_with(&prefix))
+            .count();
+        if count > 1 {
+            return Err(anyhow!("a memory can have at most one {ns}:* tag"));
+        }
     }
     Ok(())
 }
@@ -218,7 +261,8 @@ impl SqliteStore {
     }
 
     pub async fn store(&self, m: &NewMemoryRow<'_>) -> Result<()> {
-        validate_single_project_tag(m.tags)?;
+        validate_tag_format(m.tags)?;
+        validate_namespace_cardinality(self, m.tags).await?;
         let now = chrono_now();
         let token_count = m
             .token_count
@@ -336,7 +380,8 @@ impl SqliteStore {
         content: &str,
         tags: &[String],
     ) -> Result<bool> {
-        validate_single_project_tag(tags)?;
+        validate_tag_format(tags)?;
+        validate_namespace_cardinality(self, tags).await?;
         let now = chrono_now();
         let token_count = crate::budget::count_entry_tokens(title, content) as i64;
         let tx = self.conn.transaction().await?;
@@ -372,6 +417,82 @@ impl SqliteStore {
         )
         .await?;
 
+        tx.commit().await?;
+        Ok(true)
+    }
+
+    /// Merges `tags` into the memory's existing tag set (dedup via
+    /// `INSERT OR IGNORE`, same as `store`). Returns `false` if the memory
+    /// doesn't exist. Runs the same format/cardinality validation as
+    /// `store`/`update`, checked against the *merged* set.
+    pub async fn add_tags(&self, id: &str, tags: &[String]) -> Result<bool> {
+        let Some(current) = self.recall_by_id(id).await? else {
+            return Ok(false);
+        };
+        let mut merged = current.tags.clone();
+        for t in tags {
+            let lower = t.to_lowercase();
+            if !merged.contains(&lower) {
+                merged.push(lower);
+            }
+        }
+        validate_tag_format(&merged)?;
+        validate_namespace_cardinality(self, &merged).await?;
+
+        let now = chrono_now();
+        let tx = self.conn.transaction().await?;
+        for t in tags {
+            tx.execute(
+                "INSERT OR IGNORE INTO memory_tags (memory_id, tag) VALUES (?1, ?2)",
+                params![id, t.to_lowercase()],
+            )
+            .await?;
+        }
+        tx.execute(
+            "UPDATE memories SET updated_at = ?2 WHERE id = ?1",
+            params![id, now],
+        )
+        .await?;
+        tx.execute(
+            "INSERT INTO sync_journal (memory_id, content, updated_at, recorded_at)
+             VALUES (?1, ?2, ?3, ?3)
+             ON CONFLICT(memory_id) DO UPDATE SET
+               content = excluded.content, updated_at = excluded.updated_at, recorded_at = excluded.recorded_at",
+            params![id, current.content, now],
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(true)
+    }
+
+    /// Drops `tags` from the memory's existing tag set, leaving the rest
+    /// untouched. Returns `false` if the memory doesn't exist.
+    pub async fn remove_tags(&self, id: &str, tags: &[String]) -> Result<bool> {
+        let Some(current) = self.recall_by_id(id).await? else {
+            return Ok(false);
+        };
+        let now = chrono_now();
+        let tx = self.conn.transaction().await?;
+        for t in tags {
+            tx.execute(
+                "DELETE FROM memory_tags WHERE memory_id = ?1 AND tag = ?2",
+                params![id, t.to_lowercase()],
+            )
+            .await?;
+        }
+        tx.execute(
+            "UPDATE memories SET updated_at = ?2 WHERE id = ?1",
+            params![id, now],
+        )
+        .await?;
+        tx.execute(
+            "INSERT INTO sync_journal (memory_id, content, updated_at, recorded_at)
+             VALUES (?1, ?2, ?3, ?3)
+             ON CONFLICT(memory_id) DO UPDATE SET
+               content = excluded.content, updated_at = excluded.updated_at, recorded_at = excluded.recorded_at",
+            params![id, current.content, now],
+        )
+        .await?;
         tx.commit().await?;
         Ok(true)
     }

@@ -209,6 +209,86 @@ async fn patch_memory_updates_title_and_returns_full_entry() {
 }
 
 #[tokio::test]
+async fn add_memory_tags_merges_into_existing() {
+    let (app, _dir) = test_router().await;
+    let (_, created) = req(
+        app.clone(),
+        "POST",
+        "/api/v1/memories",
+        Some(memory_body("T", "C", &["a"])),
+    )
+    .await;
+    let id = created["id"].as_str().unwrap().to_string();
+    let (status, body) = req(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/memories/{id}/tags/add"),
+        Some(json!({ "tags": ["b"] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let mut tags: Vec<String> = body["tags"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    tags.sort();
+    assert_eq!(tags, vec!["a".to_string(), "b".to_string()]);
+}
+
+#[tokio::test]
+async fn remove_memory_tags_drops_named_tags() {
+    let (app, _dir) = test_router().await;
+    let (_, created) = req(
+        app.clone(),
+        "POST",
+        "/api/v1/memories",
+        Some(memory_body("T", "C", &["a", "b"])),
+    )
+    .await;
+    let id = created["id"].as_str().unwrap().to_string();
+    let (status, body) = req(
+        app.clone(),
+        "POST",
+        &format!("/api/v1/memories/{id}/tags/remove"),
+        Some(json!({ "tags": ["a"] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["tags"], json!(["b"]));
+}
+
+#[tokio::test]
+async fn add_memory_tags_404s_for_missing_memory() {
+    let (app, _dir) = test_router().await;
+    let (status, _) = req(
+        app,
+        "POST",
+        "/api/v1/memories/mem_missing/tags/add",
+        Some(json!({ "tags": ["a"] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn search_dispatches_tag_expression() {
+    let (app, _dir) = test_router().await;
+    req(
+        app.clone(),
+        "POST",
+        "/api/v1/memories",
+        Some(memory_body("Findable", "content", &["lang:rust"])),
+    )
+    .await;
+    let (status, body) = req(app, "GET", "/api/v1/search?q=tag%3Alang%3Arust", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["count"], 1);
+    assert_eq!(body["results"][0]["title"], "Findable");
+}
+
+#[tokio::test]
 async fn status_reports_version_and_count() {
     let (app, _dir) = test_router().await;
     req(
@@ -263,6 +343,19 @@ async fn save_sync_settings_returns_not_saved() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["saved"], false);
+}
+
+#[tokio::test]
+async fn save_tag_settings_rejects_malformed_body() {
+    let (app, _dir) = test_router().await;
+    let (status, _) = req(
+        app,
+        "POST",
+        "/api/v1/settings/tags",
+        Some(json!({ "area": { "color": 5 } })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 }
 
 #[tokio::test]

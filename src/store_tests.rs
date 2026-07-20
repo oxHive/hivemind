@@ -78,6 +78,86 @@ async fn store_rejects_more_than_one_project_tag() {
 }
 
 #[tokio::test]
+async fn store_rejects_empty_tag() {
+    let (s, _dir) = make_store().await;
+    let result = s
+        .store(&test_row("mem_empty_tag", "Title", "content", &["  ".into()]))
+        .await;
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn store_rejects_overlong_tag() {
+    let (s, _dir) = make_store().await;
+    let long_tag = "x".repeat(129);
+    let result = s
+        .store(&test_row("mem_long_tag", "Title", "content", &[long_tag]))
+        .await;
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn custom_singleton_namespace_is_enforced_from_registry() {
+    let (s, _dir) = make_store().await;
+    s.set_meta(
+        "tag_namespaces",
+        r##"{"owner": {"color": "#fff", "values": [], "single_value": true}}"##,
+    )
+    .await
+    .unwrap();
+    let result = s
+        .store(&test_row(
+            "mem_two_owners",
+            "Title",
+            "content",
+            &["owner:alice".into(), "owner:bob".into()],
+        ))
+        .await;
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn add_tags_merges_without_touching_existing() {
+    let (s, _dir) = make_store().await;
+    s.store(&test_row("mem_add", "Title", "content", &["a".into()]))
+        .await
+        .unwrap();
+    let ok = s
+        .add_tags("mem_add", &["b".into(), "a".into()])
+        .await
+        .unwrap();
+    assert!(ok);
+    let entry = s.recall_by_id("mem_add").await.unwrap().unwrap();
+    let mut tags = entry.tags.clone();
+    tags.sort();
+    assert_eq!(tags, vec!["a".to_string(), "b".to_string()]);
+}
+
+#[tokio::test]
+async fn remove_tags_drops_only_named_tags() {
+    let (s, _dir) = make_store().await;
+    s.store(&test_row(
+        "mem_rm",
+        "Title",
+        "content",
+        &["a".into(), "b".into()],
+    ))
+    .await
+    .unwrap();
+    let ok = s.remove_tags("mem_rm", &["a".into()]).await.unwrap();
+    assert!(ok);
+    let entry = s.recall_by_id("mem_rm").await.unwrap().unwrap();
+    assert_eq!(entry.tags, vec!["b".to_string()]);
+}
+
+#[tokio::test]
+async fn add_tags_returns_false_for_missing_memory() {
+    let (s, _dir) = make_store().await;
+    let ok = s.add_tags("mem_missing", &["a".into()]).await.unwrap();
+    assert!(!ok);
+}
+
+#[tokio::test]
 async fn update_rejects_more_than_one_project_tag() {
     let (s, _dir) = make_store().await;
     let tags: Vec<String> = vec![];

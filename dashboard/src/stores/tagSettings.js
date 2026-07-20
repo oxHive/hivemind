@@ -22,9 +22,11 @@ export const useTagSettingsStore = defineStore('tagSettings', () => {
     return namespaces.value[ns] ? ns : null
   }
 
+  const DEFAULT_TAG_COLOR = '#8a8f98'
+
   function colorFor(tag) {
     const ns = namespaceFor(tag)
-    return ns ? namespaces.value[ns].color : null
+    return ns ? namespaces.value[ns].color : DEFAULT_TAG_COLOR
   }
 
   return { namespaces, loaded, fetchNamespaces, save, namespaceFor, colorFor }

@@ -95,6 +95,11 @@ pub fn router(
             "/api/v1/memories/{id}",
             get(get_memory).patch(patch_memory).delete(delete_memory),
         )
+        .route("/api/v1/memories/{id}/tags/add", post(add_memory_tags))
+        .route(
+            "/api/v1/memories/{id}/tags/remove",
+            post(remove_memory_tags),
+        )
         .route("/api/v1/export", get(export))
         .route("/api/v1/import", post(import))
         .route("/api/v1/search", get(search))

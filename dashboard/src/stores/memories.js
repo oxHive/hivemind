@@ -59,7 +59,39 @@ export const useMemoriesStore = defineStore('memories', () => {
     Object.prototype.hasOwnProperty.call(stashedDrafts.value, NEW_DRAFT_KEY)
   )
 
+  // Mirrors src/tag_query.rs's `looks_like_tag_expr` — same three prefixes.
+  // Kept as a single-line sniff, not a re-implementation of the grammar:
+  // matching queries are evaluated server-side via api.searchMemories, so
+  // there's exactly one place that understands `tag:a & tag:b` syntax.
+  function looksLikeTagExpr(q) {
+    const t = q.trim()
+    return t.startsWith('tag:') || t.startsWith('!tag:') || t.startsWith('(')
+  }
+
+  // Set by the searchQuery watcher below when the query is a tag expression
+  // — holds the server's evaluation of it. Null means "not a tag expression,
+  // use the local substring filter instead."
+  const tagExprResults = ref(null)
+
+  watch(searchQuery, async (q) => {
+    if (!looksLikeTagExpr(q)) {
+      tagExprResults.value = null
+      return
+    }
+    try {
+      const res = await api.searchMemories(q)
+      tagExprResults.value = res.results
+    } catch {
+      tagExprResults.value = []
+    }
+  })
+
   const filtered = computed(() => {
+    if (tagExprResults.value !== null) {
+      return layerFilter.value === 'all'
+        ? tagExprResults.value
+        : tagExprResults.value.filter(m => m.layer === layerFilter.value)
+    }
     let list = all.value
     if (searchQuery.value.trim()) {
       const q = searchQuery.value.toLowerCase()
@@ -355,6 +387,7 @@ export const useMemoriesStore = defineStore('memories', () => {
 
   return {
     all, selected, draft, conflict, searchQuery, layerFilter, loading, saving, filtered, dirty,
+    tagExprResults,
     creatingNew, canSaveNew, hasNewDraft,
     isDraft, resetDraft, resolveConflictLoadLatest, resolveConflictKeepMine,
     fetchAll, refreshSilently, select, startNew, cancelNew, save, create, remove, clearAll,
