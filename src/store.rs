@@ -238,6 +238,14 @@ pub(crate) fn default_tag_namespaces() -> Value {
             "color": "#e0607e", "values": [],
             "description": "Programming language, for cross-project reference/pattern memories not tied to one project."
         },
+        "kind": {
+            "color": "#1d9e75", "values": ["pattern", "doc-mirror", "snippet", "decision"], "values_mode": "fixed",
+            "description": "Nature of cross-project knowledge content: pattern (reusable architecture/code pattern), doc-mirror (external docs saved for local/LLM consumption), snippet (reusable code), decision (an architectural decision record)."
+        },
+        "scope": {
+            "color": "#ba7517", "values": ["team", "individual"], "values_mode": "fixed",
+            "description": "Who this memory is meant for: team (shared knowledge, relevant if sync is configured to a shared remote) or individual (personal only)."
+        },
     })
 }
 
