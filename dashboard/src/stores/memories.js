@@ -41,6 +41,10 @@ export const useMemoriesStore = defineStore('memories', () => {
   const conflict = ref(null)
   const searchQuery = ref('')
   const layerFilter = ref('all')
+  // '' (off), 'ns:*' (any value in namespace ns), 'ns:value', or a bare tag.
+  // Set by TagFilter.vue. Applied client-side (not through the tag_query
+  // grammar) so the namespace-wildcard case works without a server change.
+  const tagFilter = ref('')
   const loading = ref(false)
   const saving = ref(false)
   // True while composing a brand-new memory in the detail panel — no id
@@ -86,11 +90,22 @@ export const useMemoriesStore = defineStore('memories', () => {
     }
   })
 
+  function matchesTagFilter(tags) {
+    if (!tagFilter.value) return true
+    const list = (tags || []).map(t => t.toLowerCase())
+    if (tagFilter.value.endsWith(':*')) {
+      const prefix = tagFilter.value.slice(0, -1) // "ns:"
+      return list.some(t => t.startsWith(prefix))
+    }
+    return list.includes(tagFilter.value)
+  }
+
   const filtered = computed(() => {
     if (tagExprResults.value !== null) {
-      return layerFilter.value === 'all'
-        ? tagExprResults.value
-        : tagExprResults.value.filter(m => m.layer === layerFilter.value)
+      let list = tagExprResults.value
+      if (layerFilter.value !== 'all') list = list.filter(m => m.layer === layerFilter.value)
+      if (tagFilter.value) list = list.filter(m => matchesTagFilter(m.tags))
+      return list
     }
     let list = all.value
     if (searchQuery.value.trim()) {
@@ -103,6 +118,9 @@ export const useMemoriesStore = defineStore('memories', () => {
     }
     if (layerFilter.value !== 'all') {
       list = list.filter(m => m.layer === layerFilter.value)
+    }
+    if (tagFilter.value) {
+      list = list.filter(m => matchesTagFilter(m.tags))
     }
     return list
   })
@@ -387,7 +405,7 @@ export const useMemoriesStore = defineStore('memories', () => {
 
   return {
     all, selected, draft, conflict, searchQuery, layerFilter, loading, saving, filtered, dirty,
-    tagExprResults,
+    tagExprResults, tagFilter,
     creatingNew, canSaveNew, hasNewDraft,
     isDraft, resetDraft, resolveConflictLoadLatest, resolveConflictKeepMine,
     fetchAll, refreshSilently, select, startNew, cancelNew, save, create, remove, clearAll,

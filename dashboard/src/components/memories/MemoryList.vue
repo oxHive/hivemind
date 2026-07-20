@@ -4,6 +4,7 @@ import { useMemoriesStore } from '../../stores/memories.js'
 import MemoryCard from './MemoryCard.vue'
 import FilterChip from '../shared/FilterChip.vue'
 import SkeletonCard from '../shared/SkeletonCard.vue'
+import TagFilter from '../shared/TagFilter.vue'
 
 const memories = useMemoriesStore()
 const searchEl = ref(null)
@@ -48,7 +49,7 @@ const filters = [
           @input="memories.searchQuery = $event.target.value"
         />
       </div>
-      <div class="flex gap-1.5">
+      <div class="flex gap-1.5 mb-3">
         <FilterChip
           v-for="f in filters" :key="f.value"
           :label="f.label" :value="f.value"
@@ -57,6 +58,7 @@ const filters = [
           @select="memories.layerFilter = $event"
         />
       </div>
+      <TagFilter v-model="memories.tagFilter" />
     </div>
 
     <!-- List -->
@@ -82,7 +84,7 @@ const filters = [
     <!-- Footer -->
     <div class="px-4 flex items-center" style="height:40px; border-top:0.5px solid var(--hm-border-subtle)">
       <span class="font-mono" style="font-size:11px; color:var(--hm-text-tertiary)">
-        <template v-if="memories.searchQuery || memories.layerFilter !== 'all'">
+        <template v-if="memories.searchQuery || memories.layerFilter !== 'all' || memories.tagFilter">
           {{ memories.filtered.length }} of {{ memories.all.length }} memories
         </template>
         <template v-else>{{ memories.all.length }} memories</template>

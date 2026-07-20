@@ -3,6 +3,7 @@ import { useGraphStore } from '../../stores/graph.js'
 import { useMemoriesStore } from '../../stores/memories.js'
 import { useSuggestStore } from '../../stores/suggest.js'
 import FilterChip from '../shared/FilterChip.vue'
+import TagFilter from '../shared/TagFilter.vue'
 
 const graph = useGraphStore()
 const memories = useMemoriesStore()
@@ -31,6 +32,8 @@ function jumpToMatch() {
         @select="graph.layerFilter = $event"
       />
     </div>
+
+    <TagFilter v-model="graph.tagFilter" />
 
     <div class="flex items-center gap-1 ml-auto">
       <span class="font-mono" style="font-size:10px; color:var(--hm-text-tertiary)">L{{ graph.zoom }}</span>

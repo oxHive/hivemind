@@ -11,6 +11,19 @@ export const useGraphStore = defineStore('graph', () => {
   const selectedEdgeId = ref(null)
   const searchQuery = ref('')
   const layerFilter = ref('all') // 'all' | 'personal' | 'workspace'
+  // '' (off), 'ns:*' (any value in namespace ns), 'ns:value', or a bare tag.
+  // Set by TagFilter.vue, read by GraphCanvas.vue's node-dimming pass.
+  const tagFilter = ref('')
+
+  function matchesTagFilter(tags) {
+    if (!tagFilter.value) return true
+    const list = (tags || []).map(t => t.toLowerCase())
+    if (tagFilter.value.endsWith(':*')) {
+      const prefix = tagFilter.value.slice(0, -1)
+      return list.some(t => t.startsWith(prefix))
+    }
+    return list.includes(tagFilter.value)
+  }
 
   const pendingEdges = computed(() => edges.value.filter(e => e.status === 'pending'))
   const selectedEdge = computed(() => edges.value.find(e => e.id === selectedEdgeId.value) || null)
@@ -57,8 +70,8 @@ export const useGraphStore = defineStore('graph', () => {
   }
 
   return {
-    edges, zoom, selectedNodeId, selectedEdgeId, searchQuery, layerFilter,
+    edges, zoom, selectedNodeId, selectedEdgeId, searchQuery, layerFilter, tagFilter,
     pendingEdges, selectedEdge, edgesFor, fetchEdges, resolveEdge,
-    acceptAllPending, rejectAllPending,
+    acceptAllPending, rejectAllPending, matchesTagFilter,
   }
 })

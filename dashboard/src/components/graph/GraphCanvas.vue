@@ -407,7 +407,7 @@ function draw() {
     const isSelected = graph.selectedNodeId === node.id
     const matchesSearch = !query || node.title.toLowerCase().includes(query)
     const matchesLayer = graph.layerFilter === 'all' || node.layer === graph.layerFilter
-    const isMatch = matchesSearch && matchesLayer
+    const isMatch = matchesSearch && matchesLayer && graph.matchesTagFilter(node.tags)
     const color = COLORS[node.layer] || COLORS.personal
 
     // Ring for selected
@@ -703,7 +703,7 @@ onUnmounted(() => {
 })
 
 watch([nodeData, linkData], () => startSimulation())
-watch([() => graph.zoom, () => graph.searchQuery, () => graph.layerFilter, () => graph.selectedNodeId, () => graph.selectedEdgeId], scheduleDraw)
+watch([() => graph.zoom, () => graph.searchQuery, () => graph.layerFilter, () => graph.tagFilter, () => graph.selectedNodeId, () => graph.selectedEdgeId], scheduleDraw)
 </script>
 
 <template>
