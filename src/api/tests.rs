@@ -359,14 +359,41 @@ async fn save_tag_settings_rejects_malformed_body() {
 }
 
 #[tokio::test]
+async fn save_tag_settings_rejects_invalid_values_mode() {
+    let (app, _dir) = test_router().await;
+    let (status, _) = req(
+        app,
+        "POST",
+        "/api/v1/settings/tags",
+        Some(json!({ "status": { "color": "#fff", "values": [], "values_mode": "strict" } })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn save_tag_settings_accepts_fixed_values_mode() {
+    let (app, _dir) = test_router().await;
+    let (status, _) = req(
+        app,
+        "POST",
+        "/api/v1/settings/tags",
+        Some(json!({ "status": { "color": "#fff", "values": ["idea", "done"], "values_mode": "fixed" } })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
 async fn get_tag_settings_returns_seeded_defaults_when_unset() {
     let (app, _dir) = test_router().await;
     let (status, body) = req(app, "GET", "/api/v1/settings/tags", None).await;
     assert_eq!(status, StatusCode::OK);
     assert!(body["project"]["color"].is_string());
     assert!(body["lang"]["color"].is_string());
-    assert!(body["area"]["color"].is_string());
+    assert!(body["topic"]["color"].is_string());
     assert!(body["status"]["color"].is_string());
+    assert!(body["project"]["description"].is_string());
     assert_eq!(body["project"]["values"], json!([]));
 }
 

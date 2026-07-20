@@ -13,7 +13,7 @@ Call `memory_search` with an empty or wildcard query to retrieve all memories, o
 
 ### 2. Present
 
-Group memories by tag if there are more than 10. For each memory show:
+Group memories by tag if there are more than 10 — prefer grouping by a registered namespace value (e.g. all `topic:sync` memories together; call `tag_namespaces_list` if you need the namespace list) over grouping by arbitrary bare tags. For each memory show:
 - ID (short form)
 - Title
 - Tags

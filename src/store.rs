@@ -215,44 +215,100 @@ fn validate_tag_format(tags: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// Namespaces marked `single_value: true` in the `tag_namespaces` registry
-/// (see `api::settings::default_tag_namespaces`) may have at most one tag
-/// per memory. Falls back to `["project"]` when no registry is stored yet
-/// or it fails to parse, preserving the original hardcoded behavior.
-async fn singleton_namespaces(store: &SqliteStore) -> Vec<String> {
-    let raw = match store.get_meta("tag_namespaces").await {
-        Ok(Some(s)) => s,
-        _ => return vec!["project".to_string()],
-    };
-    let parsed: serde_json::Value = match serde_json::from_str(&raw) {
-        Ok(v) => v,
-        Err(_) => return vec!["project".to_string()],
-    };
-    let Some(obj) = parsed.as_object() else {
-        return vec!["project".to_string()];
-    };
-    let singletons: Vec<String> = obj
-        .iter()
-        .filter(|(_, v)| v.get("single_value").and_then(|b| b.as_bool()) == Some(true))
-        .map(|(k, _)| k.to_lowercase())
-        .collect();
-    if singletons.is_empty() {
-        vec!["project".to_string()]
-    } else {
-        singletons
-    }
+/// Seeded `tag_namespaces` registry, used both as the dashboard's initial
+/// suggestion set and as the fallback when the stored registry is missing
+/// or fails to parse. `description` is shown to human users in the
+/// dashboard and to agents via the `tag_namespaces_list` MCP tool — it's
+/// the answer to "what does this namespace mean, when do I use it".
+pub(crate) fn default_tag_namespaces() -> Value {
+    json!({
+        "project": {
+            "color": "#4a9eff", "values": [], "single_value": true,
+            "description": "Which product/repo this memory is scoped to. At most one per memory."
+        },
+        "topic": {
+            "color": "#5fb8b0", "values": [],
+            "description": "What part of the system this concerns, or the subject discussed (e.g. sync, graph-canvas, obsidian, billing)."
+        },
+        "status": {
+            "color": "#a875d1", "values": ["idea", "planned", "done", "deferred"],
+            "description": "Lifecycle of this memory: idea (proposed, not built), planned, done (shipped), or deferred (paused)."
+        },
+        "lang": {
+            "color": "#e0607e", "values": [],
+            "description": "Programming language, for cross-project reference/pattern memories not tied to one project."
+        },
+    })
 }
 
-async fn validate_namespace_cardinality(store: &SqliteStore, tags: &[String]) -> Result<()> {
-    for ns in singleton_namespaces(store).await {
-        let prefix = format!("{ns}:");
-        let count = tags
-            .iter()
-            .filter(|t| t.to_lowercase().starts_with(&prefix))
-            .count();
-        if count > 1 {
-            return Err(anyhow!("a memory can have at most one {ns}:* tag"));
+/// Validates `tags` against the `tag_namespaces` registry: at most one tag
+/// per namespace marked `single_value` (falls back to `["project"]` alone
+/// when the registry has no singleton namespaces at all), and — for any
+/// namespace marked `values_mode: "fixed"` with a non-empty `values` list —
+/// every tag in that namespace must use one of the registered values.
+/// A namespace with `values_mode: "fixed"` but an empty `values` list is
+/// not yet restrictive (nothing has been registered to check against).
+async fn validate_tags_against_registry(store: &SqliteStore, tags: &[String]) -> Result<()> {
+    let registry = store.tag_namespace_registry().await;
+    let Some(obj) = registry.as_object() else {
+        return validate_project_singleton_fallback(tags);
+    };
+
+    let singletons: Vec<&String> = obj
+        .iter()
+        .filter(|(_, v)| v.get("single_value").and_then(|b| b.as_bool()) == Some(true))
+        .map(|(k, _)| k)
+        .collect();
+    if singletons.is_empty() {
+        validate_project_singleton_fallback(tags)?;
+    } else {
+        for ns in singletons {
+            let prefix = format!("{}:", ns.to_lowercase());
+            let count = tags
+                .iter()
+                .filter(|t| t.to_lowercase().starts_with(&prefix))
+                .count();
+            if count > 1 {
+                return Err(anyhow!("a memory can have at most one {ns}:* tag"));
+            }
         }
+    }
+
+    for tag in tags {
+        let Some(idx) = tag.find(':') else { continue };
+        let (ns, value) = (&tag[..idx], &tag[idx + 1..]);
+        let Some(entry) = obj.get(ns) else { continue };
+        if entry.get("values_mode").and_then(|v| v.as_str()) != Some("fixed") {
+            continue;
+        }
+        let Some(values) = entry.get("values").and_then(|v| v.as_array()) else {
+            continue;
+        };
+        if values.is_empty() {
+            continue;
+        }
+        let allowed = values
+            .iter()
+            .filter_map(|v| v.as_str())
+            .any(|v| v.eq_ignore_ascii_case(value));
+        if !allowed {
+            let list: Vec<&str> = values.iter().filter_map(|v| v.as_str()).collect();
+            return Err(anyhow!(
+                "{ns}:{value} is not a registered value — {ns} only allows: {}",
+                list.join(", ")
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_project_singleton_fallback(tags: &[String]) -> Result<()> {
+    let count = tags
+        .iter()
+        .filter(|t| t.to_lowercase().starts_with("project:"))
+        .count();
+    if count > 1 {
+        return Err(anyhow!("a memory can have at most one project:* tag"));
     }
     Ok(())
 }
@@ -264,7 +320,7 @@ impl SqliteStore {
 
     pub async fn store(&self, m: &NewMemoryRow<'_>) -> Result<()> {
         validate_tag_format(m.tags)?;
-        validate_namespace_cardinality(self, m.tags).await?;
+        validate_tags_against_registry(self, m.tags).await?;
         let now = chrono_now();
         let token_count = m
             .token_count
@@ -383,7 +439,7 @@ impl SqliteStore {
         tags: &[String],
     ) -> Result<bool> {
         validate_tag_format(tags)?;
-        validate_namespace_cardinality(self, tags).await?;
+        validate_tags_against_registry(self, tags).await?;
         let now = chrono_now();
         let token_count = crate::budget::count_entry_tokens(title, content) as i64;
         let tx = self.conn.transaction().await?;
@@ -439,7 +495,7 @@ impl SqliteStore {
             }
         }
         validate_tag_format(&merged)?;
-        validate_namespace_cardinality(self, &merged).await?;
+        validate_tags_against_registry(self, &merged).await?;
 
         let now = chrono_now();
         let tx = self.conn.transaction().await?;
@@ -1078,6 +1134,18 @@ impl SqliteStore {
             Some(row) => Some(row.get(0)?),
             None => None,
         })
+    }
+
+    /// The `tag_namespaces` registry (colors, values, descriptions), falling
+    /// back to `default_tag_namespaces()` when nothing is stored yet or the
+    /// stored value fails to parse. Single source of truth for the API
+    /// settings endpoint, tag-cardinality validation, and the
+    /// `tag_namespaces_list` MCP tool.
+    pub async fn tag_namespace_registry(&self) -> Value {
+        match self.get_meta("tag_namespaces").await {
+            Ok(Some(s)) => serde_json::from_str(&s).unwrap_or_else(|_| default_tag_namespaces()),
+            _ => default_tag_namespaces(),
+        }
     }
 
     pub async fn list_conflicts(&self, status: Option<&str>) -> Result<Vec<ConflictEntry>> {

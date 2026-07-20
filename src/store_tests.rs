@@ -122,6 +122,86 @@ async fn custom_singleton_namespace_is_enforced_from_registry() {
 }
 
 #[tokio::test]
+async fn fixed_values_namespace_rejects_unregistered_value() {
+    let (s, _dir) = make_store().await;
+    s.set_meta(
+        "tag_namespaces",
+        r##"{"status": {"color": "#fff", "values": ["idea", "done"], "values_mode": "fixed"}}"##,
+    )
+    .await
+    .unwrap();
+    let result = s
+        .store(&test_row(
+            "mem_bad_status",
+            "Title",
+            "content",
+            &["status:archived".into()],
+        ))
+        .await;
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn fixed_values_namespace_accepts_registered_value_case_insensitively() {
+    let (s, _dir) = make_store().await;
+    s.set_meta(
+        "tag_namespaces",
+        r##"{"status": {"color": "#fff", "values": ["idea", "done"], "values_mode": "fixed"}}"##,
+    )
+    .await
+    .unwrap();
+    let result = s
+        .store(&test_row(
+            "mem_ok_status",
+            "Title",
+            "content",
+            &["status:Done".into()],
+        ))
+        .await;
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn fixed_values_namespace_with_empty_list_is_not_restrictive() {
+    let (s, _dir) = make_store().await;
+    s.set_meta(
+        "tag_namespaces",
+        r##"{"status": {"color": "#fff", "values": [], "values_mode": "fixed"}}"##,
+    )
+    .await
+    .unwrap();
+    let result = s
+        .store(&test_row(
+            "mem_empty_fixed",
+            "Title",
+            "content",
+            &["status:anything".into()],
+        ))
+        .await;
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn suggestion_mode_namespace_accepts_any_value() {
+    let (s, _dir) = make_store().await;
+    s.set_meta(
+        "tag_namespaces",
+        r##"{"status": {"color": "#fff", "values": ["idea", "done"], "values_mode": "suggestion"}}"##,
+    )
+    .await
+    .unwrap();
+    let result = s
+        .store(&test_row(
+            "mem_suggestion",
+            "Title",
+            "content",
+            &["status:whatever".into()],
+        ))
+        .await;
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
 async fn add_tags_merges_without_touching_existing() {
     let (s, _dir) = make_store().await;
     s.store(&test_row("mem_add", "Title", "content", &["a".into()]))

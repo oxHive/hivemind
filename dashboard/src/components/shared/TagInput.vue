@@ -11,6 +11,7 @@ const tagSettings = useTagSettingsStore()
 const inputValue = ref('')
 const showSuggestions = ref(false)
 const pendingReplace = ref(null)
+const rejectionError = ref('')
 
 // project:* is the single-value namespace that identifies what the memory
 // belongs to — surface it first regardless of storage order, same as MemoryCard.
@@ -39,9 +40,29 @@ const suggestions = computed(() => {
     .map(v => `${ns}:${v}`)
 })
 
+// Enforces "fixed" namespaces client-side too — the backend rejects the
+// same case on save, but catching it here gives immediate feedback instead
+// of a failed save later.
+function rejectionReason(tag) {
+  const idx = tag.indexOf(':')
+  if (idx === -1) return null
+  const ns = tag.slice(0, idx)
+  const value = tag.slice(idx + 1)
+  const entry = tagSettings.namespaces[ns]
+  if (!entry || entry.values_mode !== 'fixed' || !entry.values.length) return null
+  if (entry.values.some(v => v.toLowerCase() === value.toLowerCase())) return null
+  return `${ns} only allows: ${entry.values.join(', ')}`
+}
+
 function commit(rawTag) {
   const tag = rawTag.trim().toLowerCase()
   if (!tag) return
+  const reason = rejectionReason(tag)
+  if (reason) {
+    rejectionError.value = reason
+    return
+  }
+  rejectionError.value = ''
   maybeConfirmAndApply(null, tag)
   inputValue.value = ''
   showSuggestions.value = false
@@ -50,6 +71,12 @@ function commit(rawTag) {
 function handleEdit(oldTag, rawNewTag) {
   const newTag = rawNewTag.trim().toLowerCase()
   if (!newTag || newTag === oldTag) return
+  const reason = rejectionReason(newTag)
+  if (reason) {
+    rejectionError.value = reason
+    return
+  }
+  rejectionError.value = ''
   maybeConfirmAndApply(oldTag, newTag)
 }
 
@@ -109,10 +136,12 @@ function handleBlur() {
         v-model="inputValue"
         placeholder="add tag…"
         @focus="showSuggestions = true"
+        @input="rejectionError = ''"
         @keydown.enter.prevent="commit(inputValue)"
         @keydown.esc="showSuggestions = false"
         @blur="handleBlur" />
     </div>
+    <p v-if="rejectionError" class="mt-1" style="font-size:10px; color:var(--hm-danger)">{{ rejectionError }}</p>
     <div v-if="showSuggestions && suggestions.length"
       class="absolute left-0 mt-1 rounded-md py-1"
       style="background:var(--hm-bg-overlay); border:0.5px solid var(--hm-border-default); z-index:10; min-width:140px">

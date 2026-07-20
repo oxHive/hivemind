@@ -9,7 +9,7 @@ Search HiveMind for memories matching the query in $ARGUMENTS.
 
 ### 1. Search
 
-Call `memory_search` with the query from $ARGUMENTS.
+Call `memory_search` with the query from $ARGUMENTS. If $ARGUMENTS names a category rather than keywords (e.g. "sync stuff", "ideas about billing"), consider searching by tag instead: `memory_search`'s `tags` param takes `namespace:value` entries and ANDs them — call `tag_namespaces_list` first if you need to confirm the right namespace/value.
 
 ### 2. Present results
 

@@ -111,6 +111,9 @@ pub struct ConflictIdInput {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct TagNamespacesListInput {}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct SessionStartInput {
     /// Absolute path to the project root where .hivemind.toml lives.
     pub project_path: String,
@@ -337,6 +340,19 @@ impl HiveMind {
             "count": results.len(),
             "results": results,
         })))
+    }
+
+    /// Returns the tag namespace registry (color, allowed values,
+    /// single_value flag, and human-written description per namespace) so
+    /// an agent can pick correct namespaces/values instead of inventing new
+    /// ones. Call this before tagging a new or edited memory.
+    pub async fn do_tag_namespaces_list(
+        &self,
+        _p: TagNamespacesListInput,
+    ) -> Result<CallToolResult, ErrorData> {
+        Ok(CallToolResult::structured(
+            self.store.tag_namespace_registry().await,
+        ))
     }
 
     pub async fn do_memory_update(
@@ -644,13 +660,23 @@ impl HiveMind {
 #[tool_router]
 impl HiveMind {
     #[tool(
-        description = "Store a memory, preference, or project context for future recall across sessions. Use when the user explicitly asks to remember something, or when important context should persist beyond this session."
+        description = "Store a memory, preference, or project context for future recall across sessions. Use when the user explicitly asks to remember something, or when important context should persist beyond this session. Call tag_namespaces_list first to pick tags that match the project's existing namespaces/values rather than inventing new ones."
     )]
     async fn memory_store(
         &self,
         Parameters(p): Parameters<MemoryStoreInput>,
     ) -> Result<CallToolResult, ErrorData> {
         self.do_memory_store(p).await
+    }
+
+    #[tool(
+        description = "List the tag namespace registry: color, allowed values, single_value flag, and a human-written description per namespace (e.g. what \"topic\" vs \"status\" means for this project). Call before choosing tags for memory_store or memory_update — reuse an existing namespace/value when one fits; only fall back to a new bare (non-namespaced) tag for a genuine one-off."
+    )]
+    async fn tag_namespaces_list(
+        &self,
+        Parameters(p): Parameters<TagNamespacesListInput>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.do_tag_namespaces_list(p).await
     }
 
     #[tool(
@@ -674,7 +700,7 @@ impl HiveMind {
     }
 
     #[tool(
-        description = "Update an existing memory's content or tags by id. Providing tags replaces all tags on the memory."
+        description = "Update an existing memory's content or tags by id. Providing tags replaces all tags on the memory — call tag_namespaces_list first if you're changing tags, to stay consistent with the project's registered namespaces."
     )]
     async fn memory_update(
         &self,

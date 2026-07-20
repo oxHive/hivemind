@@ -23,9 +23,11 @@ Display the current title, content, and tags clearly so the user can see what ex
 
 Ask the user what they want to update: content, tags, or both. Wait for their response.
 
+If tags are changing, call `tag_namespaces_list` first and steer new tags toward existing namespaces/values (see the `/memory-store` skill's tagging rule) rather than inventing new ones.
+
 ### 4. Apply the update
 
-Call `memory_update` with the ID and the new values the user provided.
+Call `memory_update` with the ID and the new values the user provided. `tags` replaces the full tag list — pass the complete set (existing tags you're keeping plus any changes), not just the diff.
 
 ### 5. Confirm
 
