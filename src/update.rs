@@ -217,7 +217,7 @@ async fn do_update() -> Result<()> {
 
 async fn ensure_binstall_available() -> Result<()> {
     let ok = tokio::process::Command::new("cargo")
-        .args(["binstall", "--version"])
+        .args(["binstall", "-V"])
         .output()
         .await
         .map(|o| o.status.success())
