@@ -30,7 +30,7 @@ defineEmits(['select'])
   cursor: pointer;
   padding: 0 0 10px;
   font-family: var(--hm-font-mono);
-  font-size: var(--hm-text-xs);
+  font-size: var(--hm-text-sm);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--hm-text-tertiary);

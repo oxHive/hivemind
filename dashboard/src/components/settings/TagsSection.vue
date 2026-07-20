@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useTagSettingsStore } from '../../stores/tagSettings.js'
 import { useUiStore } from '../../stores/ui.js'
 import TagChip from '../shared/TagChip.vue'
+import Tooltip from '../shared/Tooltip.vue'
 
 const tagSettings = useTagSettingsStore()
 const ui = useUiStore()
@@ -11,9 +12,37 @@ const newValueInput = ref({})
 const saving = ref(false)
 const error = ref('')
 const pendingDelete = ref(null)
+const valuesModeTooltip = ref({ visible: false, x: 0, y: 0, text: '' })
 
 const SWATCHES = ['#4a9eff', '#e0607e', '#5fb8b0', '#a875d1', '#1d9e75', '#7f77dd', '#ba7517', '#d9534f']
 const HEX_RE = /^#[0-9a-fA-F]{3,8}$/
+const VALUES_MODE_HELP = {
+  suggestion: 'The listed values show up as autocomplete suggestions, but any typed value is still accepted.',
+  fixed: 'Only the listed values are accepted — tagging with anything else is rejected, for AI agents too.',
+}
+
+function showValuesModeTooltip(e, mode) {
+  const rect = e.currentTarget.getBoundingClientRect()
+  valuesModeTooltip.value = {
+    visible: true, x: rect.left + rect.width / 2, y: rect.top, text: VALUES_MODE_HELP[mode],
+  }
+}
+
+function hideValuesModeTooltip() {
+  valuesModeTooltip.value.visible = false
+}
+
+function valuesCaption(ns) {
+  const mode = ns.values_mode || 'suggestion'
+  if (!ns.values.length) {
+    return mode === 'fixed'
+      ? 'Fixed, but empty — nothing is enforced yet. Add a value below to start restricting this namespace.'
+      : 'No values yet. Add some below to offer them as autocomplete suggestions when tagging.'
+  }
+  return mode === 'fixed'
+    ? 'Only these values are accepted for this namespace — enforced everywhere, including for AI agents.'
+    : 'Shown as autocomplete suggestions when tagging. Any value is still accepted.'
+}
 
 onMounted(() => {
   if (!tagSettings.loaded) tagSettings.fetchNamespaces()
@@ -82,59 +111,57 @@ async function save() {
         style="background:var(--hm-bg-elevated); border:0.5px solid var(--hm-border-subtle)">
         <div class="flex items-center gap-2 mb-3">
           <TagChip :tag="`${name}:example`" />
-          <span class="font-mono flex-1" style="font-size:11px; color:var(--hm-text-secondary)">{{ name }}</span>
+          <span class="font-mono flex-1" style="font-size:12px; color:var(--hm-text-secondary)">{{ name }}</span>
           <button v-if="pendingDelete !== name" class="hm-btn hm-btn-ghost hm-btn-sm"
             style="color:var(--hm-text-tertiary)" @click="askDeleteNamespace(name)">Remove</button>
           <template v-else>
-            <span style="font-size:11px; color:var(--hm-text-tertiary)">Remove {{ name }}:*?</span>
+            <span style="font-size:12px; color:var(--hm-text-tertiary)">Remove {{ name }}:*?</span>
             <button class="hm-btn hm-btn-danger hm-btn-sm" @click="askDeleteNamespace(name)">Confirm</button>
             <button class="hm-btn hm-btn-ghost hm-btn-sm" @click="pendingDelete = null">Cancel</button>
           </template>
         </div>
 
-        <input class="hm-input mb-3" style="font-size:11px"
+        <input class="hm-input mb-4" style="font-size:12px"
           v-model="ns.description" placeholder="What does this namespace mean? Shown to AI agents and in this UI." />
 
-        <div class="flex items-center gap-1.5 mb-3">
+        <p class="hm-label" style="margin-bottom:8px">COLOR</p>
+        <div class="flex items-center gap-1.5 mb-4">
           <button v-for="c in SWATCHES" :key="c"
             class="rounded-full"
             style="width:16px; height:16px; border:1px solid var(--hm-border-default); flex-shrink:0"
             :style="{ background: c, outline: ns.color === c ? '2px solid var(--hm-accent)' : 'none', outlineOffset: '1px' }"
             :aria-label="`Use color ${c}`"
             @click="setColor(name, c)"></button>
-          <input class="hm-input font-mono" style="width:88px; height:22px; font-size:10px; padding:0 6px"
+          <input class="hm-input font-mono" style="width:98px; height:24px; font-size:11px; padding:0 6px"
             v-model="ns.color"
             :style="!HEX_RE.test(ns.color) ? `border-color:var(--hm-danger-border)` : ''" />
         </div>
 
-        <label class="flex items-center gap-2 mb-3 cursor-pointer">
+        <label class="flex items-center gap-2 mb-4 cursor-pointer">
           <input type="checkbox" v-model="ns.single_value" class="w-3.5 h-3.5" />
-          <span style="font-size:11px; color:var(--hm-text-secondary)">
+          <span style="font-size:12px; color:var(--hm-text-secondary)">
             Only one {{ name }}:* tag per memory
           </span>
         </label>
 
-        <div class="flex flex-wrap items-center gap-1.5 mb-2">
+        <div class="flex items-center justify-between" style="margin-bottom:8px">
+          <p class="hm-label" style="margin-bottom:0">VALUES</p>
+          <div class="seg" role="radiogroup" :aria-label="`How ${name} values are enforced`">
+            <button type="button" class="seg-btn" :class="{ 'seg-btn--active': (ns.values_mode || 'suggestion') === 'suggestion' }"
+              @click="ns.values_mode = 'suggestion'"
+              @mouseenter="showValuesModeTooltip($event, 'suggestion')" @mouseleave="hideValuesModeTooltip">Suggestions</button>
+            <button type="button" class="seg-btn" :class="{ 'seg-btn--active': ns.values_mode === 'fixed' }"
+              @click="ns.values_mode = 'fixed'"
+              @mouseenter="showValuesModeTooltip($event, 'fixed')" @mouseleave="hideValuesModeTooltip">Fixed</button>
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-1.5 mb-1.5">
           <TagChip v-for="v in ns.values" :key="v" :tag="`${name}:${v}`" removable @remove="removeValue(name, v)" />
-          <input class="hm-input" style="width:100px; height:22px; font-size:10px; padding:0 6px"
-            v-model="newValueInput[name]" placeholder="add value"
+          <input class="hm-input" style="width:120px; height:24px; font-size:11px; padding:0 6px"
+            v-model="newValueInput[name]" placeholder="Add a value…"
             @keydown.enter="addValue(name)" />
         </div>
-
-        <div v-if="ns.values.length" class="flex items-center gap-4" style="font-size:11px; color:var(--hm-text-secondary)">
-          <label class="flex items-center gap-1.5 cursor-pointer">
-            <input type="radio" :name="`values-mode-${name}`" class="w-3 h-3"
-              :checked="(ns.values_mode || 'suggestion') === 'suggestion'"
-              @change="ns.values_mode = 'suggestion'" />
-            Suggestions — free text still allowed
-          </label>
-          <label class="flex items-center gap-1.5 cursor-pointer">
-            <input type="radio" :name="`values-mode-${name}`" class="w-3 h-3"
-              :checked="ns.values_mode === 'fixed'"
-              @change="ns.values_mode = 'fixed'" />
-            Fixed — only listed values allowed
-          </label>
-        </div>
+        <p style="font-size:11px; color:var(--hm-text-tertiary)">{{ valuesCaption(ns) }}</p>
       </div>
 
       <div class="flex items-center gap-2 mb-4 rounded-md p-3"
@@ -151,5 +178,45 @@ async function save() {
         <span v-if="error" style="font-size:11px; color:var(--hm-danger)">{{ error }}</span>
       </div>
     </template>
+    <Tooltip :visible="valuesModeTooltip.visible" :text="valuesModeTooltip.text"
+      :x="valuesModeTooltip.x" :y="valuesModeTooltip.y" />
   </div>
 </template>
+
+<style scoped>
+.seg {
+  display: inline-flex;
+  border-radius: 5px;
+  border: 0.5px solid var(--hm-border-default);
+  overflow: hidden;
+}
+
+.seg-btn {
+  border: none;
+  background: transparent;
+  color: var(--hm-text-tertiary);
+  font-size: 11px;
+  font-family: var(--hm-font-mono);
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.seg-btn + .seg-btn {
+  border-left: 0.5px solid var(--hm-border-default);
+}
+
+.seg-btn:hover {
+  color: var(--hm-text-secondary);
+}
+
+.seg-btn--active {
+  background: var(--hm-bg-overlay);
+  color: var(--hm-text-primary);
+}
+
+.seg-btn:focus-visible {
+  outline: 2px solid var(--hm-accent);
+  outline-offset: -2px;
+}
+</style>

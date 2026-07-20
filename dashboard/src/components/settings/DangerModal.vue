@@ -32,7 +32,7 @@ async function handleClear() {
     <div class="rounded-lg p-6 w-96"
       style="background:var(--hm-bg-overlay); border:0.5px solid var(--hm-danger-border)">
       <h3 class="mb-2 font-medium" style="font-size:14px; color:var(--hm-text-primary)">Confirm deletion</h3>
-      <p class="mb-4" style="font-size:12px; color:var(--hm-text-secondary)">
+      <p class="mb-4" style="font-size:13px; color:var(--hm-text-secondary)">
         This will permanently delete all {{ memories.all.length }} memories, edges, tags, and feedback.
         This cannot be undone.
       </p>
