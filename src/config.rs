@@ -212,7 +212,9 @@ impl AgentKind {
             "claude" => Ok(AgentKind::Claude),
             "opencode" => Ok(AgentKind::OpenCode),
             other => {
-                anyhow::bail!("unknown [agent] kind \"{other}\" (expected \"claude\" or \"opencode\")")
+                anyhow::bail!(
+                    "unknown [agent] kind \"{other}\" (expected \"claude\" or \"opencode\")"
+                )
             }
         }
     }
@@ -805,11 +807,7 @@ mod tests {
     #[test]
     fn agent_kind_defaults_to_opencode_when_command_looks_like_it() {
         let tmp = tempfile::tempdir().unwrap();
-        write(
-            tmp.path(),
-            "config.toml",
-            "[agent]\ncommand=\"opencode\"\n",
-        );
+        write(tmp.path(), "config.toml", "[agent]\ncommand=\"opencode\"\n");
         let s = load_server_settings(&tmp.path().join("config.toml")).unwrap();
         assert_eq!(s.agent.kind, AgentKind::OpenCode);
     }
@@ -817,11 +815,7 @@ mod tests {
     #[test]
     fn agent_kind_rejects_unknown_value() {
         let tmp = tempfile::tempdir().unwrap();
-        write(
-            tmp.path(),
-            "config.toml",
-            "[agent]\nkind=\"gpt\"\n",
-        );
+        write(tmp.path(), "config.toml", "[agent]\nkind=\"gpt\"\n");
         let err = load_server_settings(&tmp.path().join("config.toml")).unwrap_err();
         assert!(err.to_string().contains("unknown [agent] kind"));
     }

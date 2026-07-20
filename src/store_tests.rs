@@ -81,7 +81,12 @@ async fn store_rejects_more_than_one_project_tag() {
 async fn store_rejects_empty_tag() {
     let (s, _dir) = make_store().await;
     let result = s
-        .store(&test_row("mem_empty_tag", "Title", "content", &["  ".into()]))
+        .store(&test_row(
+            "mem_empty_tag",
+            "Title",
+            "content",
+            &["  ".into()],
+        ))
         .await;
     assert!(result.is_err());
 }

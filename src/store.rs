@@ -207,7 +207,9 @@ fn validate_tag_format(tags: &[String]) -> Result<()> {
             return Err(anyhow!("tag must not be empty or whitespace-only"));
         }
         if t.len() > MAX_TAG_LEN {
-            return Err(anyhow!("tag exceeds max length of {MAX_TAG_LEN} chars: {t:?}"));
+            return Err(anyhow!(
+                "tag exceeds max length of {MAX_TAG_LEN} chars: {t:?}"
+            ));
         }
     }
     Ok(())

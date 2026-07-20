@@ -26,7 +26,9 @@ pub async fn run_turn(
             // attacker-controlled message text.
             run_opencode_turn(agent, prompt, resume).await
         }
-        AgentKind::Claude => run_claude_turn(agent, hivemind_bin, prompt, resume, system_prompt).await,
+        AgentKind::Claude => {
+            run_claude_turn(agent, hivemind_bin, prompt, resume, system_prompt).await
+        }
     }
 }
 
