@@ -6,11 +6,11 @@ export const useTagSettingsStore = defineStore('tagSettings', () => {
   const namespaces = ref({})
   const loaded = ref(false)
   // Which namespace names are predefined (built into HiveMind) vs
-  // user-created — drives the "predefined" label and hides the Remove
+  // user-created. Drives the "predefined" label and hides the Remove
   // button in the settings UI. Authoritative list comes from the backend
   // (default_tag_namespaces()), not duplicated here.
   const predefined = ref([])
-  // Whether the predefined-namespace guard is active — set false via
+  // Whether the predefined-namespace guard is active. Set false via
   // [tags] guard_predefined_namespaces = false in the global hivemind
   // config to allow editing/deleting predefined namespaces again.
   const guardPredefinedNamespaces = ref(true)

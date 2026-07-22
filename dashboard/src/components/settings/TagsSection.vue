@@ -15,7 +15,7 @@ const pendingDelete = ref(null)
 const valuesModeTooltip = ref({ visible: false, x: 0, y: 0, text: '' })
 
 // Predefined namespaces are fully read-only in this UI while the guard is
-// active — color, description, single_value, values_mode, and values all
+// active: color, description, single_value, values_mode, and values all
 // locked. Disable the guard via [tags] guard_predefined_namespaces = false
 // in the global hivemind config to edit them here again.
 function isLocked(name) {
@@ -26,7 +26,7 @@ const SWATCHES = ['#4a9eff', '#e0607e', '#5fb8b0', '#a875d1', '#1d9e75', '#7f77d
 const HEX_RE = /^#[0-9a-fA-F]{3,8}$/
 const VALUES_MODE_HELP = {
   suggestion: 'The listed values show up as autocomplete suggestions, but any typed value is still accepted.',
-  fixed: 'Only the listed values are accepted — tagging with anything else is rejected, for AI agents too.',
+  fixed: 'Only the listed values are accepted. Tagging with anything else is rejected, for AI agents too.',
 }
 
 function showValuesModeTooltip(e, mode) {
@@ -44,11 +44,11 @@ function valuesCaption(ns) {
   const mode = ns.values_mode || 'suggestion'
   if (!ns.values.length) {
     return mode === 'fixed'
-      ? 'Fixed, but empty — nothing is enforced yet. Add a value below to start restricting this namespace.'
+      ? 'Fixed, but empty, so nothing is enforced yet. Add a value below to start restricting this namespace.'
       : 'No values yet. Add some below to offer them as autocomplete suggestions when tagging.'
   }
   return mode === 'fixed'
-    ? 'Only these values are accepted for this namespace — enforced everywhere, including for AI agents.'
+    ? 'Only these values are accepted for this namespace, enforced everywhere, including for AI agents.'
     : 'Shown as autocomplete suggestions when tagging. Any value is still accepted.'
 }
 
@@ -97,7 +97,7 @@ async function save() {
     await tagSettings.save()
     ui.showToast('Tag namespaces saved')
   } catch {
-    error.value = 'Save failed — check namespace colors and values, then try again.'
+    error.value = 'Save failed. Check namespace colors and values, then try again.'
   } finally {
     saving.value = false
   }
@@ -118,13 +118,13 @@ async function save() {
       <div v-for="(ns, name) in tagSettings.namespaces" :key="name" class="rounded-md mb-3 p-3"
         style="background:var(--hm-bg-elevated); border:0.5px solid var(--hm-border-subtle)">
         <div class="flex items-center gap-2 mb-3">
-          <TagChip :tag="`${name}:example`" />
-          <span class="font-mono flex-1" style="font-size:12px; color:var(--hm-text-secondary)">{{ name }}</span>
+          <TagChip :tag="`${name}:example`" size="md" />
           <span v-if="tagSettings.isPredefined(name)" class="font-mono rounded-sm px-1.5 py-0.5"
-            style="font-size:9px; background:var(--hm-bg-elevated); color:var(--hm-text-tertiary); border:0.5px solid var(--hm-border-subtle)"
-            :title="isLocked(name) ? 'Built into HiveMind — locked from deletion/edits. Disable via [tags] guard_predefined_namespaces = false in the global config.' : 'Built into HiveMind, but the guard is currently disabled — editable/removable.'">
+            style="font-size:12px; background:var(--hm-bg-elevated); color:var(--hm-text-tertiary); border:0.5px solid var(--hm-border-subtle)"
+            :title="isLocked(name) ? 'Built into HiveMind, locked from deletion/edits. Disable via [tags] guard_predefined_namespaces = false in the global config.' : 'Built into HiveMind, but the guard is currently disabled, so it is editable/removable.'">
             PREDEFINED
           </span>
+          <span class="flex-1"></span>
           <template v-if="!isLocked(name)">
             <button v-if="pendingDelete !== name" class="hm-btn hm-btn-ghost hm-btn-sm"
               style="color:var(--hm-text-tertiary)" @click="askDeleteNamespace(name)">Remove</button>
@@ -136,47 +136,61 @@ async function save() {
           </template>
         </div>
 
-        <input class="hm-input mb-4" style="font-size:12px" :disabled="isLocked(name)"
-          v-model="ns.description" placeholder="What does this namespace mean? Shown to AI agents and in this UI." />
+        <textarea class="hm-input mb-4 resize-none" style="font-size:12px; height:auto; padding:8px 10px; white-space:pre-wrap"
+          rows="2" :disabled="isLocked(name)"
+          v-model="ns.description" placeholder="What does this namespace mean? Shown to AI agents and in this UI."></textarea>
 
         <p class="hm-label" style="margin-bottom:8px">COLOR</p>
-        <div class="flex items-center gap-1.5 mb-4">
+        <div v-if="isLocked(name)" class="flex items-center gap-1.5 mb-4">
+          <span class="rounded-full" style="width:16px; height:16px; border:1px solid var(--hm-border-default); flex-shrink:0"
+            :style="{ background: ns.color }"></span>
+          <span class="font-mono" style="font-size:11px; color:var(--hm-text-secondary)">{{ ns.color }}</span>
+        </div>
+        <div v-else class="flex items-center gap-1.5 mb-4">
           <button v-for="c in SWATCHES" :key="c"
-            class="rounded-full" :disabled="isLocked(name)"
+            class="rounded-full"
             style="width:16px; height:16px; border:1px solid var(--hm-border-default); flex-shrink:0"
             :style="{ background: c, outline: ns.color === c ? '2px solid var(--hm-accent)' : 'none', outlineOffset: '1px' }"
             :aria-label="`Use color ${c}`"
             @click="setColor(name, c)"></button>
           <input class="hm-input font-mono" style="width:98px; height:24px; font-size:11px; padding:0 6px"
-            v-model="ns.color" :disabled="isLocked(name)"
+            v-model="ns.color"
             :style="!HEX_RE.test(ns.color) ? `border-color:var(--hm-danger-border)` : ''" />
         </div>
 
-        <label class="flex items-center gap-2 mb-4 cursor-pointer">
-          <input type="checkbox" v-model="ns.single_value" class="w-3.5 h-3.5" :disabled="isLocked(name)" />
+        <label class="flex items-center gap-2 mb-4" :class="isLocked(name) ? 'cursor-not-allowed' : 'cursor-pointer'">
+          <input type="checkbox" v-model="ns.single_value" class="w-3.5 h-3.5" :disabled="isLocked(name)"
+            :class="isLocked(name) ? 'cursor-not-allowed' : ''" />
           <span style="font-size:12px; color:var(--hm-text-secondary)">
             Only one {{ name }}:* tag per memory
           </span>
         </label>
 
-        <div class="flex items-center justify-between" style="margin-bottom:8px">
-          <p class="hm-label" style="margin-bottom:0">VALUES</p>
-          <div class="seg" role="radiogroup" :aria-label="`How ${name} values are enforced`">
-            <button type="button" class="seg-btn" :disabled="isLocked(name)" :class="{ 'seg-btn--active': (ns.values_mode || 'suggestion') === 'suggestion' }"
-              @click="ns.values_mode = 'suggestion'"
-              @mouseenter="showValuesModeTooltip($event, 'suggestion')" @mouseleave="hideValuesModeTooltip">Suggestions</button>
-            <button type="button" class="seg-btn" :disabled="isLocked(name)" :class="{ 'seg-btn--active': ns.values_mode === 'fixed' }"
-              @click="ns.values_mode = 'fixed'"
-              @mouseenter="showValuesModeTooltip($event, 'fixed')" @mouseleave="hideValuesModeTooltip">Fixed</button>
+        <template v-if="!isLocked(name) || ns.values.length">
+          <div class="flex items-center justify-between" style="margin-bottom:8px">
+            <p class="hm-label" style="margin-bottom:0">VALUES</p>
+            <div v-if="!isLocked(name)" class="seg" role="radiogroup" :aria-label="`How ${name} values are enforced`">
+              <button type="button" class="seg-btn" :class="{ 'seg-btn--active': (ns.values_mode || 'suggestion') === 'suggestion' }"
+                @click="ns.values_mode = 'suggestion'"
+                @mouseenter="showValuesModeTooltip($event, 'suggestion')" @mouseleave="hideValuesModeTooltip">Suggestions</button>
+              <button type="button" class="seg-btn" :class="{ 'seg-btn--active': ns.values_mode === 'fixed' }"
+                @click="ns.values_mode = 'fixed'"
+                @mouseenter="showValuesModeTooltip($event, 'fixed')" @mouseleave="hideValuesModeTooltip">Fixed</button>
+            </div>
+            <div v-else class="seg">
+              <span class="seg-btn seg-btn--active" style="cursor:default">
+                {{ (ns.values_mode || 'suggestion') === 'fixed' ? 'Fixed' : 'Suggestions' }}
+              </span>
+            </div>
           </div>
-        </div>
-        <div class="flex flex-wrap items-center gap-1.5 mb-1.5">
-          <TagChip v-for="v in ns.values" :key="v" :tag="`${name}:${v}`" :removable="!isLocked(name)" @remove="removeValue(name, v)" />
-          <input v-if="!isLocked(name)" class="hm-input" style="width:120px; height:24px; font-size:11px; padding:0 6px"
-            v-model="newValueInput[name]" placeholder="Add a value…"
-            @keydown.enter="addValue(name)" />
-        </div>
-        <p style="font-size:11px; color:var(--hm-text-tertiary)">{{ valuesCaption(ns) }}</p>
+          <div class="flex flex-wrap items-center gap-1.5 mb-1.5">
+            <TagChip v-for="v in ns.values" :key="v" :tag="`${name}:${v}`" :removable="!isLocked(name)" @remove="removeValue(name, v)" />
+            <input v-if="!isLocked(name)" class="hm-input" style="width:120px; height:24px; font-size:11px; padding:0 6px"
+              v-model="newValueInput[name]" placeholder="Add a value…"
+              @keydown.enter="addValue(name)" />
+          </div>
+          <p style="font-size:11px; color:var(--hm-text-tertiary)">{{ valuesCaption(ns) }}</p>
+        </template>
       </div>
 
       <div class="flex items-center gap-2 mb-4 rounded-md p-3"

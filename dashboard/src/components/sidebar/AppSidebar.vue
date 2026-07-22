@@ -93,7 +93,7 @@ const syncDot = computed(() => {
     <ul class="flex flex-col py-3">
       <li v-for="item in navItems" :key="item.id">
         <button
-          @click="ui.activeView = item.id"
+          @click="ui.requestActiveView(item.id)"
           class="nav-item"
           :class="{ 'nav-item--active': ui.activeView === item.id }"
           :aria-current="ui.activeView === item.id ? 'page' : undefined"

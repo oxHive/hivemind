@@ -3,7 +3,14 @@ import { computed, ref, nextTick } from 'vue'
 import { PhX } from '@phosphor-icons/vue'
 import { useTagSettingsStore } from '../../stores/tagSettings.js'
 
-const props = defineProps({ tag: String, removable: Boolean, editable: Boolean })
+const props = defineProps({
+  tag: String,
+  removable: Boolean,
+  editable: Boolean,
+  // 'sm' (default, 10px) for dense lists/filters; 'md' (12px) for standalone
+  // previews like the namespace example chip in Settings > Tags.
+  size: { type: String, default: 'sm' },
+})
 const emit = defineEmits(['remove', 'edit'])
 
 const tagSettings = useTagSettingsStore()
@@ -44,16 +51,16 @@ function cancelEdit() {
       @keydown.esc="cancelEdit"
       @blur="commitEdit" />
   </span>
-  <span v-else class="inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[10px] font-mono"
-    :style="color
+  <span v-else class="inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 font-mono"
+    :style="`font-size:${size === 'md' ? '12px' : '10px'}; ${color
       ? `background:${color}22; color:${color}; border:0.5px solid ${color}55`
-      : 'background:var(--hm-bg-elevated); color:var(--hm-text-tertiary); border:0.5px solid var(--hm-border-subtle)'"
+      : 'background:var(--hm-bg-elevated); color:var(--hm-text-tertiary); border:0.5px solid var(--hm-border-subtle)'}`"
     @dblclick="startEdit">
     {{ tag }}
     <button v-if="removable" @click.stop="$emit('remove')" aria-label="Remove tag"
       class="inline-flex items-center tag-remove-btn"
       :style="color ? `color:${color}` : 'color:var(--hm-text-tertiary)'">
-      <PhX :size="10" weight="bold" />
+      <PhX :size="size === 'md' ? 12 : 10" weight="bold" />
     </button>
   </span>
 </template>

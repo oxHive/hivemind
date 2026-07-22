@@ -9,6 +9,30 @@ export const useUiStore = defineStore('ui', () => {
   const syncInfo = ref(null)
   const toast = ref({ message: '', visible: false })
 
+  // Lets a view (currently: Settings > Tags) veto a top-level view switch
+  // while it has unsaved edits. Set to a () => boolean function that
+  // returns true if it's safe to navigate away (prompting the user itself
+  // if needed), false to cancel the navigation. Only one guard at a time;
+  // registered/cleared by the view that owns the unsaved state.
+  const navigationGuard = ref(null)
+
+  function registerNavigationGuard(fn) {
+    navigationGuard.value = fn
+  }
+
+  function clearNavigationGuard() {
+    navigationGuard.value = null
+  }
+
+  // Use this instead of assigning `activeView` directly from anywhere a
+  // user-initiated navigation can happen (sidebar clicks, hash changes,
+  // "back to memories" shortcuts) so the guard actually gets a chance to run.
+  function requestActiveView(view) {
+    if (view === activeView.value) return
+    if (navigationGuard.value && !navigationGuard.value()) return
+    activeView.value = view
+  }
+
   let toastTimer = null
 
   function showToast(message, duration = 2200) {
@@ -33,5 +57,9 @@ export const useUiStore = defineStore('ui', () => {
     }
   }
 
-  return { activeView, serverStatus, serverInfo, syncInfo, toast, showToast, copyToClipboard, pollServerStatus }
+  return {
+    activeView, serverStatus, serverInfo, syncInfo, toast,
+    registerNavigationGuard, clearNavigationGuard, requestActiveView,
+    showToast, copyToClipboard, pollServerStatus,
+  }
 })

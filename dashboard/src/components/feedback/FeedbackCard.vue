@@ -20,7 +20,7 @@ function navToMemory() {
   const mem = memories.all.find(m => m.id === props.item.memory_id)
   if (mem) {
     memories.select(mem)
-    ui.activeView = 'memories'
+    ui.requestActiveView('memories')
   }
 }
 </script>

@@ -6,6 +6,7 @@ import { useGraphStore } from './stores/graph.js'
 import { useFeedbackStore } from './stores/feedback.js'
 import { useTagSettingsStore } from './stores/tagSettings.js'
 import { useThemeStore } from './stores/theme.js'
+import { useFontScaleStore } from './stores/fontScale.js'
 import { useAnalyticsStore } from './stores/analytics.js'
 import { useSuggestStore } from './stores/suggest.js'
 import { useUpdateStore } from './stores/update.js'
@@ -29,6 +30,7 @@ const analytics = useAnalyticsStore()
 const suggest = useSuggestStore()
 const update = useUpdateStore()
 useThemeStore() // applies data-theme to <html> as soon as the store is created
+useFontScaleStore() // applies zoom to <html> as soon as the store is created
 
 const VIEWS = ['analytics', 'memories', 'graph', 'feedback', 'settings']
 const apiBase = window.HIVEMIND_API || 'http://localhost:3456'
@@ -37,7 +39,7 @@ let eventSource
 
 function applyHash() {
   const h = location.hash.replace('#/', '')
-  if (VIEWS.includes(h)) ui.activeView = h
+  if (VIEWS.includes(h)) ui.requestActiveView(h)
 }
 
 watch(() => ui.activeView, v => { location.hash = '#/' + v })

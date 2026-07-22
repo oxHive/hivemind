@@ -15,7 +15,7 @@ async function handleClear() {
   working.value = true
   try {
     await memories.clearAll()
-    ui.activeView = 'memories'
+    ui.requestActiveView('memories')
     ui.showToast('All memories deleted')
     confirmText.value = ''
   } catch {
