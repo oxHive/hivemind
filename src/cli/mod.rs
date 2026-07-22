@@ -71,6 +71,9 @@ pub enum ServiceAction {
         /// Also install the Matrix bot unit (requires `hivemind matrix login` first)
         #[arg(long)]
         matrix: bool,
+        /// Enable Hive Mode (requires [hive] enabled = true in the global config first)
+        #[arg(long)]
+        hive: bool,
     },
     /// Stop and remove the HiveMind background service
     Uninstall,

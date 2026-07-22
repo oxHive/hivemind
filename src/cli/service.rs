@@ -4,11 +4,11 @@ use std::path::{Path, PathBuf};
 
 // ── service management ────────────────────────────────────────────────────────
 
-pub fn cmd_service_install(dashboard: bool, matrix: bool) -> Result<()> {
+pub fn cmd_service_install(dashboard: bool, matrix: bool, hive: bool) -> Result<()> {
     #[cfg(target_os = "macos")]
-    return service_install_macos(dashboard, matrix);
+    return service_install_macos(dashboard, matrix, hive);
     #[cfg(target_os = "linux")]
-    return service_install_linux(dashboard, matrix);
+    return service_install_linux(dashboard, matrix, hive);
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     anyhow::bail!("hivemind service install is only supported on Linux and macOS");
 }
@@ -154,7 +154,7 @@ fn service_status_unit_linux(unit_name: &str) -> Result<()> {
 }
 
 #[cfg(target_os = "linux")]
-fn service_install_linux(dashboard: bool, matrix: bool) -> Result<()> {
+fn service_install_linux(dashboard: bool, matrix: bool, hive: bool) -> Result<()> {
     let (args, desc): (&[&str], &str) = if dashboard {
         (&["up"], "HiveMind server (API + dashboard)")
     } else {
@@ -178,6 +178,23 @@ fn service_install_linux(dashboard: bool, matrix: bool) -> Result<()> {
             "HiveMind Matrix chat bot",
             &["matrix", "run"],
         )?;
+    }
+
+    if hive {
+        let configured = crate::config::load_server_settings(&crate::config::global_config_path())
+            .map(|s| s.hive.enabled)
+            .unwrap_or(false);
+        if !configured {
+            anyhow::bail!(
+                "--hive was passed but Hive Mode is not enabled.\n\
+                 Set [hive] enabled = true in ~/.config/hivemind/config.toml first, \
+                 then re-run `hivemind service install --hive`."
+            );
+        }
+        // Hive sync runs inside the main `hivemind up` process (unlike the Matrix
+        // bot, which is a wholly separate daemon) -- no separate systemd unit to
+        // install here. This block exists purely as the same fail-fast precondition
+        // check the --matrix flag already does, for consistency.
     }
 
     println!();
@@ -360,7 +377,7 @@ fn service_status_unit_macos(label: &str) -> Result<()> {
 }
 
 #[cfg(target_os = "macos")]
-fn service_install_macos(dashboard: bool, matrix: bool) -> Result<()> {
+fn service_install_macos(dashboard: bool, matrix: bool, hive: bool) -> Result<()> {
     let (args, desc): (&[&str], &str) = if dashboard {
         (&["up"], "HiveMind server (API + dashboard)")
     } else {
@@ -384,6 +401,23 @@ fn service_install_macos(dashboard: bool, matrix: bool) -> Result<()> {
             &["matrix", "run"],
             "HiveMind Matrix chat bot",
         )?;
+    }
+
+    if hive {
+        let configured = crate::config::load_server_settings(&crate::config::global_config_path())
+            .map(|s| s.hive.enabled)
+            .unwrap_or(false);
+        if !configured {
+            anyhow::bail!(
+                "--hive was passed but Hive Mode is not enabled.\n\
+                 Set [hive] enabled = true in ~/.config/hivemind/config.toml first, \
+                 then re-run `hivemind service install --hive`."
+            );
+        }
+        // Hive sync runs inside the main `hivemind up` process (unlike the Matrix
+        // bot, which is a wholly separate daemon) -- no separate systemd unit to
+        // install here. This block exists purely as the same fail-fast precondition
+        // check the --matrix flag already does, for consistency.
     }
 
     println!();
