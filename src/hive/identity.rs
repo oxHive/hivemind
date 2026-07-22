@@ -15,6 +15,18 @@ fn device_id_from_public_key(vk: &VerifyingKey) -> String {
     format!("hive_{}", hex::encode(&vk.to_bytes()[..16]))
 }
 
+/// Derives the device id from a hex-encoded public key, returning `None` if
+/// the hex string cannot be decoded into a valid public key. This is the
+/// single source of truth for the device_id/public_key relationship shared
+/// with callers (e.g. `roster::verify_join_record`) that only have the
+/// public key in hex form.
+pub(crate) fn device_id_from_public_key_hex(public_key_hex: &str) -> Option<String> {
+    let bytes = hex::decode(public_key_hex).ok()?;
+    let bytes: [u8; 32] = bytes.try_into().ok()?;
+    let vk = VerifyingKey::from_bytes(&bytes).ok()?;
+    Some(device_id_from_public_key(&vk))
+}
+
 pub fn public_key_hex(identity: &DeviceIdentity) -> String {
     hex::encode(identity.signing_key.verifying_key().to_bytes())
 }

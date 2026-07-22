@@ -25,11 +25,9 @@ pub fn verify_join_record(record: &JoinRecord) -> bool {
     if !identity::verify(&record.public_key, message.as_bytes(), &record.signature) {
         return false;
     }
-    let expected_device_id = format!("hive_{}", {
-        let Ok(bytes) = hex::decode(&record.public_key) else { return false };
-        if bytes.len() < 16 { return false; }
-        hex::encode(&bytes[..16])
-    });
+    let Some(expected_device_id) = identity::device_id_from_public_key_hex(&record.public_key) else {
+        return false;
+    };
     record.device_id == expected_device_id
 }
 
@@ -98,14 +96,29 @@ mod tests {
 
     #[test]
     fn join_record_rejects_device_id_public_key_mismatch() {
-        let a = identity::generate();
-        let b = identity::generate();
-        let mut record = create_join_record(&a, "alice-laptop", 1000);
-        record.public_key = identity::public_key_hex(&b);
-        // Signature no longer matches the (now swapped) public key either,
-        // but this also independently fails the device_id/public_key
-        // consistency check even if signature verification were somehow bypassed.
-        assert!(!verify_join_record(&record));
+        let identity = identity::generate();
+        let public_key = identity::public_key_hex(&identity);
+        let fake_device_id = "hive_00000000000000000000000000000000";
+        let name = "alice-laptop";
+        let joined_at = 1000i64;
+        // Sign a message that is internally consistent with what verify_join_record
+        // will reconstruct, EXCEPT the device_id doesn't match the public_key's
+        // real derivation -- the signature itself is genuinely valid over these
+        // exact (wrong) fields, isolating the device_id/public_key cross-check
+        // from the signature check.
+        let message = format!("join:{}:{}:{}:{}", fake_device_id, public_key, name, joined_at);
+        let signature = identity::sign(&identity, message.as_bytes());
+        let record = JoinRecord {
+            device_id: fake_device_id.to_string(),
+            public_key,
+            name: name.to_string(),
+            joined_at,
+            signature,
+        };
+        assert!(
+            !verify_join_record(&record),
+            "a validly-signed record with a device_id inconsistent with its own public_key must still be rejected"
+        );
     }
 
     #[test]
