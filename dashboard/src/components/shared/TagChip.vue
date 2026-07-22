@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, nextTick } from 'vue'
+import { PhX } from '@phosphor-icons/vue'
 import { useTagSettingsStore } from '../../stores/tagSettings.js'
 
 const props = defineProps({ tag: String, removable: Boolean, editable: Boolean })
@@ -49,9 +50,11 @@ function cancelEdit() {
       : 'background:var(--hm-bg-elevated); color:var(--hm-text-tertiary); border:0.5px solid var(--hm-border-subtle)'"
     @dblclick="startEdit">
     {{ tag }}
-    <button v-if="removable" @click.stop="$emit('remove')"
-      class="leading-none tag-remove-btn"
-      :style="color ? `color:${color}` : 'color:var(--hm-text-tertiary)'">×</button>
+    <button v-if="removable" @click.stop="$emit('remove')" aria-label="Remove tag"
+      class="inline-flex items-center tag-remove-btn"
+      :style="color ? `color:${color}` : 'color:var(--hm-text-tertiary)'">
+      <PhX :size="10" weight="bold" />
+    </button>
   </span>
 </template>
 

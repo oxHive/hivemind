@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
+import { PhDownloadSimple, PhFlag } from '@phosphor-icons/vue'
 import { useMemoriesStore } from '../../stores/memories.js'
 import { useUiStore } from '../../stores/ui.js'
 import { useGraphStore } from '../../stores/graph.js'
@@ -219,11 +220,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
             :disabled="!canDownload"
             :title="memories.dirty ? 'Save changes before downloading' : 'Download as Markdown'"
             @click="downloadMarkdown">
-            <span aria-hidden="true">⭳</span> Download
+            <PhDownloadSimple :size="14" /> Download
           </button>
           <div class="relative">
-            <button class="hm-btn hm-btn-ghost hm-btn-sm" style="font-size:15px" title="Flag for review"
-              @click="flagOpen = !flagOpen" @keydown.esc="flagOpen = false">⚑</button>
+            <button class="hm-btn hm-btn-ghost hm-btn-sm" title="Flag for review"
+              @click="flagOpen = !flagOpen" @keydown.esc="flagOpen = false">
+              <PhFlag :size="14" />
+            </button>
             <div v-if="flagOpen" class="fixed inset-0" style="z-index:9" @click="flagOpen = false"></div>
             <div v-if="flagOpen" class="absolute right-0 mt-1 rounded-md py-1"
               style="background:var(--hm-bg-overlay); border:0.5px solid var(--hm-border-default); z-index:10">

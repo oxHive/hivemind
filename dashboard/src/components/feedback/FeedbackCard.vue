@@ -1,4 +1,5 @@
 <script setup>
+import { PhX } from '@phosphor-icons/vue'
 import { useUiStore } from '../../stores/ui.js'
 import { useFeedbackStore } from '../../stores/feedback.js'
 import { useMemoriesStore } from '../../stores/memories.js'
@@ -38,7 +39,9 @@ function navToMemory() {
           {{ item.title || item.memory_id }}
         </button>
       </div>
-      <button class="hm-btn hm-btn-ghost hm-btn-sm" aria-label="Dismiss feedback" @click="fb.dismissFeedback(item.id)">✕</button>
+      <button class="hm-btn hm-btn-ghost hm-btn-sm" aria-label="Dismiss feedback" @click="fb.dismissFeedback(item.id)">
+        <PhX :size="14" weight="bold" />
+      </button>
     </div>
 
     <p v-if="item.note" style="font-size:12px; color:var(--hm-text-secondary)" class="mb-4">{{ item.note }}</p>

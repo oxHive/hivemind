@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from 'vue'
+import { PhX } from '@phosphor-icons/vue'
 import { useGraphStore } from '../../stores/graph.js'
 import { useMemoriesStore } from '../../stores/memories.js'
 import LayerBadge from '../shared/LayerBadge.vue'
@@ -21,7 +22,9 @@ const node = computed(() => memories.all.find(m => m.id === graph.selectedNodeId
       <div class="flex items-center justify-between px-5 py-2.5"
         style="border-bottom:0.5px solid var(--hm-border-subtle)">
         <span style="font-size:13px; font-weight:500; color:var(--hm-text-primary)">Memory</span>
-        <button class="hm-btn hm-btn-ghost hm-btn-sm" @click="graph.selectedNodeId = null">✕</button>
+        <button class="hm-btn hm-btn-ghost hm-btn-sm" aria-label="Close" @click="graph.selectedNodeId = null">
+          <PhX :size="14" weight="bold" />
+        </button>
       </div>
 
       <div v-if="node" class="flex-1 overflow-y-auto px-5 py-4">

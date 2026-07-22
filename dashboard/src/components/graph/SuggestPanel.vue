@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import { PhX } from '@phosphor-icons/vue'
 import { useGraphStore } from '../../stores/graph.js'
 import { useMemoriesStore } from '../../stores/memories.js'
 import { useSuggestStore } from '../../stores/suggest.js'
@@ -90,7 +91,9 @@ async function endSession() {
       <span style="font-size:13px; font-weight:500; color:var(--hm-text-primary)">
         ✦ Suggestions
       </span>
-      <button class="hm-btn hm-btn-ghost hm-btn-sm" @click="close">✕</button>
+      <button class="hm-btn hm-btn-ghost hm-btn-sm" aria-label="Close" @click="close">
+        <PhX :size="14" weight="bold" />
+      </button>
     </div>
 
     <div v-if="suggest.error" class="px-4 py-2"
