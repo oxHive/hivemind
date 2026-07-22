@@ -54,7 +54,7 @@ ed25519-dalek = { version = "2", features = ["rand_core"] }
 mdns-sd = "0.20.2"
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
 hex = "0.4.3"
-rand = { version = "0.10.2", features = ["std"] }
+rand = { version = "0.8", features = ["std"] }
 
 [dev-dependencies]
 tempfile = "3"

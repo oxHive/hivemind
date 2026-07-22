@@ -3627,7 +3627,7 @@ dependencies = [
  "matrix-sdk",
  "mdns-sd",
  "mime_guess",
- "rand 0.10.2",
+ "rand 0.8.6",
  "ratatui",
  "regex",
  "reqwest",
