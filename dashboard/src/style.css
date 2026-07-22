@@ -113,7 +113,11 @@ body {
 
 .hm-shell {
   display: flex;
-  height: 100vh;
+  /* 100% (not 100vh) so it stays inside the html/body/#app height:100% chain
+     above — `vh` is viewport-relative and immune to the font-scale zoom
+     applied on <html>, so it wouldn't shrink to match everything else that
+     does scale, breaking the sidebar's internal vertical proportions. */
+  height: 100%;
   background: var(--hm-bg-base);
   overflow: hidden;
   min-width: 760px;
