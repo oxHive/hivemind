@@ -55,6 +55,7 @@ mdns-sd = "0.20.2"
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
 hex = "0.4.3"
 rand = { version = "0.8", features = ["std"] }
+rcgen = "0.14.8"
 
 [dev-dependencies]
 tempfile = "3"

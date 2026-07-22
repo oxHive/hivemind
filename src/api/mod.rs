@@ -91,6 +91,7 @@ pub fn router(
     update_state: SharedUpdateState,
     agent: AgentSettings,
     guard_predefined_namespaces: bool,
+    pairing_codes: Arc<crate::hive::pairing::PairingCodeStore>,
 ) -> Router {
     Router::new()
         .route("/api/v1/memories", get(list_memories).post(create_memory))
@@ -149,6 +150,8 @@ pub fn router(
             "/api/v1/suggest-sessions/current/revise",
             post(revise_suggest_session),
         )
+        .route("/api/v1/hive/pair", post(hive_pair))
+        .route("/api/v1/hive/roster", get(hive_roster))
         .with_state(store)
         .layer(Extension(sync))
         .layer(Extension(events))
@@ -158,6 +161,7 @@ pub fn router(
         .layer(Extension(GuardPredefinedNamespaces(
             guard_predefined_namespaces,
         )))
+        .layer(Extension(pairing_codes))
         .layer(
             CorsLayer::new()
                 .allow_origin(localhost_origins(dashboard_origin))
@@ -196,6 +200,7 @@ fn entry_json(e: &crate::store::MemoryEntry) -> Value {
 
 mod edges;
 mod feedback;
+mod hive;
 mod memories;
 mod settings;
 mod status;
@@ -207,6 +212,7 @@ mod update;
 
 use edges::*;
 use feedback::*;
+use hive::*;
 use memories::*;
 use settings::*;
 use status::*;

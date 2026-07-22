@@ -34,6 +34,7 @@ pub fn app_router(
     mcp_url: String,
     update_state: SharedUpdateState,
     guard_predefined_namespaces: bool,
+    pairing_codes: std::sync::Arc<crate::hive::pairing::PairingCodeStore>,
 ) -> Router {
     // Fires whenever a memory or edge is created/updated/deleted, either via
     // an MCP tool call (below) or the REST API (api::router) — the dashboard
@@ -65,6 +66,7 @@ pub fn app_router(
         update_state,
         agent_for_status,
         guard_predefined_namespaces,
+        pairing_codes,
     )
     .nest_service("/mcp", mcp)
 }
@@ -226,6 +228,7 @@ pub async fn run_up(
         h => h,
     };
     let mcp_url = format!("http://{}:{}/mcp", mcp_host, settings.port);
+    let pairing_codes = Arc::new(crate::hive::pairing::PairingCodeStore::new());
     let app = app_router(
         store.clone(),
         settings.sync.clone(),
@@ -236,6 +239,7 @@ pub async fn run_up(
         mcp_url.clone(),
         update_state,
         settings.guard_predefined_namespaces,
+        pairing_codes.clone(),
     );
 
     if !matches!(settings.host.as_str(), "127.0.0.1" | "localhost" | "::1") {
@@ -261,6 +265,28 @@ pub async fn run_up(
     );
     if settings.sync.enabled {
         tracing::info!("Sync:          enabled → {}", settings.sync.remote_url);
+    }
+
+    if settings.hive.enabled {
+        let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])?;
+        let tls_config = axum_server::tls_rustls::RustlsConfig::from_pem(
+            cert.cert.pem().into_bytes(),
+            cert.signing_key.serialize_pem().into_bytes(),
+        )
+        .await?;
+        let hive_app = app.clone(); // same router, served a second time on a TLS port
+        let hive_addr: std::net::SocketAddr =
+            format!("{}:{}", settings.host, settings.port + 1).parse()?;
+        tokio::spawn(async move {
+            axum_server::bind_rustls(hive_addr, tls_config)
+                .serve(hive_app.into_make_service())
+                .await
+        });
+        tracing::info!(
+            "Hive pairing/sync (TLS): https://{}:{}",
+            settings.host,
+            settings.port + 1
+        );
     }
 
     let mut dashboard_url = None;
@@ -471,6 +497,7 @@ mod tests {
                 crate::update::UpdateState::new_idle(),
             )),
             true,
+            std::sync::Arc::new(crate::hive::pairing::PairingCodeStore::new()),
         );
         let resp = app
             .oneshot(
