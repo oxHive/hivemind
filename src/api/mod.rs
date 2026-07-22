@@ -123,6 +123,10 @@ pub fn router(
             "/api/v1/settings/tags",
             get(get_tag_settings).post(save_tag_settings),
         )
+        .route(
+            "/api/v1/settings/content-limits",
+            get(get_content_limit_settings).post(save_content_limit_settings),
+        )
         .route("/api/v1/session-logs", get(list_session_logs))
         .route("/api/v1/status", get(server_status))
         .route("/api/v1/events", get(sse_events))

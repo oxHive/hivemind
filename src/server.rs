@@ -205,6 +205,27 @@ impl HiveMind {
         }
     }
 
+    /// Rejects content whose title+content token count exceeds the
+    /// dashboard-configurable `max_content_tokens` guardrail (default
+    /// `DEFAULT_MAX_CONTENT_TOKENS`). Applied to both `memory_store` and
+    /// `memory_update` so the limit holds on edits too, not just creation.
+    async fn check_content_size(&self, title: &str, content: &str) -> Result<(), ErrorData> {
+        let tokens = crate::budget::count_entry_tokens(title, content) as i64;
+        let limit = self.store.max_content_tokens().await;
+        if tokens > limit {
+            return Err(ErrorData::invalid_params(
+                format!(
+                    "content is {tokens} tokens, exceeds max_content_tokens ({limit}). \
+                     Split into an index memory plus child memories, linked via \
+                     [phrase](child:mem_xxx) — store each child first, then reference \
+                     their real returned ids from the index's content."
+                ),
+                None,
+            ));
+        }
+        Ok(())
+    }
+
     pub async fn do_memory_store(&self, p: MemoryStoreInput) -> Result<CallToolResult, ErrorData> {
         let id = format!("mem_{}", uuid::Uuid::new_v4().simple());
         let title = p.title.clone();
@@ -218,6 +239,8 @@ impl HiveMind {
         memory_type
             .parse::<crate::model::MemoryType>()
             .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
+
+        self.check_content_size(&p.title, &p.content).await?;
 
         self.store
             .store(&crate::store::NewMemoryRow {
@@ -377,6 +400,9 @@ impl HiveMind {
         let title = p.title.as_deref().unwrap_or(&current.title);
         let content = p.content.as_deref().unwrap_or(&current.content);
         let tags = p.tags.as_deref().unwrap_or(&current.tags);
+
+        self.check_content_size(title, content).await?;
+
         let updated = self
             .store
             .update(&p.id, title, content, tags)
@@ -972,7 +998,15 @@ pub(crate) async fn build_suggest_prompt(store: &SqliteStore) -> anyhow::Result<
          (content was edited away from it, the link was a coincidence, or it duplicates/contradicts\n\
          another edge). You cannot reject an edge yourself — only the user can, in the dashboard.\n\
          For each stale one, call memory_update_edge with the edge id and a reason starting with\n\
-         \"STALE:\" explaining why, so it's flagged for the user to review and reject.\n\n\
+         \"STALE:\" explaining why, so it's flagged for the user to review and reject.\n\
+         Some parent/child edges are structural, not organic: they exist because a large\n\
+         piece of content was chunked into an index memory plus child memories, linked via\n\
+         a literal [phrase](child:mem_xxx) already present in the index's content. Identify\n\
+         these by the part tag shown in MEMORIES above (part:index on the parent, part:fragment\n\
+         on the children) rather than guessing from content alone. Do not flag these as stale\n\
+         just because a fragment's narrow content doesn't on its own seem to \"support\" the\n\
+         relationship — the relationship is structural (this fragment IS part of that document),\n\
+         not a semantic claim that needs its own supporting evidence.\n\n\
          STEP 2 — Suggest new connections.\n\
          Identify meaningful connections not yet captured. For each one, call memory_store_edge\n\
          with: source_id, target_id, relationship, status: \"pending\", link_text (a short phrase\n\
@@ -986,6 +1020,10 @@ pub(crate) async fn build_suggest_prompt(store: &SqliteStore) -> anyhow::Result<
          \x20\x20parent  - target is a broader principle/context source falls under\n\
          \x20\x20child   - target is a specific instance of source\n\
          \x20\x20sibling - a peer, no hierarchy\n\
+         Don't re-suggest a connection already implied by chunking structure — e.g. two\n\
+         part:fragment memories of the same part:index are already related by sharing that\n\
+         parent; proposing a new sibling link between them just because they're topically adjacent\n\
+         is redundant. Focus on connections across genuinely different memories/documents.\n\
          Suggest 3-7 connections. Focus on cross-domain insights.\n\n\
          Keep each memory's own content short and focused on what it uniquely knows; these links\n\
          are how related context gets pointed at instead of duplicated inline. A future reader\n\

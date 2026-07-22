@@ -395,6 +395,8 @@ async fn get_tag_settings_returns_seeded_defaults_when_unset() {
     assert!(body["status"]["color"].is_string());
     assert!(body["project"]["description"].is_string());
     assert_eq!(body["project"]["values"], json!([]));
+    assert_eq!(body["part"]["values"], json!(["index", "fragment"]));
+    assert_eq!(body["part"]["values_mode"], "fixed");
 }
 
 #[tokio::test]
@@ -417,6 +419,58 @@ async fn save_tag_settings_persists_and_get_returns_it() {
     let (status, body) = req(app, "GET", "/api/v1/settings/tags", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body, custom);
+}
+
+#[tokio::test]
+async fn get_content_limit_settings_returns_default_when_unset() {
+    let (app, _dir) = test_router().await;
+    let (status, body) = req(app, "GET", "/api/v1/settings/content-limits", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["max_content_tokens"], 1500);
+}
+
+#[tokio::test]
+async fn save_content_limit_settings_rejects_non_positive_value() {
+    let (app, _dir) = test_router().await;
+    let (status, _) = req(
+        app,
+        "POST",
+        "/api/v1/settings/content-limits",
+        Some(json!({ "max_content_tokens": 0 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn save_content_limit_settings_rejects_missing_field() {
+    let (app, _dir) = test_router().await;
+    let (status, _) = req(
+        app,
+        "POST",
+        "/api/v1/settings/content-limits",
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn save_content_limit_settings_persists_and_get_returns_it() {
+    let (app, _dir) = test_router().await;
+    let (status, saved) = req(
+        app.clone(),
+        "POST",
+        "/api/v1/settings/content-limits",
+        Some(json!({ "max_content_tokens": 800 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(saved["saved"], true);
+
+    let (status, body) = req(app, "GET", "/api/v1/settings/content-limits", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["max_content_tokens"], 800);
 }
 
 #[test]

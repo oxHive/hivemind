@@ -35,6 +35,80 @@ async fn seed_two(hm: &HiveMind) -> (String, String) {
 }
 
 #[tokio::test]
+async fn memory_store_rejects_content_over_max_content_tokens() {
+    let (hm, _dir) = test_hivemind().await;
+    hm.store.set_meta("max_content_tokens", "5").await.unwrap();
+    let err = hm
+        .do_memory_store(MemoryStoreInput {
+            title: "a title with several words in it".to_string(),
+            content: "this content also has plenty of words in it to push past five tokens"
+                .to_string(),
+            tags: vec![],
+            token_count: None,
+            layer: None,
+            memory_type: None,
+        })
+        .await;
+    assert!(
+        err.is_err(),
+        "should reject content over the configured limit"
+    );
+    let msg = err.unwrap_err().to_string();
+    assert!(
+        msg.contains("max_content_tokens"),
+        "error should name the guardrail: {msg}"
+    );
+    assert!(
+        msg.contains("child:mem_xxx"),
+        "error should explain how to chunk: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn memory_store_accepts_content_under_max_content_tokens() {
+    let (hm, _dir) = test_hivemind().await;
+    hm.store
+        .set_meta("max_content_tokens", "500")
+        .await
+        .unwrap();
+    let res = hm
+        .do_memory_store(MemoryStoreInput {
+            title: "short".to_string(),
+            content: "short content".to_string(),
+            tags: vec![],
+            token_count: None,
+            layer: None,
+            memory_type: None,
+        })
+        .await;
+    assert!(
+        res.is_ok(),
+        "should accept content under the configured limit"
+    );
+}
+
+#[tokio::test]
+async fn memory_update_rejects_content_over_max_content_tokens() {
+    let (hm, _dir) = test_hivemind().await;
+    let (a, _b) = seed_two(&hm).await;
+    hm.store.set_meta("max_content_tokens", "5").await.unwrap();
+    let err = hm
+        .do_memory_update(MemoryUpdateInput {
+            id: a,
+            title: None,
+            content: Some(
+                "this content also has plenty of words in it to push past five tokens".to_string(),
+            ),
+            tags: None,
+        })
+        .await;
+    assert!(
+        err.is_err(),
+        "should reject an edit that pushes content over the limit"
+    );
+}
+
+#[tokio::test]
 async fn memory_store_edge_accepts_pending_status_and_reason() {
     let (hm, _dir) = test_hivemind().await;
     let (a, b) = seed_two(&hm).await;

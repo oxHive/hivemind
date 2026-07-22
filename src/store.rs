@@ -100,6 +100,13 @@ pub struct SqliteStore {
 
 pub const VALID_RELATIONSHIPS: &[&str] = &["parent", "child", "sibling"];
 
+/// Default cap on a single memory's title+content token count (see
+/// `count_entry_tokens`), leaving headroom under the default 2000-token
+/// session-start budget so no single memory can dominate a recall alone.
+/// Configurable per-instance via the `max_content_tokens` `_meta` key
+/// (dashboard-editable, same pattern as `tag_namespaces`).
+pub const DEFAULT_MAX_CONTENT_TOKENS: i64 = 1500;
+
 static RELATIONSHIP_LINK_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new(r"\[([^\]]+)\]\((?:(parent|child|sibling):)?(mem_[0-9a-f]{32})\)").unwrap()
 });
@@ -253,6 +260,10 @@ pub(crate) fn default_tag_namespaces() -> Value {
         "scope": {
             "color": "#ba7517", "values": ["team", "individual"], "values_mode": "fixed",
             "description": "Who this memory is meant for: team (shared knowledge, relevant if sync is configured to a shared remote) or individual (personal only)."
+        },
+        "part": {
+            "color": "#f0883e", "values": ["index", "fragment"], "values_mode": "fixed", "single_value": true,
+            "description": "Marks a memory's role when content was too large for one memory and got split: index (the short entry point whose content links to each fragment via [phrase](child:mem_xxx)) or fragment (one piece of the split content). Absent on ordinary, unsplit memories."
         },
     })
 }
@@ -1161,6 +1172,17 @@ impl SqliteStore {
         match self.get_meta("tag_namespaces").await {
             Ok(Some(s)) => serde_json::from_str(&s).unwrap_or_else(|_| default_tag_namespaces()),
             _ => default_tag_namespaces(),
+        }
+    }
+
+    /// The max-content-tokens guardrail (see `DEFAULT_MAX_CONTENT_TOKENS`),
+    /// falling back to the default when nothing is stored yet or the stored
+    /// value fails to parse. Single source of truth for the API settings
+    /// endpoint and the `memory_store`/`memory_update` size check.
+    pub async fn max_content_tokens(&self) -> i64 {
+        match self.get_meta("max_content_tokens").await {
+            Ok(Some(s)) => s.parse().unwrap_or(DEFAULT_MAX_CONTENT_TOKENS),
+            _ => DEFAULT_MAX_CONTENT_TOKENS,
         }
     }
 

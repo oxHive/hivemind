@@ -1175,6 +1175,28 @@ async fn meta_roundtrip() {
 }
 
 #[tokio::test]
+async fn max_content_tokens_defaults_when_unset() {
+    let (s, _dir) = make_store().await;
+    assert_eq!(s.max_content_tokens().await, DEFAULT_MAX_CONTENT_TOKENS);
+}
+
+#[tokio::test]
+async fn max_content_tokens_reads_back_stored_value() {
+    let (s, _dir) = make_store().await;
+    s.set_meta("max_content_tokens", "500").await.unwrap();
+    assert_eq!(s.max_content_tokens().await, 500);
+}
+
+#[tokio::test]
+async fn max_content_tokens_falls_back_on_unparsable_value() {
+    let (s, _dir) = make_store().await;
+    s.set_meta("max_content_tokens", "not-a-number")
+        .await
+        .unwrap();
+    assert_eq!(s.max_content_tokens().await, DEFAULT_MAX_CONTENT_TOKENS);
+}
+
+#[tokio::test]
 async fn log_and_list_session_start_round_trip() {
     let (store, _dir) = make_store().await;
     let result = crate::session::SessionStartResult {

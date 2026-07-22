@@ -76,3 +76,33 @@ pub(super) async fn save_tag_settings(
     store.set_meta("tag_namespaces", &body.to_string()).await?;
     Ok(Json(json!({ "saved": true })))
 }
+
+// --- content-size guardrail (max_content_tokens) ---
+
+pub(super) async fn get_content_limit_settings(
+    State(store): State<Store>,
+) -> Result<Json<Value>, ApiError> {
+    Ok(Json(
+        json!({ "max_content_tokens": store.max_content_tokens().await }),
+    ))
+}
+
+pub(super) async fn save_content_limit_settings(
+    State(store): State<Store>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let tokens = body
+        .get("max_content_tokens")
+        .and_then(Value::as_i64)
+        .filter(|v| *v > 0)
+        .ok_or_else(|| {
+            ApiError(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "max_content_tokens must be a positive integer".to_string(),
+            )
+        })?;
+    store
+        .set_meta("max_content_tokens", &tokens.to_string())
+        .await?;
+    Ok(Json(json!({ "saved": true })))
+}
