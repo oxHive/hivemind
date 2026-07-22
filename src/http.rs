@@ -34,7 +34,6 @@ pub fn app_router(
     mcp_url: String,
     update_state: SharedUpdateState,
     guard_predefined_namespaces: bool,
-    pairing_codes: std::sync::Arc<crate::hive::pairing::PairingCodeStore>,
 ) -> Router {
     // Fires whenever a memory or edge is created/updated/deleted, either via
     // an MCP tool call (below) or the REST API (api::router) — the dashboard
@@ -66,7 +65,6 @@ pub fn app_router(
         update_state,
         agent_for_status,
         guard_predefined_namespaces,
-        pairing_codes,
     )
     .nest_service("/mcp", mcp)
 }
@@ -239,7 +237,6 @@ pub async fn run_up(
         mcp_url.clone(),
         update_state,
         settings.guard_predefined_namespaces,
-        pairing_codes.clone(),
     );
 
     if !matches!(settings.host.as_str(), "127.0.0.1" | "localhost" | "::1") {
@@ -268,25 +265,82 @@ pub async fn run_up(
     }
 
     if settings.hive.enabled {
+        let key_store = crate::hive::keyring_store::KeyringHiveKeyStore;
+        let identity = crate::hive::bootstrap_self_identity(&store, &key_store).await?;
+
+        // Self-join: this device always appears in its own roster, signed
+        // exactly like any peer's join record would be. `merge_roster` is
+        // idempotent, so re-running this on every restart is safe — it
+        // will not duplicate or regress an already-Active entry, and if
+        // this device_id was ever revoked by a peer, the sticky-revocation
+        // rule keeps it revoked rather than letting a restart un-revoke it.
+        let self_join = crate::hive::roster::create_join_record(
+            &identity,
+            &identity.device_id,
+            chrono::Utc::now().timestamp(),
+        );
+        let local_roster = store.hive_list_roster().await?;
+        let self_entry = crate::hive::roster::RosterEntry {
+            device_id: self_join.device_id.clone(),
+            public_key: self_join.public_key.clone(),
+            name: self_join.name.clone(),
+            status: crate::hive::roster::RosterStatus::Active,
+            joined_at: self_join.joined_at,
+            revoked_at: None,
+            revoked_by: None,
+            join_record: self_join,
+            revocation_record: None,
+        };
+        let merged = crate::hive::gossip::merge_roster(local_roster, vec![self_entry]);
+        for entry in &merged {
+            store.hive_upsert_roster_entry(entry).await?;
+        }
+
         let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])?;
         let tls_config = axum_server::tls_rustls::RustlsConfig::from_pem(
             cert.cert.pem().into_bytes(),
             cert.signing_key.serialize_pem().into_bytes(),
         )
         .await?;
-        let hive_app = app.clone(); // same router, served a second time on a TLS port
+        // Only the hive-specific routes are served here (see Finding #1) —
+        // the plaintext-equivalent full app is never mirrored onto this port.
+        let hive_only_app = api::hive_router(store.clone(), pairing_codes.clone());
         let hive_addr: std::net::SocketAddr =
             format!("{}:{}", settings.host, settings.port + 1).parse()?;
         tokio::spawn(async move {
-            axum_server::bind_rustls(hive_addr, tls_config)
-                .serve(hive_app.into_make_service())
+            if let Err(e) = axum_server::bind_rustls(hive_addr, tls_config)
+                .serve(hive_only_app.into_make_service())
                 .await
+            {
+                tracing::error!("hive TLS listener failed to bind/serve: {e:#}");
+            }
         });
         tracing::info!(
             "Hive pairing/sync (TLS): https://{}:{}",
             settings.host,
             settings.port + 1
         );
+
+        let discovery = crate::hive::discovery::HiveDiscovery::new()?;
+        discovery.advertise(&identity.device_id, &identity.device_id, settings.port + 1)?;
+        tracing::info!("Hive mDNS: advertising as {}", identity.device_id);
+        tokio::spawn(async move {
+            // `discovery` is moved in here so the underlying ServiceDaemon
+            // (and thus the mDNS advertisement) stays alive for the life of
+            // this task. This loop only logs discovered peers for
+            // visibility — actually contacting/syncing with them is the
+            // data-sync plan's job, not this one's.
+            match discovery.browse() {
+                Ok(receiver) => {
+                    while let Ok(event) = receiver.recv_async().await {
+                        if let mdns_sd::ServiceEvent::ServiceResolved(info) = event {
+                            tracing::info!("hive peer discovered: {}", info.get_fullname());
+                        }
+                    }
+                }
+                Err(e) => tracing::error!("hive mDNS browse failed: {e:#}"),
+            }
+        });
     }
 
     let mut dashboard_url = None;
@@ -497,7 +551,6 @@ mod tests {
                 crate::update::UpdateState::new_idle(),
             )),
             true,
-            std::sync::Arc::new(crate::hive::pairing::PairingCodeStore::new()),
         );
         let resp = app
             .oneshot(

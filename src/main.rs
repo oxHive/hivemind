@@ -79,22 +79,7 @@ async fn open_store(
 #[tokio::main]
 async fn run_server() -> Result<()> {
     init_tracing();
-    let settings =
-        config::load_server_settings(&config::global_config_path()).unwrap_or_else(|e| {
-            tracing::warn!("could not load global config ({e:#}); using defaults");
-            config::ServerSettings {
-                host: "127.0.0.1".into(),
-                port: 3456,
-                dashboard_port: 3457,
-                api_url: "http://127.0.0.1:3456".into(),
-                cors_origin: "http://127.0.0.1:3457".into(),
-                sync: config::SyncSettings::default(),
-                update: config::UpdateSettings::default(),
-                agent: config::AgentSettings::default(),
-                hive: config::HiveSettings::default(),
-                guard_predefined_namespaces: true,
-            }
-        });
+    let settings = config::load_server_settings(&config::global_config_path())?;
     let (store, database) = open_store(&settings.sync).await?;
     // Holds the DB handle so it lives past `server.waiting()` when no sync loop owns it.
     let mut _db_guard: Option<libsql::Database> = None;

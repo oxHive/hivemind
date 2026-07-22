@@ -53,3 +53,11 @@ pub(super) async fn hive_roster(State(store): State<Store>) -> Result<Json<Value
     let roster = store.hive_list_roster().await?;
     Ok(Json(json!({ "roster": roster })))
 }
+
+pub(super) async fn hive_issue_pairing_code(
+    Extension(pairing_codes): Extension<Arc<PairingCodeStore>>,
+) -> Json<Value> {
+    let now = chrono::Utc::now().timestamp();
+    let pairing = pairing_codes.issue(now);
+    Json(json!({ "code": pairing.code, "expires_at": pairing.expires_at }))
+}

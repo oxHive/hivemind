@@ -31,6 +31,17 @@ pub fn public_key_hex(identity: &DeviceIdentity) -> String {
     hex::encode(identity.signing_key.verifying_key().to_bytes())
 }
 
+/// Reconstructs a `DeviceIdentity` from a signing key previously persisted
+/// via `public_key_hex`'s sibling save path (hex-encoded 32-byte seed).
+/// Returns `None` if the hex is malformed or not exactly 32 bytes.
+pub fn from_signing_key_hex(signing_key_hex: &str) -> Option<DeviceIdentity> {
+    let bytes = hex::decode(signing_key_hex).ok()?;
+    let bytes: [u8; 32] = bytes.try_into().ok()?;
+    let signing_key = SigningKey::from_bytes(&bytes);
+    let device_id = device_id_from_public_key(&signing_key.verifying_key());
+    Some(DeviceIdentity { device_id, signing_key })
+}
+
 pub fn sign(identity: &DeviceIdentity, message: &[u8]) -> String {
     hex::encode(identity.signing_key.sign(message).to_bytes())
 }
@@ -93,5 +104,23 @@ mod tests {
     #[test]
     fn verify_rejects_malformed_hex() {
         assert!(!verify("not-hex", b"msg", "also-not-hex"));
+    }
+
+    #[test]
+    fn from_signing_key_hex_round_trips_with_generate() {
+        let identity = generate();
+        let hex_key = hex::encode(identity.signing_key.to_bytes());
+        let reconstructed = from_signing_key_hex(&hex_key).unwrap();
+        assert_eq!(reconstructed.device_id, identity.device_id);
+        assert_eq!(
+            public_key_hex(&reconstructed),
+            public_key_hex(&identity)
+        );
+    }
+
+    #[test]
+    fn from_signing_key_hex_rejects_malformed_hex() {
+        assert!(from_signing_key_hex("not-hex").is_none());
+        assert!(from_signing_key_hex("deadbeef").is_none()); // too short
     }
 }

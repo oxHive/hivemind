@@ -91,7 +91,6 @@ pub fn router(
     update_state: SharedUpdateState,
     agent: AgentSettings,
     guard_predefined_namespaces: bool,
-    pairing_codes: Arc<crate::hive::pairing::PairingCodeStore>,
 ) -> Router {
     Router::new()
         .route("/api/v1/memories", get(list_memories).post(create_memory))
@@ -150,8 +149,6 @@ pub fn router(
             "/api/v1/suggest-sessions/current/revise",
             post(revise_suggest_session),
         )
-        .route("/api/v1/hive/pair", post(hive_pair))
-        .route("/api/v1/hive/roster", get(hive_roster))
         .with_state(store)
         .layer(Extension(sync))
         .layer(Extension(events))
@@ -161,7 +158,6 @@ pub fn router(
         .layer(Extension(GuardPredefinedNamespaces(
             guard_predefined_namespaces,
         )))
-        .layer(Extension(pairing_codes))
         .layer(
             CorsLayer::new()
                 .allow_origin(localhost_origins(dashboard_origin))
@@ -174,6 +170,26 @@ pub fn router(
                 ])
                 .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]),
         )
+}
+
+/// Hive pairing/roster/pairing-code routes only. Served exclusively on the
+/// TLS-fronted hive port (see `http::run_up`) — never merged into the main
+/// plaintext app router, so pairing cannot be reached unencrypted and the
+/// rest of the (unauthenticated) memory/agent API is not exposed on the
+/// hive port.
+pub fn hive_router(
+    store: Store,
+    pairing_codes: Arc<crate::hive::pairing::PairingCodeStore>,
+) -> Router {
+    Router::new()
+        .route("/api/v1/hive/pair", post(hive_pair))
+        .route("/api/v1/hive/roster", get(hive_roster))
+        .route(
+            "/api/v1/hive/pairing-code",
+            post(hive_issue_pairing_code),
+        )
+        .with_state(store)
+        .layer(Extension(pairing_codes))
 }
 
 async fn sse_events(

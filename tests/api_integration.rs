@@ -59,7 +59,6 @@ async fn test_app() -> (axum::Router, TempDir) {
         update_state,
         oxhivemind::config::AgentSettings::default(),
         true,
-        Arc::new(oxhivemind::hive::pairing::PairingCodeStore::new()),
     );
     (router, dir)
 }
