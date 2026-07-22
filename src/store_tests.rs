@@ -122,6 +122,40 @@ async fn custom_singleton_namespace_is_enforced_from_registry() {
 }
 
 #[tokio::test]
+async fn tag_namespace_registry_backfills_namespace_added_to_code_after_last_save() {
+    // Simulates a stored blob saved before `part` existed in
+    // default_tag_namespaces() — the registry must still surface `part`
+    // (and every other current default) rather than being permanently
+    // shadowed by the stale snapshot.
+    let (s, _dir) = make_store().await;
+    s.set_meta(
+        "tag_namespaces",
+        r##"{"project": {"color": "#4a9eff", "values": [], "single_value": true}}"##,
+    )
+    .await
+    .unwrap();
+    let registry = s.tag_namespace_registry().await;
+    assert_eq!(
+        registry["part"]["values"],
+        serde_json::json!(["index", "fragment"])
+    );
+    assert_eq!(registry["project"]["color"], "#4a9eff");
+}
+
+#[tokio::test]
+async fn tag_namespace_registry_lets_stored_customization_win_over_default() {
+    let (s, _dir) = make_store().await;
+    s.set_meta(
+        "tag_namespaces",
+        r##"{"project": {"color": "#ff0000", "values": [], "single_value": true}}"##,
+    )
+    .await
+    .unwrap();
+    let registry = s.tag_namespace_registry().await;
+    assert_eq!(registry["project"]["color"], "#ff0000");
+}
+
+#[tokio::test]
 async fn fixed_values_namespace_rejects_unregistered_value() {
     let (s, _dir) = make_store().await;
     s.set_meta(

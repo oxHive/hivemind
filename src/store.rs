@@ -268,6 +268,27 @@ pub(crate) fn default_tag_namespaces() -> Value {
     })
 }
 
+/// Shallow object merge, keyed by top-level namespace name: every key from
+/// `stored` wins outright (customized or merely re-saved as-is); any key
+/// present only in `defaults` (added to code after `stored` was last saved)
+/// gets filled in from `defaults`. Not a deep/field-level merge — a
+/// namespace present in `stored` is used wholesale, not merged field by
+/// field with its code-default counterpart, since a partial per-field merge
+/// would make it unclear which value "wins" for a namespace the user has
+/// deliberately customized.
+fn merge_tag_namespaces(defaults: Value, stored: Value) -> Value {
+    let mut merged = match stored {
+        Value::Object(map) => map,
+        _ => return defaults,
+    };
+    if let Value::Object(default_map) = defaults {
+        for (name, entry) in default_map {
+            merged.entry(name).or_insert(entry);
+        }
+    }
+    Value::Object(merged)
+}
+
 /// Validates `tags` against the `tag_namespaces` registry: at most one tag
 /// per namespace marked `single_value` (falls back to `["project"]` alone
 /// when the registry has no singleton namespaces at all), and — for any
@@ -1163,15 +1184,27 @@ impl SqliteStore {
         })
     }
 
-    /// The `tag_namespaces` registry (colors, values, descriptions), falling
-    /// back to `default_tag_namespaces()` when nothing is stored yet or the
+    /// The `tag_namespaces` registry (colors, values, descriptions): starts
+    /// from `default_tag_namespaces()` and overlays whatever's stored, key by
+    /// key. Falling back to bare defaults when nothing is stored yet or the
     /// stored value fails to parse. Single source of truth for the API
     /// settings endpoint, tag-cardinality validation, and the
     /// `tag_namespaces_list` MCP tool.
+    ///
+    /// The overlay (not a wholesale replace) matters: a namespace added to
+    /// `default_tag_namespaces()` after a user's first save (e.g. `part`,
+    /// added post-1.0) must still show up for anyone whose stored blob
+    /// predates it, rather than being permanently shadowed by an old
+    /// snapshot. Namespaces the stored blob does mention (customized or
+    /// left untouched) still win over the code default.
     pub async fn tag_namespace_registry(&self) -> Value {
+        let defaults = default_tag_namespaces();
         match self.get_meta("tag_namespaces").await {
-            Ok(Some(s)) => serde_json::from_str(&s).unwrap_or_else(|_| default_tag_namespaces()),
-            _ => default_tag_namespaces(),
+            Ok(Some(s)) => match serde_json::from_str::<Value>(&s) {
+                Ok(stored) => merge_tag_namespaces(defaults, stored),
+                Err(_) => defaults,
+            },
+            _ => defaults,
         }
     }
 
