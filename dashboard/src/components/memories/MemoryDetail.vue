@@ -219,7 +219,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
             :disabled="!canDownload"
             :title="memories.dirty ? 'Save changes before downloading' : 'Download as Markdown'"
             @click="downloadMarkdown">
-            Download .md
+            <span aria-hidden="true">⭳</span> Download
           </button>
           <div class="relative">
             <button class="hm-btn hm-btn-ghost hm-btn-sm" style="font-size:15px" title="Flag for review"
