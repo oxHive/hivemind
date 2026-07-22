@@ -91,6 +91,7 @@ async fn run_server() -> Result<()> {
                 sync: config::SyncSettings::default(),
                 update: config::UpdateSettings::default(),
                 agent: config::AgentSettings::default(),
+                guard_predefined_namespaces: true,
             }
         });
     let (store, database) = open_store(&settings.sync).await?;

@@ -64,6 +64,10 @@ fn test_agent_settings() -> crate::config::AgentSettings {
 }
 
 async fn test_router() -> (Router, TempDir) {
+    test_router_with_guard(true).await
+}
+
+async fn test_router_with_guard(guard_predefined_namespaces: bool) -> (Router, TempDir) {
     let (store, dir) = test_store().await;
     let (events, _) = broadcast::channel(16);
     let suggest = test_suggest_manager(Arc::clone(&store), dir.path(), events.clone());
@@ -75,6 +79,7 @@ async fn test_router() -> (Router, TempDir) {
         suggest,
         test_update_state(),
         test_agent_settings(),
+        guard_predefined_namespaces,
     );
     (r, dir)
 }
@@ -91,6 +96,7 @@ async fn test_router_with_events() -> (Router, broadcast::Receiver<Value>, TempD
         suggest,
         test_update_state(),
         test_agent_settings(),
+        true,
     );
     (r, rx, dir)
 }
@@ -107,6 +113,7 @@ async fn test_router_with_store() -> (Router, Arc<SqliteStore>, TempDir) {
         suggest,
         test_update_state(),
         test_agent_settings(),
+        true,
     );
     (r, store, dir)
 }
@@ -373,7 +380,9 @@ async fn save_tag_settings_rejects_invalid_values_mode() {
 
 #[tokio::test]
 async fn save_tag_settings_accepts_fixed_values_mode() {
-    let (app, _dir) = test_router().await;
+    // Guard disabled — this test is about format acceptance for a custom
+    // namespace shape, not about the predefined-namespace guard.
+    let (app, _dir) = test_router_with_guard(false).await;
     let (status, _) = req(
         app,
         "POST",
@@ -389,14 +398,76 @@ async fn get_tag_settings_returns_seeded_defaults_when_unset() {
     let (app, _dir) = test_router().await;
     let (status, body) = req(app, "GET", "/api/v1/settings/tags", None).await;
     assert_eq!(status, StatusCode::OK);
-    assert!(body["project"]["color"].is_string());
-    assert!(body["lang"]["color"].is_string());
-    assert!(body["topic"]["color"].is_string());
-    assert!(body["status"]["color"].is_string());
-    assert!(body["project"]["description"].is_string());
-    assert_eq!(body["project"]["values"], json!([]));
-    assert_eq!(body["part"]["values"], json!(["index", "fragment"]));
-    assert_eq!(body["part"]["values_mode"], "fixed");
+    let ns = &body["namespaces"];
+    assert!(ns["project"]["color"].is_string());
+    assert!(ns["lang"]["color"].is_string());
+    assert!(ns["topic"]["color"].is_string());
+    assert!(ns["status"]["color"].is_string());
+    assert!(ns["project"]["description"].is_string());
+    assert_eq!(ns["project"]["values"], json!([]));
+    assert_eq!(ns["part"]["values"], json!(["index", "fragment"]));
+    assert_eq!(ns["part"]["values_mode"], "fixed");
+
+    let predefined = body["predefined"].as_array().unwrap();
+    for name in [
+        "project", "topic", "status", "lang", "kind", "scope", "part",
+    ] {
+        assert!(
+            predefined.iter().any(|v| v == name),
+            "{name} should be listed as predefined"
+        );
+    }
+    assert_eq!(body["guard_predefined_namespaces"], true);
+}
+
+#[tokio::test]
+async fn save_tag_settings_rejects_deleting_a_predefined_namespace() {
+    let (app, _dir) = test_router().await;
+    let (status, body) = req(app, "GET", "/api/v1/settings/tags", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let mut namespaces = body["namespaces"].clone();
+    namespaces.as_object_mut().unwrap().remove("project");
+
+    let (app, _dir2) = test_router().await;
+    let (status, _) = req(app, "POST", "/api/v1/settings/tags", Some(namespaces)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn save_tag_settings_rejects_modifying_a_predefined_namespace() {
+    let (app, _dir) = test_router().await;
+    let (status, body) = req(app.clone(), "GET", "/api/v1/settings/tags", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let mut namespaces = body["namespaces"].clone();
+    namespaces["project"]["color"] = json!("#000000");
+
+    let (status, _) = req(app, "POST", "/api/v1/settings/tags", Some(namespaces)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn save_tag_settings_allows_editing_a_custom_namespace() {
+    let (app, _dir) = test_router().await;
+    let (status, body) = req(app.clone(), "GET", "/api/v1/settings/tags", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let mut namespaces = body["namespaces"].clone();
+    namespaces["mycustomns"] = json!({ "color": "#123456", "values": ["a"] });
+
+    let (status, _) = req(app, "POST", "/api/v1/settings/tags", Some(namespaces)).await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn save_tag_settings_allows_predefined_edits_when_guard_disabled() {
+    let (app, _dir) = test_router_with_guard(false).await;
+    let (status, body) = req(app.clone(), "GET", "/api/v1/settings/tags", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["guard_predefined_namespaces"], false);
+    let mut namespaces = body["namespaces"].clone();
+    namespaces["project"]["color"] = json!("#000000");
+
+    let (status, _) = req(app, "POST", "/api/v1/settings/tags", Some(namespaces)).await;
+    assert_eq!(status, StatusCode::OK);
 }
 
 #[tokio::test]
@@ -453,7 +524,9 @@ async fn count_tokens_reflects_custom_max_content_tokens() {
 
 #[tokio::test]
 async fn save_tag_settings_persists_and_get_returns_it() {
-    let (app, _dir) = test_router().await;
+    // Guard disabled — this test is about the persist/round-trip mechanics,
+    // not the predefined-namespace guard, so it's free to replace project/lang.
+    let (app, _dir) = test_router_with_guard(false).await;
     let custom = json!({
         "project": { "color": "#4a9eff", "values": ["hivemind", "oxhive"] },
         "lang": { "color": "#e0607e", "values": ["rust"] },
@@ -470,7 +543,12 @@ async fn save_tag_settings_persists_and_get_returns_it() {
 
     let (status, body) = req(app, "GET", "/api/v1/settings/tags", None).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body, custom);
+    // The registry backfills any default namespace missing from the stored
+    // blob (see tag_namespace_registry's merge), so it's a superset of what
+    // was submitted, not an exact match — check the submitted keys survived
+    // as-is rather than asserting the whole object.
+    assert_eq!(body["namespaces"]["project"], custom["project"]);
+    assert_eq!(body["namespaces"]["lang"], custom["lang"]);
 }
 
 #[tokio::test]

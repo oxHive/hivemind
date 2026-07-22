@@ -64,15 +64,63 @@ fn validate_tag_namespaces(body: &Value) -> Result<(), String> {
     Ok(())
 }
 
-pub(super) async fn get_tag_settings(State(store): State<Store>) -> Result<Json<Value>, ApiError> {
-    Ok(Json(store.tag_namespace_registry().await))
+/// True if `body[name]` matches `crate::store::default_tag_namespaces()[name]`
+/// exactly — used to detect whether a predefined namespace was left alone.
+fn matches_predefined_default(name: &str, body: &Value, defaults: &Value) -> bool {
+    let default_entry = defaults.get(name);
+    body.get(name) == default_entry
+}
+
+/// Rejects deleting or modifying any predefined namespace (name, color,
+/// description, values, single_value, values_mode — the entry must match
+/// `default_tag_namespaces()` exactly). Namespaces not in the predefined set
+/// are unaffected — freely addable/editable/removable as before.
+fn validate_predefined_namespaces_unchanged(body: &Value) -> Result<(), String> {
+    let defaults = crate::store::default_tag_namespaces();
+    let names = defaults
+        .as_object()
+        .expect("default_tag_namespaces returns an object")
+        .keys();
+    for name in names {
+        if !matches_predefined_default(name, body, &defaults) {
+            return Err(format!(
+                "namespace {name:?} is predefined and cannot be deleted or modified. \
+                 Disable this guard with [tags] guard_predefined_namespaces = false \
+                 in the global hivemind config to allow it."
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub(super) async fn get_tag_settings(
+    State(store): State<Store>,
+    Extension(guard): Extension<GuardPredefinedNamespaces>,
+) -> Result<Json<Value>, ApiError> {
+    let namespaces = store.tag_namespace_registry().await;
+    let defaults = crate::store::default_tag_namespaces();
+    let predefined: Vec<&String> = defaults
+        .as_object()
+        .expect("default_tag_namespaces returns an object")
+        .keys()
+        .collect();
+    Ok(Json(json!({
+        "namespaces": namespaces,
+        "predefined": predefined,
+        "guard_predefined_namespaces": guard.0,
+    })))
 }
 
 pub(super) async fn save_tag_settings(
     State(store): State<Store>,
+    Extension(guard): Extension<GuardPredefinedNamespaces>,
     Json(body): Json<Value>,
 ) -> Result<Json<Value>, ApiError> {
     validate_tag_namespaces(&body).map_err(|e| ApiError(StatusCode::UNPROCESSABLE_ENTITY, e))?;
+    if guard.0 {
+        validate_predefined_namespaces_unchanged(&body)
+            .map_err(|e| ApiError(StatusCode::UNPROCESSABLE_ENTITY, e))?;
+    }
     store.set_meta("tag_namespaces", &body.to_string()).await?;
     Ok(Json(json!({ "saved": true })))
 }

@@ -14,6 +14,14 @@ const error = ref('')
 const pendingDelete = ref(null)
 const valuesModeTooltip = ref({ visible: false, x: 0, y: 0, text: '' })
 
+// Predefined namespaces are fully read-only in this UI while the guard is
+// active — color, description, single_value, values_mode, and values all
+// locked. Disable the guard via [tags] guard_predefined_namespaces = false
+// in the global hivemind config to edit them here again.
+function isLocked(name) {
+  return tagSettings.isPredefined(name) && tagSettings.guardPredefinedNamespaces
+}
+
 const SWATCHES = ['#4a9eff', '#e0607e', '#5fb8b0', '#a875d1', '#1d9e75', '#7f77dd', '#ba7517', '#d9534f']
 const HEX_RE = /^#[0-9a-fA-F]{3,8}$/
 const VALUES_MODE_HELP = {
@@ -112,33 +120,40 @@ async function save() {
         <div class="flex items-center gap-2 mb-3">
           <TagChip :tag="`${name}:example`" />
           <span class="font-mono flex-1" style="font-size:12px; color:var(--hm-text-secondary)">{{ name }}</span>
-          <button v-if="pendingDelete !== name" class="hm-btn hm-btn-ghost hm-btn-sm"
-            style="color:var(--hm-text-tertiary)" @click="askDeleteNamespace(name)">Remove</button>
-          <template v-else>
-            <span style="font-size:12px; color:var(--hm-text-tertiary)">Remove {{ name }}:*?</span>
-            <button class="hm-btn hm-btn-danger hm-btn-sm" @click="askDeleteNamespace(name)">Confirm</button>
-            <button class="hm-btn hm-btn-ghost hm-btn-sm" @click="pendingDelete = null">Cancel</button>
+          <span v-if="tagSettings.isPredefined(name)" class="font-mono rounded-sm px-1.5 py-0.5"
+            style="font-size:9px; background:var(--hm-bg-elevated); color:var(--hm-text-tertiary); border:0.5px solid var(--hm-border-subtle)"
+            :title="isLocked(name) ? 'Built into HiveMind — locked from deletion/edits. Disable via [tags] guard_predefined_namespaces = false in the global config.' : 'Built into HiveMind, but the guard is currently disabled — editable/removable.'">
+            PREDEFINED
+          </span>
+          <template v-if="!isLocked(name)">
+            <button v-if="pendingDelete !== name" class="hm-btn hm-btn-ghost hm-btn-sm"
+              style="color:var(--hm-text-tertiary)" @click="askDeleteNamespace(name)">Remove</button>
+            <template v-else>
+              <span style="font-size:12px; color:var(--hm-text-tertiary)">Remove {{ name }}:*?</span>
+              <button class="hm-btn hm-btn-danger hm-btn-sm" @click="askDeleteNamespace(name)">Confirm</button>
+              <button class="hm-btn hm-btn-ghost hm-btn-sm" @click="pendingDelete = null">Cancel</button>
+            </template>
           </template>
         </div>
 
-        <input class="hm-input mb-4" style="font-size:12px"
+        <input class="hm-input mb-4" style="font-size:12px" :disabled="isLocked(name)"
           v-model="ns.description" placeholder="What does this namespace mean? Shown to AI agents and in this UI." />
 
         <p class="hm-label" style="margin-bottom:8px">COLOR</p>
         <div class="flex items-center gap-1.5 mb-4">
           <button v-for="c in SWATCHES" :key="c"
-            class="rounded-full"
+            class="rounded-full" :disabled="isLocked(name)"
             style="width:16px; height:16px; border:1px solid var(--hm-border-default); flex-shrink:0"
             :style="{ background: c, outline: ns.color === c ? '2px solid var(--hm-accent)' : 'none', outlineOffset: '1px' }"
             :aria-label="`Use color ${c}`"
             @click="setColor(name, c)"></button>
           <input class="hm-input font-mono" style="width:98px; height:24px; font-size:11px; padding:0 6px"
-            v-model="ns.color"
+            v-model="ns.color" :disabled="isLocked(name)"
             :style="!HEX_RE.test(ns.color) ? `border-color:var(--hm-danger-border)` : ''" />
         </div>
 
         <label class="flex items-center gap-2 mb-4 cursor-pointer">
-          <input type="checkbox" v-model="ns.single_value" class="w-3.5 h-3.5" />
+          <input type="checkbox" v-model="ns.single_value" class="w-3.5 h-3.5" :disabled="isLocked(name)" />
           <span style="font-size:12px; color:var(--hm-text-secondary)">
             Only one {{ name }}:* tag per memory
           </span>
@@ -147,17 +162,17 @@ async function save() {
         <div class="flex items-center justify-between" style="margin-bottom:8px">
           <p class="hm-label" style="margin-bottom:0">VALUES</p>
           <div class="seg" role="radiogroup" :aria-label="`How ${name} values are enforced`">
-            <button type="button" class="seg-btn" :class="{ 'seg-btn--active': (ns.values_mode || 'suggestion') === 'suggestion' }"
+            <button type="button" class="seg-btn" :disabled="isLocked(name)" :class="{ 'seg-btn--active': (ns.values_mode || 'suggestion') === 'suggestion' }"
               @click="ns.values_mode = 'suggestion'"
               @mouseenter="showValuesModeTooltip($event, 'suggestion')" @mouseleave="hideValuesModeTooltip">Suggestions</button>
-            <button type="button" class="seg-btn" :class="{ 'seg-btn--active': ns.values_mode === 'fixed' }"
+            <button type="button" class="seg-btn" :disabled="isLocked(name)" :class="{ 'seg-btn--active': ns.values_mode === 'fixed' }"
               @click="ns.values_mode = 'fixed'"
               @mouseenter="showValuesModeTooltip($event, 'fixed')" @mouseleave="hideValuesModeTooltip">Fixed</button>
           </div>
         </div>
         <div class="flex flex-wrap items-center gap-1.5 mb-1.5">
-          <TagChip v-for="v in ns.values" :key="v" :tag="`${name}:${v}`" removable @remove="removeValue(name, v)" />
-          <input class="hm-input" style="width:120px; height:24px; font-size:11px; padding:0 6px"
+          <TagChip v-for="v in ns.values" :key="v" :tag="`${name}:${v}`" :removable="!isLocked(name)" @remove="removeValue(name, v)" />
+          <input v-if="!isLocked(name)" class="hm-input" style="width:120px; height:24px; font-size:11px; padding:0 6px"
             v-model="newValueInput[name]" placeholder="Add a value…"
             @keydown.enter="addValue(name)" />
         </div>

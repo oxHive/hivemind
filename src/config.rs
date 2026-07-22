@@ -127,6 +127,11 @@ struct RawAgent {
 }
 
 #[derive(Debug, Default, Deserialize)]
+struct RawTags {
+    guard_predefined_namespaces: Option<bool>,
+}
+
+#[derive(Debug, Default, Deserialize)]
 struct RawMatrix {
     homeserver_url: Option<String>,
     user_id: Option<String>,
@@ -280,6 +285,8 @@ struct RawGlobal {
     agent: RawAgent,
     #[serde(default)]
     matrix: RawMatrix,
+    #[serde(default)]
+    tags: RawTags,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -405,6 +412,11 @@ pub struct ServerSettings {
     pub sync: SyncSettings,
     pub update: UpdateSettings,
     pub agent: AgentSettings,
+    /// Whether predefined tag namespaces (project, topic, status, lang, kind,
+    /// scope, part) can be deleted or modified via the dashboard/API. On by
+    /// default; set `[tags] guard_predefined_namespaces = false` in the
+    /// global config to disable.
+    pub guard_predefined_namespaces: bool,
 }
 
 pub fn load_server_settings(global_path: &std::path::Path) -> anyhow::Result<ServerSettings> {
@@ -453,6 +465,7 @@ pub fn load_server_settings(global_path: &std::path::Path) -> anyhow::Result<Ser
         args: raw.agent.args.unwrap_or_default(),
         kind: agent_kind,
     };
+    let guard_predefined_namespaces = raw.tags.guard_predefined_namespaces.unwrap_or(true);
     Ok(ServerSettings {
         host,
         port,
@@ -462,6 +475,7 @@ pub fn load_server_settings(global_path: &std::path::Path) -> anyhow::Result<Ser
         sync,
         update,
         agent,
+        guard_predefined_namespaces,
     })
 }
 
@@ -716,6 +730,25 @@ mod tests {
         let s = load_server_settings(&tmp.path().join("config.toml")).unwrap();
         assert!(!s.update.enabled);
         assert_eq!(s.update.check_interval_seconds, 120);
+    }
+
+    #[test]
+    fn guard_predefined_namespaces_defaults_to_true_when_global_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let s = load_server_settings(&tmp.path().join("no-global.toml")).unwrap();
+        assert!(s.guard_predefined_namespaces);
+    }
+
+    #[test]
+    fn guard_predefined_namespaces_can_be_disabled_via_global_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "config.toml",
+            "[tags]\nguard_predefined_namespaces=false\n",
+        );
+        let s = load_server_settings(&tmp.path().join("config.toml")).unwrap();
+        assert!(!s.guard_predefined_namespaces);
     }
 
     #[test]

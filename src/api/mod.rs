@@ -24,6 +24,12 @@ use tower_http::cors::{AllowOrigin, CorsLayer};
 type Store = Arc<SqliteStore>;
 type Events = broadcast::Sender<serde_json::Value>;
 
+/// Whether predefined tag namespaces can be deleted/modified via
+/// `save_tag_settings` — wrapped so it's a distinct Extension type rather
+/// than a bare `bool`. See `config::ServerSettings::guard_predefined_namespaces`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct GuardPredefinedNamespaces(pub bool);
+
 pub struct ApiError(StatusCode, String);
 
 impl IntoResponse for ApiError {
@@ -84,6 +90,7 @@ pub fn router(
     suggest: Arc<SuggestSessionManager>,
     update_state: SharedUpdateState,
     agent: AgentSettings,
+    guard_predefined_namespaces: bool,
 ) -> Router {
     Router::new()
         .route("/api/v1/memories", get(list_memories).post(create_memory))
@@ -148,6 +155,9 @@ pub fn router(
         .layer(Extension(suggest))
         .layer(Extension(update_state))
         .layer(Extension(agent))
+        .layer(Extension(GuardPredefinedNamespaces(
+            guard_predefined_namespaces,
+        )))
         .layer(
             CorsLayer::new()
                 .allow_origin(localhost_origins(dashboard_origin))

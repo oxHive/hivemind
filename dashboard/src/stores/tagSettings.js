@@ -5,6 +5,15 @@ import { getTagSettings, saveTagSettings } from '../api/settings.js'
 export const useTagSettingsStore = defineStore('tagSettings', () => {
   const namespaces = ref({})
   const loaded = ref(false)
+  // Which namespace names are predefined (built into HiveMind) vs
+  // user-created — drives the "predefined" label and hides the Remove
+  // button in the settings UI. Authoritative list comes from the backend
+  // (default_tag_namespaces()), not duplicated here.
+  const predefined = ref([])
+  // Whether the predefined-namespace guard is active — set false via
+  // [tags] guard_predefined_namespaces = false in the global hivemind
+  // config to allow editing/deleting predefined namespaces again.
+  const guardPredefinedNamespaces = ref(true)
   // Snapshot of `namespaces` as last fetched/saved, used to detect unsaved
   // edits (compared by value, not reference, since namespaces is mutated
   // in place by the settings UI).
@@ -12,8 +21,15 @@ export const useTagSettingsStore = defineStore('tagSettings', () => {
 
   const isDirty = computed(() => JSON.stringify(namespaces.value) !== savedSnapshot.value)
 
+  function isPredefined(name) {
+    return predefined.value.includes(name)
+  }
+
   async function fetchNamespaces() {
-    namespaces.value = await getTagSettings()
+    const res = await getTagSettings()
+    namespaces.value = res.namespaces
+    predefined.value = res.predefined
+    guardPredefinedNamespaces.value = res.guard_predefined_namespaces
     savedSnapshot.value = JSON.stringify(namespaces.value)
     loaded.value = true
   }
@@ -37,5 +53,8 @@ export const useTagSettingsStore = defineStore('tagSettings', () => {
     return ns ? namespaces.value[ns].color : DEFAULT_TAG_COLOR
   }
 
-  return { namespaces, loaded, isDirty, fetchNamespaces, save, namespaceFor, colorFor }
+  return {
+    namespaces, loaded, isDirty, predefined, guardPredefinedNamespaces, isPredefined,
+    fetchNamespaces, save, namespaceFor, colorFor,
+  }
 })

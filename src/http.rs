@@ -33,6 +33,7 @@ pub fn app_router(
     agent: AgentSettings,
     mcp_url: String,
     update_state: SharedUpdateState,
+    guard_predefined_namespaces: bool,
 ) -> Router {
     // Fires whenever a memory or edge is created/updated/deleted, either via
     // an MCP tool call (below) or the REST API (api::router) — the dashboard
@@ -63,6 +64,7 @@ pub fn app_router(
         suggest,
         update_state,
         agent_for_status,
+        guard_predefined_namespaces,
     )
     .nest_service("/mcp", mcp)
 }
@@ -233,6 +235,7 @@ pub async fn run_up(
         settings.agent.clone(),
         mcp_url.clone(),
         update_state,
+        settings.guard_predefined_namespaces,
     );
 
     if !matches!(settings.host.as_str(), "127.0.0.1" | "localhost" | "::1") {
@@ -467,6 +470,7 @@ mod tests {
             std::sync::Arc::new(tokio::sync::RwLock::new(
                 crate::update::UpdateState::new_idle(),
             )),
+            true,
         );
         let resp = app
             .oneshot(
