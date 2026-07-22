@@ -1,0 +1,85 @@
+use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
+
+pub struct DeviceIdentity {
+    pub device_id: String,
+    pub signing_key: SigningKey,
+}
+
+pub fn generate() -> DeviceIdentity {
+    let signing_key = SigningKey::generate(&mut rand::rngs::OsRng);
+    let device_id = device_id_from_public_key(&signing_key.verifying_key());
+    DeviceIdentity { device_id, signing_key }
+}
+
+fn device_id_from_public_key(vk: &VerifyingKey) -> String {
+    format!("hive_{}", hex::encode(&vk.to_bytes()[..16]))
+}
+
+pub fn public_key_hex(identity: &DeviceIdentity) -> String {
+    hex::encode(identity.signing_key.verifying_key().to_bytes())
+}
+
+pub fn sign(identity: &DeviceIdentity, message: &[u8]) -> String {
+    hex::encode(identity.signing_key.sign(message).to_bytes())
+}
+
+pub fn verify(public_key_hex: &str, message: &[u8], signature_hex: &str) -> bool {
+    let Ok(pk_bytes) = hex::decode(public_key_hex) else { return false };
+    let Ok(pk_bytes): Result<[u8; 32], _> = pk_bytes.try_into() else { return false };
+    let Ok(verifying_key) = VerifyingKey::from_bytes(&pk_bytes) else { return false };
+    let Ok(sig_bytes) = hex::decode(signature_hex) else { return false };
+    let Ok(sig_bytes): Result<[u8; 64], _> = sig_bytes.try_into() else { return false };
+    let signature = ed25519_dalek::Signature::from_bytes(&sig_bytes);
+    verifying_key.verify(message, &signature).is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generate_produces_device_id_prefixed_hive() {
+        let identity = generate();
+        assert!(identity.device_id.starts_with("hive_"));
+        assert_eq!(identity.device_id.len(), "hive_".len() + 32);
+    }
+
+    #[test]
+    fn device_id_is_deterministic_from_public_key() {
+        let identity = generate();
+        let recomputed = device_id_from_public_key(&identity.signing_key.verifying_key());
+        assert_eq!(identity.device_id, recomputed);
+    }
+
+    #[test]
+    fn sign_then_verify_round_trips() {
+        let identity = generate();
+        let msg = b"join:hive_abc123";
+        let sig = sign(&identity, msg);
+        let pk = public_key_hex(&identity);
+        assert!(verify(&pk, msg, &sig));
+    }
+
+    #[test]
+    fn verify_rejects_tampered_message() {
+        let identity = generate();
+        let sig = sign(&identity, b"original message");
+        let pk = public_key_hex(&identity);
+        assert!(!verify(&pk, b"tampered message", &sig));
+    }
+
+    #[test]
+    fn verify_rejects_wrong_public_key() {
+        let identity = generate();
+        let other = generate();
+        let msg = b"some message";
+        let sig = sign(&identity, msg);
+        let wrong_pk = public_key_hex(&other);
+        assert!(!verify(&wrong_pk, msg, &sig));
+    }
+
+    #[test]
+    fn verify_rejects_malformed_hex() {
+        assert!(!verify("not-hex", b"msg", "also-not-hex"));
+    }
+}
