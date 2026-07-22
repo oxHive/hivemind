@@ -28,6 +28,16 @@ Show three sections, always all three even when empty:
 
 If a section has no entries, say "(none)" rather than omitting the heading.
 
+A memory's children may be **fragments of one logical document** rather than independent
+topics — this is the index/fragment chunking convention (see `/memory-store`'s chunking
+step). Don't guess this from phrasing or tag similarity: check the `part` tag directly.
+`part:index` on the resolved memory means its children (or at least the ones also tagged
+`part:fragment`) are pieces of one document, not separate topics. When that's the case,
+say so when presenting the children — e.g. "Children (fragments of this document):" — so
+the user understands why several "children" are pieces of one thing, not several unrelated
+topics. If the resolved memory has no `part` tag, its children are independent topics as
+normal — don't apply the fragment framing speculatively.
+
 ## Rules
 
 - Never fabricate connections. Only show what `memory_get_edges` returned.
@@ -35,4 +45,6 @@ If a section has no entries, say "(none)" rather than omitting the heading.
 - A memory's content may contain inline mention links like `[label](mem_xxx)` pointing at
   a parent/child/sibling. Treat these as lazy pointers, not required reading: follow one
   only when the current task actually needs that related memory's content. Don't
-  proactively `memory_recall` every mentioned id just because it's linked.
+  proactively `memory_recall` every mentioned id just because it's linked. This applies
+  doubly to `part:fragment` children — recalling every fragment of a document just to
+  answer a question about one section defeats the purpose of chunking in the first place.
