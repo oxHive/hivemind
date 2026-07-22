@@ -1091,7 +1091,7 @@ async fn hive_pair_rejects_unknown_code() {
 
 #[tokio::test]
 async fn hive_pair_accepts_valid_code_and_join_record() {
-    let (app, dir) = test_router().await;
+    let (_app, dir) = test_router().await;
     let identity = crate::hive::identity::generate();
     let join_record = crate::hive::roster::create_join_record(&identity, "bob-phone", 1000);
 
