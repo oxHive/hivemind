@@ -3,6 +3,8 @@ use libsql::{Connection, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::hive::roster::{JoinRecord, RevocationRecord, RosterEntry, RosterStatus};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryEntry {
     pub id: String,
@@ -1331,6 +1333,73 @@ impl SqliteStore {
             .await?
             .ok_or_else(|| anyhow::anyhow!("PRAGMA data_version returned no row"))?;
         Ok(row.get(0)?)
+    }
+
+    pub async fn hive_list_roster(&self) -> Result<Vec<RosterEntry>> {
+        let mut rows = self
+            .conn
+            .query(
+                "SELECT device_id, public_key, name, status, joined_at, revoked_at, revoked_by, \
+                 join_record, revocation_record FROM hive_devices",
+                (),
+            )
+            .await?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().await? {
+            let status_str: String = row.get(3)?;
+            let join_record_json: String = row.get(7)?;
+            let revocation_record_json: Option<String> = row.get(8)?;
+            out.push(RosterEntry {
+                device_id: row.get(0)?,
+                public_key: row.get(1)?,
+                name: row.get(2)?,
+                status: if status_str == "revoked" { RosterStatus::Revoked } else { RosterStatus::Active },
+                joined_at: row.get(4)?,
+                revoked_at: row.get(5)?,
+                revoked_by: row.get(6)?,
+                join_record: serde_json::from_str::<JoinRecord>(&join_record_json)?,
+                revocation_record: revocation_record_json
+                    .map(|s| serde_json::from_str::<RevocationRecord>(&s))
+                    .transpose()?,
+            });
+        }
+        Ok(out)
+    }
+
+    pub async fn hive_upsert_roster_entry(&self, entry: &RosterEntry) -> Result<()> {
+        let status_str = match entry.status {
+            RosterStatus::Active => "active",
+            RosterStatus::Revoked => "revoked",
+        };
+        let join_record_json = serde_json::to_string(&entry.join_record)?;
+        let revocation_record_json = entry
+            .revocation_record
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?;
+        self.conn
+            .execute(
+                "INSERT INTO hive_devices \
+                 (device_id, public_key, name, status, joined_at, revoked_at, revoked_by, join_record, revocation_record) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
+                 ON CONFLICT(device_id) DO UPDATE SET \
+                   public_key = excluded.public_key, name = excluded.name, status = excluded.status, \
+                   revoked_at = excluded.revoked_at, revoked_by = excluded.revoked_by, \
+                   join_record = excluded.join_record, revocation_record = excluded.revocation_record",
+                params![
+                    entry.device_id.as_str(),
+                    entry.public_key.as_str(),
+                    entry.name.as_str(),
+                    status_str,
+                    entry.joined_at,
+                    entry.revoked_at,
+                    entry.revoked_by.as_deref(),
+                    join_record_json.as_str(),
+                    revocation_record_json.as_deref(),
+                ],
+            )
+            .await?;
+        Ok(())
     }
 
     fn row_to_entry(&self, row: &libsql::Row) -> Result<MemoryEntry> {

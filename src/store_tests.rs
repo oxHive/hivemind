@@ -1281,3 +1281,62 @@ async fn list_session_logs_orders_newest_first() {
     assert_eq!(logs[0].project_name, "second", "newest first");
     assert_eq!(logs[1].project_name, "first");
 }
+
+#[tokio::test]
+async fn hive_roster_starts_empty() {
+    let (s, _dir) = make_store().await;
+    let roster = s.hive_list_roster().await.unwrap();
+    assert!(roster.is_empty());
+}
+
+#[tokio::test]
+async fn hive_upsert_then_list_round_trips() {
+    let (s, _dir) = make_store().await;
+    let identity = crate::hive::identity::generate();
+    let join_record = crate::hive::roster::create_join_record(&identity, "alice-laptop", 1000);
+    let entry = crate::hive::roster::RosterEntry {
+        device_id: identity.device_id.clone(),
+        public_key: crate::hive::identity::public_key_hex(&identity),
+        name: "alice-laptop".to_string(),
+        status: crate::hive::roster::RosterStatus::Active,
+        joined_at: 1000,
+        revoked_at: None,
+        revoked_by: None,
+        join_record,
+        revocation_record: None,
+    };
+    s.hive_upsert_roster_entry(&entry).await.unwrap();
+    let roster = s.hive_list_roster().await.unwrap();
+    assert_eq!(roster.len(), 1);
+    assert_eq!(roster[0].device_id, identity.device_id);
+    assert_eq!(roster[0].name, "alice-laptop");
+}
+
+#[tokio::test]
+async fn hive_upsert_updates_existing_entry_status() {
+    let (s, _dir) = make_store().await;
+    let identity = crate::hive::identity::generate();
+    let join_record = crate::hive::roster::create_join_record(&identity, "bob-phone", 1000);
+    let mut entry = crate::hive::roster::RosterEntry {
+        device_id: identity.device_id.clone(),
+        public_key: crate::hive::identity::public_key_hex(&identity),
+        name: "bob-phone".to_string(),
+        status: crate::hive::roster::RosterStatus::Active,
+        joined_at: 1000,
+        revoked_at: None,
+        revoked_by: None,
+        join_record,
+        revocation_record: None,
+    };
+    s.hive_upsert_roster_entry(&entry).await.unwrap();
+
+    entry.status = crate::hive::roster::RosterStatus::Revoked;
+    entry.revoked_at = Some(2000);
+    entry.revoked_by = Some("hive_someoneelse00000000".to_string());
+    s.hive_upsert_roster_entry(&entry).await.unwrap();
+
+    let roster = s.hive_list_roster().await.unwrap();
+    assert_eq!(roster.len(), 1, "upsert must replace, not duplicate, the existing row");
+    assert_eq!(roster[0].status, crate::hive::roster::RosterStatus::Revoked);
+    assert_eq!(roster[0].revoked_at, Some(2000));
+}

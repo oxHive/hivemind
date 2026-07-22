@@ -108,6 +108,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "V7__edge_reason",
         include_str!("../migrations/V7__edge_reason.sql"),
     ),
+    (
+        "V8__hive_roster",
+        include_str!("../migrations/V8__hive_roster.sql"),
+    ),
 ];
 
 pub async fn run_migrations(conn: &libsql::Connection) -> Result<()> {
