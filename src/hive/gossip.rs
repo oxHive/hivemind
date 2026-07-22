@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::hive::roster::{verify_join_record, verify_revocation_record, RosterEntry, RosterStatus};
 
 /// Merges an incoming roster (received from a peer over gossip) into the
@@ -6,18 +8,36 @@ use crate::hive::roster::{verify_join_record, verify_revocation_record, RosterEn
 ///
 /// 1. Any incoming entry whose `join_record` doesn't verify is dropped
 ///    entirely.
-/// 2. An incoming entry not yet known locally is added, active.
+/// 2. An incoming entry not yet known locally is added, forced `Active`
+///    with no revocation state, regardless of whatever the incoming struct
+///    itself claims -- a first-seen device_id can never be pre-poisoned as
+///    `Revoked` without a verified revocation record, since this path never
+///    checks one.
 /// 3./4. An incoming revocation for a locally-`Active` entry is applied only
-///    if it verifies against the revoker's public key AND the revoker is
-///    itself a currently-`Active` entry in the *local* roster. This covers
-///    both self-revocation (revoker == target) and the common case of a
-///    separate trusted revoker.
+///    if: the revocation record's own claimed target (`device_id`) matches
+///    the candidate entry it's attached to (preventing cross-target
+///    replay), AND it verifies against the revoker's public key AND the
+///    revoker is itself a currently-`Active` entry in the local roster *as
+///    it stood before this merge call began* (preventing same-batch trust
+///    bootstrapping, where a throwaway device added earlier in this same
+///    incoming batch is used as the "trusted" revoker later in the same
+///    batch). This covers both self-revocation (revoker == target) and the
+///    common case of a separate trusted revoker.
 /// 5. A `Revoked` local entry is never overwritten back to `Active`.
 /// 6. Merge is idempotent.
 ///
 /// This is a pure function: no I/O, no clock reads. Callers (pairing
 /// handshake, data-sync exchange) are responsible for persisting the result.
 pub fn merge_roster(local: Vec<RosterEntry>, incoming: Vec<RosterEntry>) -> Vec<RosterEntry> {
+    // Frozen BEFORE the merge loop mutates anything -- revoker trust is
+    // checked against this snapshot only, never against `merged`'s
+    // in-progress state.
+    let locally_active_before_merge: HashMap<String, String> = local
+        .iter()
+        .filter(|e| e.status == RosterStatus::Active)
+        .map(|e| (e.device_id.clone(), e.public_key.clone()))
+        .collect();
+
     let mut merged = local;
 
     for candidate in incoming {
@@ -25,32 +45,51 @@ pub fn merge_roster(local: Vec<RosterEntry>, incoming: Vec<RosterEntry>) -> Vec<
             continue;
         }
 
-        match merged.iter_mut().find(|e| e.device_id == candidate.device_id) {
-            None => merged.push(candidate),
-            Some(existing) => {
-                if existing.status == RosterStatus::Revoked {
-                    continue;
+        match merged.iter().position(|e| e.device_id == candidate.device_id) {
+            None => {
+                // Rule 2: first-seen entries are always added Active,
+                // regardless of whatever status/revocation fields the
+                // incoming struct happens to carry.
+                merged.push(RosterEntry {
+                    status: RosterStatus::Active,
+                    revoked_at: None,
+                    revoked_by: None,
+                    revocation_record: None,
+                    ..candidate
+                });
+            }
+            Some(idx) => {
+                if merged[idx].status == RosterStatus::Revoked {
+                    continue; // sticky: never un-revoke
                 }
                 if let Some(revocation) = &candidate.revocation_record {
-                    let revoker_is_active_locally = merged
-                        .iter()
-                        .find(|e| e.device_id == revocation.revoked_by)
-                        .map(|e| e.status == RosterStatus::Active)
+                    // The revocation record's own claimed target must
+                    // match the entry we're about to apply it to --
+                    // otherwise a legitimate revocation for one device
+                    // could be replayed against an unrelated one.
+                    if revocation.device_id != candidate.device_id {
+                        continue;
+                    }
+
+                    let target_public_key = merged[idx].public_key.clone();
+
+                    // Degenerate case: a device revoking itself, verified
+                    // against ITS OWN public key.
+                    let self_revoked = revocation.revoked_by == candidate.device_id
+                        && verify_revocation_record(revocation, &target_public_key);
+
+                    // Common case: revocation from a different member who
+                    // was ALREADY active before this merge began.
+                    let revoker_trusted = locally_active_before_merge
+                        .get(&revocation.revoked_by)
+                        .map(|revoker_pk| verify_revocation_record(revocation, revoker_pk))
                         .unwrap_or(false);
-                    let revoker_public_key = merged
-                        .iter()
-                        .find(|e| e.device_id == revocation.revoked_by)
-                        .map(|e| e.public_key.clone());
-                    let sig_ok = revoker_public_key
-                        .map(|pk| verify_revocation_record(revocation, &pk))
-                        .unwrap_or(false);
-                    if revoker_is_active_locally && sig_ok {
-                        if let Some(existing) = merged.iter_mut().find(|e| e.device_id == candidate.device_id) {
-                            existing.status = RosterStatus::Revoked;
-                            existing.revoked_at = Some(revocation.revoked_at);
-                            existing.revoked_by = Some(revocation.revoked_by.clone());
-                            existing.revocation_record = Some(revocation.clone());
-                        }
+
+                    if self_revoked || revoker_trusted {
+                        merged[idx].status = RosterStatus::Revoked;
+                        merged[idx].revoked_at = Some(revocation.revoked_at);
+                        merged[idx].revoked_by = Some(revocation.revoked_by.clone());
+                        merged[idx].revocation_record = Some(revocation.clone());
                     }
                 }
             }
@@ -160,5 +199,129 @@ mod tests {
         assert_eq!(once.len(), twice.len());
         assert_eq!(once[0].device_id, twice[0].device_id);
         assert_eq!(once[0].status, twice[0].status);
+    }
+
+    // Bug 1: same-batch trust bootstrapping. A throwaway device C is added
+    // as Active by the same incoming batch that also carries a revocation
+    // "from" C targeting a real, previously-active device B. C must not be
+    // usable as a trusted revoker just because it appears earlier in the
+    // same batch -- trust is checked against the roster as it stood BEFORE
+    // this merge call began.
+    #[test]
+    fn rejects_same_batch_revoker_bootstrapping() {
+        let b = identity::generate();
+        let c = identity::generate();
+        let local = vec![entry_for(&b, "bob-phone", 1100)];
+
+        let c_join = entry_for(&c, "throwaway-c", 1500);
+
+        let revocation = create_revocation_record(&c, &b.device_id, 2000);
+        let mut incoming_b = entry_for(&b, "bob-phone", 1100);
+        incoming_b.revocation_record = Some(revocation);
+
+        let merged = merge_roster(local, vec![c_join, incoming_b]);
+        let b_entry = merged.iter().find(|e| e.device_id == b.device_id).unwrap();
+        assert_eq!(
+            b_entry.status,
+            RosterStatus::Active,
+            "a device added earlier in the same batch must not be trusted as a revoker"
+        );
+    }
+
+    // Bug 2: cross-target replay. A genuine revocation record for device D
+    // (signed by a real, locally-trusted revoker A) gets reattached to a
+    // different candidate entry for device B. It must be rejected because
+    // the record's own claimed target (D) doesn't match the entry it's
+    // attached to (B).
+    #[test]
+    fn rejects_cross_target_revocation_replay() {
+        let a = identity::generate();
+        let b = identity::generate();
+        let d = identity::generate();
+        let local = vec![
+            entry_for(&a, "alice-laptop", 1000),
+            entry_for(&b, "bob-phone", 1100),
+            entry_for(&d, "dave-tablet", 1200),
+        ];
+
+        // Genuine revocation: A revokes D.
+        let revocation_for_d = create_revocation_record(&a, &d.device_id, 2000);
+
+        // Replayed onto B's own, otherwise-valid, unrelated entry.
+        let mut incoming_b = entry_for(&b, "bob-phone", 1100);
+        incoming_b.revocation_record = Some(revocation_for_d);
+
+        let merged = merge_roster(local, vec![incoming_b]);
+        let b_entry = merged.iter().find(|e| e.device_id == b.device_id).unwrap();
+        assert_eq!(
+            b_entry.status,
+            RosterStatus::Active,
+            "a revocation record for a different target must not apply to this entry"
+        );
+    }
+
+    // Bug 3: a first-seen candidate with status forced to Revoked directly
+    // (no verified revocation record at all) must be added as Active.
+    #[test]
+    fn rejects_pre_poisoned_new_entry() {
+        let c = identity::generate();
+        let mut poisoned = entry_for(&c, "poisoned-c", 1000);
+        poisoned.status = RosterStatus::Revoked;
+        poisoned.revoked_by = Some("nobody".to_string());
+        poisoned.revoked_at = Some(999);
+
+        let merged = merge_roster(vec![], vec![poisoned]);
+        let c_entry = merged.iter().find(|e| e.device_id == c.device_id).unwrap();
+        assert_eq!(
+            c_entry.status,
+            RosterStatus::Active,
+            "a first-seen entry must never be added pre-poisoned as Revoked"
+        );
+        assert!(c_entry.revoked_by.is_none());
+        assert!(c_entry.revoked_at.is_none());
+        assert!(c_entry.revocation_record.is_none());
+    }
+
+    // Gap 1: self-revocation, where revoked_by == the target's own
+    // device_id and the signature verifies against the target's own
+    // public key (not some other revoker's).
+    #[test]
+    fn applies_self_revocation() {
+        let b = identity::generate();
+        let local = vec![entry_for(&b, "bob-phone", 1100)];
+
+        let self_revocation = create_revocation_record(&b, &b.device_id, 2000);
+        let mut incoming_b = entry_for(&b, "bob-phone", 1100);
+        incoming_b.revocation_record = Some(self_revocation);
+
+        let merged = merge_roster(local, vec![incoming_b]);
+        let b_entry = merged.iter().find(|e| e.device_id == b.device_id).unwrap();
+        assert_eq!(b_entry.status, RosterStatus::Revoked);
+        assert_eq!(b_entry.revoked_by.as_deref(), Some(b.device_id.as_str()));
+    }
+
+    // Gap 2: idempotency of a revocation merge specifically -- merging the
+    // same revoking batch twice must not change status/revoked_at/revoked_by
+    // between the first and second merge.
+    #[test]
+    fn revocation_merge_is_idempotent() {
+        let a = identity::generate();
+        let b = identity::generate();
+        let local = vec![entry_for(&a, "alice-laptop", 1000), entry_for(&b, "bob-phone", 1100)];
+
+        let revocation = create_revocation_record(&a, &b.device_id, 2000);
+        let mut incoming_b = entry_for(&b, "bob-phone", 1100);
+        incoming_b.revocation_record = Some(revocation);
+
+        let once = merge_roster(local, vec![incoming_b.clone()]);
+        let twice = merge_roster(once.clone(), vec![incoming_b]);
+
+        let once_b = once.iter().find(|e| e.device_id == b.device_id).unwrap();
+        let twice_b = twice.iter().find(|e| e.device_id == b.device_id).unwrap();
+
+        assert_eq!(once_b.status, twice_b.status);
+        assert_eq!(once_b.revoked_at, twice_b.revoked_at);
+        assert_eq!(once_b.revoked_by, twice_b.revoked_by);
+        assert_eq!(once_b.status, RosterStatus::Revoked);
     }
 }
