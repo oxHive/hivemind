@@ -91,6 +91,7 @@ async fn run_server() -> Result<()> {
                 sync: config::SyncSettings::default(),
                 update: config::UpdateSettings::default(),
                 agent: config::AgentSettings::default(),
+                hive: config::HiveSettings::default(),
                 guard_predefined_namespaces: true,
             }
         });

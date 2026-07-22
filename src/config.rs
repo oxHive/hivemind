@@ -132,6 +132,13 @@ struct RawTags {
 }
 
 #[derive(Debug, Default, Deserialize)]
+struct RawHive {
+    enabled: Option<bool>,
+    sync_interval_seconds: Option<u64>,
+    ping_interval_seconds: Option<u64>,
+}
+
+#[derive(Debug, Default, Deserialize)]
 struct RawMatrix {
     homeserver_url: Option<String>,
     user_id: Option<String>,
@@ -184,6 +191,23 @@ impl Default for UpdateSettings {
         UpdateSettings {
             enabled: true,
             check_interval_seconds: 600,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HiveSettings {
+    pub enabled: bool,
+    pub sync_interval_seconds: u64,
+    pub ping_interval_seconds: u64,
+}
+
+impl Default for HiveSettings {
+    fn default() -> Self {
+        HiveSettings {
+            enabled: false,
+            sync_interval_seconds: 300,
+            ping_interval_seconds: 60,
         }
     }
 }
@@ -287,6 +311,8 @@ struct RawGlobal {
     matrix: RawMatrix,
     #[serde(default)]
     tags: RawTags,
+    #[serde(default)]
+    hive: RawHive,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -412,6 +438,7 @@ pub struct ServerSettings {
     pub sync: SyncSettings,
     pub update: UpdateSettings,
     pub agent: AgentSettings,
+    pub hive: HiveSettings,
     /// Whether predefined tag namespaces (project, topic, status, lang, kind,
     /// scope, part) can be deleted or modified via the dashboard/API. On by
     /// default; set `[tags] guard_predefined_namespaces = false` in the
@@ -466,6 +493,17 @@ pub fn load_server_settings(global_path: &std::path::Path) -> anyhow::Result<Ser
         kind: agent_kind,
     };
     let guard_predefined_namespaces = raw.tags.guard_predefined_namespaces.unwrap_or(true);
+    let hive = HiveSettings {
+        enabled: raw.hive.enabled.unwrap_or(false),
+        sync_interval_seconds: raw.hive.sync_interval_seconds.unwrap_or(300),
+        ping_interval_seconds: raw.hive.ping_interval_seconds.unwrap_or(60),
+    };
+    if sync.enabled && hive.enabled {
+        anyhow::bail!(
+            "[sync] and [hive] are mutually exclusive - enable only one. \
+             A device runs either cloud sync (hub-and-spoke) or Hive Mode (LAN peer-to-peer), not both."
+        );
+    }
     Ok(ServerSettings {
         host,
         port,
@@ -475,6 +513,7 @@ pub fn load_server_settings(global_path: &std::path::Path) -> anyhow::Result<Ser
         sync,
         update,
         agent,
+        hive,
         guard_predefined_namespaces,
     })
 }
@@ -730,6 +769,41 @@ mod tests {
         let s = load_server_settings(&tmp.path().join("config.toml")).unwrap();
         assert!(!s.update.enabled);
         assert_eq!(s.update.check_interval_seconds, 120);
+    }
+
+    #[test]
+    fn hive_settings_defaults_when_global_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let s = load_server_settings(&tmp.path().join("no-global.toml")).unwrap();
+        assert!(!s.hive.enabled);
+        assert_eq!(s.hive.sync_interval_seconds, 300);
+        assert_eq!(s.hive.ping_interval_seconds, 60);
+    }
+
+    #[test]
+    fn hive_settings_reads_from_global_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "config.toml",
+            "[hive]\nenabled=true\nsync_interval_seconds=120\nping_interval_seconds=30\n",
+        );
+        let s = load_server_settings(&tmp.path().join("config.toml")).unwrap();
+        assert!(s.hive.enabled);
+        assert_eq!(s.hive.sync_interval_seconds, 120);
+        assert_eq!(s.hive.ping_interval_seconds, 30);
+    }
+
+    #[test]
+    fn hive_and_sync_both_enabled_is_rejected() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "config.toml",
+            "[sync]\nenabled=true\nremote_url=\"http://example.com\"\n[hive]\nenabled=true\n",
+        );
+        let err = load_server_settings(&tmp.path().join("config.toml")).unwrap_err();
+        assert!(err.to_string().contains("hive") && err.to_string().contains("sync"));
     }
 
     #[test]

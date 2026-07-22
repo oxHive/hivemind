@@ -485,6 +485,7 @@ async fn build_status_data_matches_render_status_text() {
         sync: SyncSettings::default(),
         update: crate::config::UpdateSettings::default(),
         agent: crate::config::AgentSettings::default(),
+        hive: crate::config::HiveSettings::default(),
         guard_predefined_namespaces: true,
     };
 
