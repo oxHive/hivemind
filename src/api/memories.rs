@@ -22,6 +22,29 @@ pub(super) async fn list_memories(
 }
 
 #[derive(Deserialize)]
+pub(super) struct CountTokensBody {
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    content: String,
+}
+
+/// Live token count for the dashboard's memory editor, using the exact same
+/// counting the memory_store/memory_update guardrail enforces — read-only,
+/// no store write, so the UI can show the count while the user is still
+/// typing.
+pub(super) async fn count_tokens(
+    State(store): State<Store>,
+    Json(body): Json<CountTokensBody>,
+) -> Json<Value> {
+    let tokens = crate::budget::count_entry_tokens(&body.title, &body.content);
+    Json(json!({
+        "tokens": tokens,
+        "max_content_tokens": store.max_content_tokens().await,
+    }))
+}
+
+#[derive(Deserialize)]
 pub(super) struct CreateMemoryBody {
     title: String,
     content: String,

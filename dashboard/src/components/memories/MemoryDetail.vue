@@ -13,6 +13,7 @@ import ConfirmModal from '../shared/ConfirmModal.vue'
 import CopyIdButton from '../shared/CopyIdButton.vue'
 import { fmtDate, slugify } from '../../lib/format.js'
 import { createFeedback } from '../../api/feedback.js'
+import { countTokens } from '../../api/memories.js'
 import { caretCoords } from '../../lib/caret.js'
 import { diffPreview } from '../../lib/mention.js'
 
@@ -48,6 +49,36 @@ function downloadMarkdown() {
   a.remove()
   URL.revokeObjectURL(url)
 }
+
+// Live token count while editing — debounced so we're not hitting the API
+// on every keystroke, but still feels live. Best-effort: a failed count
+// request just leaves the last-known count stale, it's not on the save path.
+const tokenCount = ref(0)
+const maxContentTokens = ref(null)
+const tokenOverLimit = computed(() => maxContentTokens.value != null && tokenCount.value > maxContentTokens.value)
+let tokenDebounceTimer = null
+
+async function refreshTokenCount() {
+  if (!memories.draft) return
+  try {
+    const res = await countTokens({ title: memories.draft.title || '', content: memories.draft.content || '' })
+    tokenCount.value = res.tokens
+    maxContentTokens.value = res.max_content_tokens
+  } catch {
+    // best-effort — leave the last known count displayed
+  }
+}
+
+watch(
+  () => [memories.draft?.title, memories.draft?.content],
+  () => {
+    clearTimeout(tokenDebounceTimer)
+    tokenDebounceTimer = setTimeout(refreshTokenCount, 300)
+  },
+  { immediate: true },
+)
+
+onBeforeUnmount(() => clearTimeout(tokenDebounceTimer))
 
 const contentEl = ref(null)
 const mention = ref(null) // { start, query, top, left } | null
@@ -269,13 +300,20 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
         <!-- Content -->
         <div class="flex items-center justify-between mb-1.5">
           <label class="hm-label" style="margin-bottom:0" for="mem-content">CONTENT</label>
-          <div class="content-toggle" role="tablist" aria-label="Content view">
-            <button type="button" role="tab" :aria-selected="contentView === 'markdown'"
-              class="content-toggle__btn" :class="{ 'content-toggle__btn--active': contentView === 'markdown' }"
-              @click="contentView = 'markdown'">Markdown</button>
-            <button type="button" role="tab" :aria-selected="contentView === 'raw'"
-              class="content-toggle__btn" :class="{ 'content-toggle__btn--active': contentView === 'raw' }"
-              @click="contentView = 'raw'">Raw</button>
+          <div class="flex items-center gap-3">
+            <span v-if="maxContentTokens != null" class="font-mono"
+              :title="tokenOverLimit ? 'Exceeds max_content_tokens — split into an index memory plus fragments before saving' : 'Title + content token count'"
+              :style="`font-size:10px; color:${tokenOverLimit ? 'var(--hm-danger)' : 'var(--hm-text-tertiary)'}`">
+              {{ tokenCount }}/{{ maxContentTokens }}
+            </span>
+            <div class="content-toggle" role="tablist" aria-label="Content view">
+              <button type="button" role="tab" :aria-selected="contentView === 'markdown'"
+                class="content-toggle__btn" :class="{ 'content-toggle__btn--active': contentView === 'markdown' }"
+                @click="contentView = 'markdown'">Markdown</button>
+              <button type="button" role="tab" :aria-selected="contentView === 'raw'"
+                class="content-toggle__btn" :class="{ 'content-toggle__btn--active': contentView === 'raw' }"
+                @click="contentView = 'raw'">Raw</button>
+            </div>
           </div>
         </div>
         <div v-if="pendingDiff" class="mb-6 rounded"

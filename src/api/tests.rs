@@ -400,6 +400,58 @@ async fn get_tag_settings_returns_seeded_defaults_when_unset() {
 }
 
 #[tokio::test]
+async fn count_tokens_returns_zero_for_empty_input() {
+    let (app, _dir) = test_router().await;
+    let (status, body) = req(
+        app,
+        "POST",
+        "/api/v1/memories/count-tokens",
+        Some(json!({ "title": "", "content": "" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["tokens"], 0);
+    assert_eq!(body["max_content_tokens"], 1500);
+}
+
+#[tokio::test]
+async fn count_tokens_counts_title_and_content_together() {
+    let (app, _dir) = test_router().await;
+    let (status, body) = req(
+        app,
+        "POST",
+        "/api/v1/memories/count-tokens",
+        Some(json!({ "title": "a short title", "content": "some body content here" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body["tokens"].as_i64().unwrap() > 0);
+}
+
+#[tokio::test]
+async fn count_tokens_reflects_custom_max_content_tokens() {
+    let (app, _dir) = test_router().await;
+    let (status, _) = req(
+        app.clone(),
+        "POST",
+        "/api/v1/settings/content-limits",
+        Some(json!({ "max_content_tokens": 42 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = req(
+        app,
+        "POST",
+        "/api/v1/memories/count-tokens",
+        Some(json!({ "title": "", "content": "" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["max_content_tokens"], 42);
+}
+
+#[tokio::test]
 async fn save_tag_settings_persists_and_get_returns_it() {
     let (app, _dir) = test_router().await;
     let custom = json!({
