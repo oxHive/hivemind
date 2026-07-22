@@ -8,3 +8,6 @@ on:
 jobs:
   ci:
     uses: oxHive/pipelines/.github/workflows/rust-check.yml@main
+    with:
+      upload-coverage: true
+    secrets: inherit

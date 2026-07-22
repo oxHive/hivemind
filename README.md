@@ -1,5 +1,12 @@
 # HiveMind
 
+[![Crates.io](https://img.shields.io/crates/v/oxhivemind.svg)](https://crates.io/crates/oxhivemind)
+[![Crates.io Downloads](https://img.shields.io/crates/d/oxhivemind.svg)](https://crates.io/crates/oxhivemind)
+[![CI](https://github.com/oxhive/hivemind/actions/workflows/pull-request.yml/badge.svg?event=pull_request)](https://github.com/oxhive/hivemind/actions/workflows/pull-request.yml)
+[![codecov](https://codecov.io/gh/oxhive/hivemind/branch/main/graph/badge.svg)](https://codecov.io/gh/oxhive/hivemind)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+[![GitHub release](https://img.shields.io/github/v/release/oxhive/hivemind)](https://github.com/oxhive/hivemind/releases)
+
 > 🚧 **Under active development.** APIs and config formats may change between releases.
 
 Persistent memory for AI coding agents. HiveMind is a local MCP server that gives Claude Code (and other AI agents) access to a [libsql](https://github.com/tursodatabase/libsql)-backed memory store, keeping context, preferences, and project knowledge alive across sessions.
