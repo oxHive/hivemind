@@ -1013,6 +1013,38 @@ async fn update_dropping_one_of_two_targets_deletes_only_that_edge() {
 }
 
 #[tokio::test]
+async fn update_does_not_delete_manually_created_edge_with_no_content_link() {
+    // Edges created via create_edge_with_status (the memory_store_edge MCP
+    // tool's path) have link_text: None and no corresponding [phrase](kind:id)
+    // markup in either memory's content. A later content-driven sync must not
+    // treat "no content link" as "this edge should be deleted" for edges it
+    // never created in the first place.
+    let (s, _dir) = make_store().await;
+    s.store(&test_row("mem_src", "Src", "plain body, no links", &[]))
+        .await
+        .unwrap();
+    s.store(&test_row(T_B, "Target", "plain body, no links", &[]))
+        .await
+        .unwrap();
+    s.create_edge("mem_src", T_B, "parent").await.unwrap();
+
+    let before = s.list_edges(Some("mem_src")).await.unwrap();
+    assert_eq!(before.len(), 1);
+
+    // Title-only edit: content is unchanged, still has no relationship links.
+    s.update("mem_src", "Src (renamed)", "plain body, no links", &[])
+        .await
+        .unwrap();
+
+    let after = s.list_edges(Some("mem_src")).await.unwrap();
+    assert_eq!(
+        after.len(),
+        1,
+        "manually-created edge should survive an unrelated content-sync"
+    );
+}
+
+#[tokio::test]
 async fn relationship_link_to_nonexistent_target_creates_no_edge() {
     let (s, _dir) = make_store().await;
     s.store(&test_row("mem_src", "Src", &format!("[ghost]({T_B})"), &[]))

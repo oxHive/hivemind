@@ -136,6 +136,13 @@ pub(crate) fn parse_relationship_links(
 /// "sibling"): upserts an active edge per surviving (kind, target) pair
 /// (refreshing `link_text` and resetting `status` to 'active' on rephrase),
 /// and deletes any (kind, target) pair no longer present in the content.
+///
+/// Deletion is scoped to `link_text IS NOT NULL` — i.e. edges this same
+/// function previously created from content. Edges created out-of-band
+/// (e.g. via the `memory_store_edge` MCP tool) are stored with
+/// `link_text: None` and have no content link to begin with; without this
+/// scope, saving a memory for any reason (even a title-only edit) would
+/// wipe every such edge since none of them match a currently-parsed link.
 async fn sync_relationship_edges(
     tx: &libsql::Transaction,
     source_id: &str,
@@ -158,7 +165,8 @@ async fn sync_relationship_edges(
 
     if links.is_empty() {
         tx.execute(
-            "DELETE FROM edges WHERE source_id = ?1 AND relationship IN ('parent', 'child', 'sibling')",
+            "DELETE FROM edges WHERE source_id = ?1 AND relationship IN ('parent', 'child', 'sibling') \
+             AND link_text IS NOT NULL",
             params![source_id],
         )
         .await?;
@@ -174,7 +182,7 @@ async fn sync_relationship_edges(
             .collect();
         let sql = format!(
             "DELETE FROM edges WHERE source_id = ?1 AND relationship IN ('parent', 'child', 'sibling') \
-             AND NOT ({})",
+             AND link_text IS NOT NULL AND NOT ({})",
             conditions.join(" OR ")
         );
         let mut p: Vec<libsql::Value> = vec![libsql::Value::Text(source_id.to_string())];
