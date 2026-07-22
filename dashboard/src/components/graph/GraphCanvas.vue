@@ -115,8 +115,13 @@ const COLORS = {
 // Brighter, higher-contrast than the original muted set — at low alpha and
 // 1px width the old colors (#5b8fd9/#c2634a/#9a63d6) were nearly indistinguishable
 // from each other and from the background.
+// parent and child share a color: the relationship field only records which
+// end the edge was stored from ('parent' means target is source's parent,
+// 'child' means target is source's child) — the arrowhead (drawn toward the
+// child end) is what actually conveys direction, so two colors for the same
+// relationship kind was redundant.
 const RELATIONSHIP_COLORS = {
-  parent: '#4d9bff',
+  parent: '#ff7a45',
   child: '#ff7a45',
   sibling: '#c084fc',
 }
@@ -320,6 +325,22 @@ function drawClusterLabel(ctx, name, members, hue, scale) {
   ctx.textBaseline = 'alphabetic'
 }
 
+// Draws a filled triangle at `tip`, oriented along the from->tip direction —
+// used on parent/child edges to show which end is the child (arrow points
+// away from the parent, toward the child), since edge color alone doesn't
+// convey direction.
+function drawArrowhead(ctx, from, tip, color) {
+  const angle = Math.atan2(tip.y - from.y, tip.x - from.x)
+  const size = 8
+  ctx.beginPath()
+  ctx.moveTo(tip.x, tip.y)
+  ctx.lineTo(tip.x - size * Math.cos(angle - Math.PI / 6), tip.y - size * Math.sin(angle - Math.PI / 6))
+  ctx.lineTo(tip.x - size * Math.cos(angle + Math.PI / 6), tip.y - size * Math.sin(angle + Math.PI / 6))
+  ctx.closePath()
+  ctx.fillStyle = color
+  ctx.fill()
+}
+
 // Memories render as hexagonal cells — the honeycomb is the graph.
 function traceHex(ctx, x, y, r) {
   ctx.beginPath()
@@ -395,6 +416,18 @@ function draw() {
     ctx.moveTo(sx, sy)
     ctx.lineTo(tx, ty)
     ctx.stroke()
+
+    // relationship describes target relative to source (e.g. 'parent' means
+    // target is source's parent) — see MemoryDetail.vue's INVERSE_RELATIONSHIP.
+    // Arrow always points at the child end, away from the parent end, so
+    // direction reads correctly regardless of which side is source/target.
+    if (link.status !== 'pending' && (link.relationship === 'parent' || link.relationship === 'child')) {
+      const parentIsSource = link.relationship === 'child'
+      const from = parentIsSource ? { x: sx, y: sy } : { x: tx, y: ty }
+      const tip = parentIsSource ? { x: tx, y: ty } : { x: sx, y: sy }
+      drawArrowhead(ctx, from, tip, ctx.strokeStyle)
+    }
+
     ctx.globalAlpha = 1
     ctx.setLineDash([])
   }

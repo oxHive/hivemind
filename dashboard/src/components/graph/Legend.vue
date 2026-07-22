@@ -11,10 +11,9 @@
       <span class="inline-block w-5 h-0 border-t-2 border-dashed" style="border-color:#ba7517"></span>pending
     </span>
     <span class="flex items-center gap-1.5">
-      <span class="inline-block w-5 h-0 border-t-2" style="border-color:#4d9bff"></span>parent
-    </span>
-    <span class="flex items-center gap-1.5">
-      <span class="inline-block w-5 h-0 border-t-2" style="border-color:#ff7a45"></span>child
+      <span class="inline-block w-5 h-0 border-t-2" style="border-color:#ff7a45"></span>
+      <span style="width:0; height:0; border-top:4px solid transparent; border-bottom:4px solid transparent; border-left:6px solid #ff7a45"></span>
+      parent<span style="font-size:14px; line-height:1">&#8594;</span>child
     </span>
     <span class="flex items-center gap-1.5">
       <span class="inline-block w-5 h-0 border-t-2" style="border-color:#c084fc"></span>sibling
