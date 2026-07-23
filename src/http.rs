@@ -523,6 +523,31 @@ mod tests {
         let result = rustls::ServerConfig::builder_with_provider(provider)
             .with_protocol_versions(rustls::DEFAULT_VERSIONS);
         assert!(result.is_ok(), "explicit provider selection must not fail");
+
+        // Prove the ambiguity is real, not hypothetical: the bare builder()
+        // this fix replaced genuinely panics in this exact build (both
+        // crypto backends compiled in, no process-wide default installed).
+        // Without this assertion, the test above would pass identically
+        // even if only one backend were ever compiled in, and wouldn't
+        // prove anything about the bug it's guarding against.
+        // Note: this prints a panic backtrace to stderr even though the test
+        // passes -- that's expected and benign (it's the panic this test is
+        // proving happens). Not suppressing it via a custom panic hook here,
+        // since std::panic::set_hook/take_hook are process-global and this
+        // test binary runs many tests in parallel threads; swapping the hook
+        // could race with a genuine panic in another concurrently-running
+        // test and swallow its real backtrace.
+        let bare_builder_panics =
+            std::panic::catch_unwind(|| rustls::ServerConfig::builder()).is_err();
+        assert!(
+            bare_builder_panics,
+            "expected the bare ServerConfig::builder() to panic on an ambiguous \
+             default crypto provider -- if this now passes, either the dependency \
+             graph changed to only compile in one backend (fine, but re-check \
+             whether the explicit-provider workaround above is still needed) or \
+             something upstream started installing a process-wide default before \
+             this test runs (also worth understanding before treating this as safe)"
+        );
     }
 
     #[tokio::test]
