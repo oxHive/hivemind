@@ -3874,6 +3874,7 @@ dependencies = [
  "rmcp",
  "rpassword",
  "rustls 0.22.4",
+ "rustls-pki-types",
  "schemars",
  "semver",
  "serde",

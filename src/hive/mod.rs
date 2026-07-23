@@ -1,3 +1,4 @@
+pub mod cert;
 pub mod discovery;
 pub mod gossip;
 pub mod identity;
