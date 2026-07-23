@@ -1,6 +1,7 @@
 use crate::hive::roster::{RosterEntry, RosterStatus};
 use anyhow::{bail, Context, Result};
-use rustls::pki_types::{CertificateDer, UnixTime};
+use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
 use rustls::{DigitallySignedStruct, DistinguishedName, SignatureScheme};
 use std::fmt;
@@ -113,6 +114,81 @@ impl ClientCertVerifier for RosterClientCertVerifier {
     }
 }
 
+/// Accepts a server's TLS certificate only if its public key matches one
+/// specific expected device — used when this device initiates an outbound
+/// hive call to a *known* peer (looked up from the local roster before
+/// connecting). Unlike `RosterClientCertVerifier` (which accepts any
+/// currently-Active member), this is a tight per-connection pin: exactly
+/// one acceptable public key, not "any roster member."
+#[derive(Debug)]
+pub struct PinnedServerCertVerifier {
+    expected_public_key: [u8; 32],
+}
+
+impl PinnedServerCertVerifier {
+    pub fn new(expected_public_key: [u8; 32]) -> Self {
+        Self { expected_public_key }
+    }
+}
+
+impl ServerCertVerifier for PinnedServerCertVerifier {
+    fn verify_server_cert(
+        &self,
+        end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        let Ok(public_key) = extract_ed25519_public_key(end_entity) else {
+            return Err(rustls::Error::General(
+                "could not extract Ed25519 public key from server certificate".into(),
+            ));
+        };
+        if public_key == self.expected_public_key {
+            Ok(ServerCertVerified::assertion())
+        } else {
+            Err(rustls::Error::General(
+                "server certificate's public key does not match the expected hive peer".into(),
+            ))
+        }
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls12_signature(
+            message,
+            cert,
+            dss,
+            &rustls::crypto::ring::default_provider().signature_verification_algorithms,
+        )
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls13_signature(
+            message,
+            cert,
+            dss,
+            &rustls::crypto::ring::default_provider().signature_verification_algorithms,
+        )
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        rustls::crypto::ring::default_provider()
+            .signature_verification_algorithms
+            .supported_schemes()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,5 +207,30 @@ mod tests {
     #[test]
     fn extract_ed25519_public_key_rejects_garbage_der() {
         assert!(extract_ed25519_public_key(b"not a certificate").is_err());
+    }
+
+    #[test]
+    fn pinned_verifier_accepts_matching_key_rejects_mismatched() {
+        let a = identity::generate();
+        let b = identity::generate();
+        let cert_a = cert::self_signed_cert(&a).unwrap();
+        let der_a = cert_a.cert.der();
+        let pubkey_a = extract_ed25519_public_key(der_a).unwrap();
+        let pubkey_b_hex = identity::public_key_hex(&b);
+        let pubkey_b: [u8; 32] = hex::decode(&pubkey_b_hex).unwrap().try_into().unwrap();
+
+        let verifier_expects_a = PinnedServerCertVerifier::new(pubkey_a);
+        let verifier_expects_b = PinnedServerCertVerifier::new(pubkey_b);
+
+        let now = rustls::pki_types::UnixTime::now();
+        let cert_der = rustls::pki_types::CertificateDer::from(der_a.to_vec());
+        let server_name = rustls::pki_types::ServerName::try_from(a.device_id.clone()).unwrap();
+
+        assert!(verifier_expects_a
+            .verify_server_cert(&cert_der, &[], &server_name, &[], now)
+            .is_ok());
+        assert!(verifier_expects_b
+            .verify_server_cert(&cert_der, &[], &server_name, &[], now)
+            .is_err());
     }
 }
