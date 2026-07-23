@@ -59,6 +59,8 @@ async fn test_app() -> (axum::Router, TempDir) {
         update_state,
         oxhivemind::config::AgentSettings::default(),
         true,
+        false,
+        None,
     );
     (router, dir)
 }

@@ -137,6 +137,30 @@ async fn sync_once(store: &Arc<SqliteStore>, identity: &DeviceIdentity) {
     }
 }
 
+/// Best-effort push of a just-changed memory to every peer this device
+/// currently believes is online. Takes owned values, not references: this
+/// function is always invoked via `tokio::spawn` (the REST/MCP write
+/// handlers in `src/api/memories.rs` / `src/server.rs`), and a spawned
+/// future must be `'static` -- it cannot borrow from the caller's stack
+/// frame, which is why every argument here is owned (`Arc` for the store,
+/// an owned `DeviceIdentity` clone, an owned `String` for the id) rather
+/// than a borrow.
+pub async fn push_memory_change_to_online_peers(
+    store: Arc<SqliteStore>,
+    identity: DeviceIdentity,
+    memory_id: String,
+) {
+    let Ok(Some(payload)) = store.hive_push_payload_for(&memory_id).await else { return };
+    let Ok(online_peers) = crate::hive::peer_status::online_peers(&store).await else { return };
+    for peer in online_peers {
+        let Ok(client) = crate::hive::client::HiveClient::new(&identity, &peer.public_key) else { continue };
+        let Some(address) = peer.address else { continue };
+        let _ = client.post_json(&format!("https://{address}/api/v1/hive/push"), &payload).await;
+        // Best-effort: a failed push is silently dropped, per this plan's
+        // spec decision -- the peer's own next pull round is the backstop.
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

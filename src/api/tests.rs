@@ -80,6 +80,8 @@ async fn test_router_with_guard(guard_predefined_namespaces: bool) -> (Router, T
         test_update_state(),
         test_agent_settings(),
         guard_predefined_namespaces,
+        false,
+        None,
     );
     (r, dir)
 }
@@ -97,6 +99,8 @@ async fn test_router_with_events() -> (Router, broadcast::Receiver<Value>, TempD
         test_update_state(),
         test_agent_settings(),
         true,
+        false,
+        None,
     );
     (r, rx, dir)
 }
@@ -114,6 +118,8 @@ async fn test_router_with_store() -> (Router, Arc<SqliteStore>, TempDir) {
         test_update_state(),
         test_agent_settings(),
         true,
+        false,
+        None,
     );
     (r, store, dir)
 }

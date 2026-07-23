@@ -30,6 +30,16 @@ type Events = broadcast::Sender<serde_json::Value>;
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct GuardPredefinedNamespaces(pub bool);
 
+/// Whether push-on-change (Plan 2 Task 11) should fire after a successful
+/// memory write, and the identity to sign/authenticate those pushes with.
+/// `identity` is only `Some` when `enabled` is true (see `http::run_up`,
+/// which bootstraps it once and threads it through here).
+#[derive(Clone)]
+pub(crate) struct HivePushConfig {
+    pub enabled: bool,
+    pub identity: Option<crate::hive::identity::DeviceIdentity>,
+}
+
 pub struct ApiError(StatusCode, String);
 
 impl IntoResponse for ApiError {
@@ -91,7 +101,13 @@ pub fn router(
     update_state: SharedUpdateState,
     agent: AgentSettings,
     guard_predefined_namespaces: bool,
+    hive_enabled: bool,
+    hive_identity: Option<crate::hive::identity::DeviceIdentity>,
 ) -> Router {
+    let hive_push_config = HivePushConfig {
+        enabled: hive_enabled,
+        identity: hive_identity,
+    };
     Router::new()
         .route("/api/v1/memories", get(list_memories).post(create_memory))
         .route("/api/v1/memories/count-tokens", post(count_tokens))
@@ -158,6 +174,7 @@ pub fn router(
         .layer(Extension(GuardPredefinedNamespaces(
             guard_predefined_namespaces,
         )))
+        .layer(Extension(hive_push_config))
         .layer(
             CorsLayer::new()
                 .allow_origin(localhost_origins(dashboard_origin))
@@ -203,6 +220,22 @@ async fn sse_events(
     let stream = BroadcastStream::new(events.subscribe())
         .filter_map(|msg| msg.ok().map(|v| Ok(Event::default().data(v.to_string()))));
     Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+/// Spawns a best-effort push-on-change attempt (Plan 2 Task 11) after a
+/// successful store()/update()/add_tags()/remove_tags() call, if Hive Mode
+/// is enabled. Spawned rather than awaited so a slow/unreachable peer never
+/// adds latency to the user-facing write response.
+pub(crate) fn spawn_hive_push(hive: &HivePushConfig, store: &Store, memory_id: &str) {
+    if hive.enabled
+        && let Some(identity) = hive.identity.clone()
+    {
+        tokio::spawn(crate::hive::sync_loop::push_memory_change_to_online_peers(
+            store.clone(),
+            identity,
+            memory_id.to_string(),
+        ));
+    }
 }
 
 fn entry_json(e: &crate::store::MemoryEntry) -> Value {

@@ -1584,6 +1584,19 @@ impl SqliteStore {
         })
     }
 
+    /// Returns the info a caller needs to push a just-changed memory to
+    /// online peers -- call this right after a successful store()/update()/
+    /// add_tags()/remove_tags(), not from inside them.
+    pub async fn hive_push_payload_for(&self, id: &str) -> Result<Option<serde_json::Value>> {
+        let Some(entry) = self.recall_by_id(id).await? else { return Ok(None) };
+        let hash = compute_hive_content_hash(&entry.title, &entry.content, &entry.tags, &entry.layer, &entry.memory_type);
+        Ok(Some(serde_json::json!({
+            "kind": "memory", "id": entry.id, "title": entry.title, "content": entry.content,
+            "tags": entry.tags, "layer": entry.layer, "memory_type": entry.memory_type,
+            "updated_at": entry.updated_at, "hive_content_hash": hash,
+        })))
+    }
+
     pub async fn hive_settings_override(&self) -> Result<Option<(u64, u64, i64)>> {
         let Some(raw) = self.get_meta("hive_settings_override").await? else {
             return Ok(None);

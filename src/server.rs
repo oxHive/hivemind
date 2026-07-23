@@ -164,6 +164,7 @@ pub struct HiveMind {
     store: Arc<SqliteStore>,
     sync_trigger: Option<Arc<tokio::sync::Notify>>,
     events: Option<tokio::sync::broadcast::Sender<serde_json::Value>>,
+    hive_identity: Option<crate::hive::identity::DeviceIdentity>,
 }
 
 impl HiveMind {
@@ -173,6 +174,7 @@ impl HiveMind {
             store: Arc::new(store),
             sync_trigger: None,
             events: None,
+            hive_identity: None,
         }
     }
 
@@ -181,6 +183,7 @@ impl HiveMind {
             store,
             sync_trigger: None,
             events: None,
+            hive_identity: None,
         }
     }
 
@@ -189,6 +192,7 @@ impl HiveMind {
             store,
             sync_trigger: Some(trigger),
             events: None,
+            hive_identity: None,
         }
     }
 
@@ -199,9 +203,29 @@ impl HiveMind {
         self
     }
 
+    /// Enables push-on-change (Plan 2 Task 11) for memory_store/memory_update
+    /// calls made through this MCP handle: a successful write spawns a
+    /// best-effort push to currently-online peers, signed with `identity`.
+    pub fn with_hive(mut self, identity: crate::hive::identity::DeviceIdentity) -> Self {
+        self.hive_identity = Some(identity);
+        self
+    }
+
     fn notify_change(&self) {
         if let Some(tx) = &self.events {
             let _ = tx.send(serde_json::json!({ "type": "changed" }));
+        }
+    }
+
+    /// Spawns a best-effort push-on-change attempt after a successful
+    /// store()/update() call, if Hive Mode is enabled on this handle.
+    fn spawn_hive_push(&self, memory_id: &str) {
+        if let Some(identity) = &self.hive_identity {
+            tokio::spawn(crate::hive::sync_loop::push_memory_change_to_online_peers(
+                self.store.clone(),
+                identity.clone(),
+                memory_id.to_string(),
+            ));
         }
     }
 
@@ -258,6 +282,7 @@ impl HiveMind {
             t.notify_one();
         }
         self.notify_change();
+        self.spawn_hive_push(&id);
         Ok(CallToolResult::structured(json!({
             "id": id,
             "title": title,
@@ -410,6 +435,7 @@ impl HiveMind {
             .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
         if updated {
             self.notify_change();
+            self.spawn_hive_push(&p.id);
         }
         Ok(CallToolResult::structured(json!({
             "updated": updated,

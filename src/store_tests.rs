@@ -1651,3 +1651,25 @@ async fn hive_upsert_peer_status_none_preserves_existing_last_synced_at() {
     assert!(!status.online);
     assert_eq!(status.last_synced_at, Some(1000));
 }
+
+#[tokio::test]
+async fn hive_push_payload_for_returns_none_for_missing_memory() {
+    let (store, _dir) = make_store().await;
+    assert!(store.hive_push_payload_for("mem_doesnotexist00000000000001").await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn hive_push_payload_for_includes_current_hash() {
+    let (store, _dir) = make_store().await;
+    store
+        .store(&NewMemoryRow {
+            id: "mem_pushpayload0000000000000001",
+            title: "t", content: "c", tags: &[], token_count: None,
+            layer: "workspace", memory_type: "project",
+        })
+        .await
+        .unwrap();
+    let payload = store.hive_push_payload_for("mem_pushpayload0000000000000001").await.unwrap().unwrap();
+    assert_eq!(payload["kind"], "memory");
+    assert!(payload["hive_content_hash"].as_str().unwrap().len() > 0);
+}

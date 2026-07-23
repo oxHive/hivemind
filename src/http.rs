@@ -1,6 +1,7 @@
 use crate::{
     api,
     config::{AgentSettings, ServerSettings, SyncSettings},
+    hive::identity::DeviceIdentity,
     server::HiveMind,
     store::SqliteStore,
     suggest_session::SuggestSessionManager,
@@ -34,6 +35,8 @@ pub fn app_router(
     mcp_url: String,
     update_state: SharedUpdateState,
     guard_predefined_namespaces: bool,
+    hive_enabled: bool,
+    hive_identity: Option<DeviceIdentity>,
 ) -> Router {
     // Fires whenever a memory or edge is created/updated/deleted, either via
     // an MCP tool call (below) or the REST API (api::router) — the dashboard
@@ -43,12 +46,18 @@ pub fn app_router(
             let store = store.clone();
             let trigger = notify_on_store.clone();
             let events_tx = events_tx.clone();
+            let hive_identity = hive_identity.clone();
             move || {
                 let hivemind = match &trigger {
                     Some(t) => HiveMind::with_sync(store.clone(), t.clone()),
                     None => HiveMind::with_store(store.clone()),
                 };
-                Ok(hivemind.with_events(events_tx.clone()))
+                let hivemind = hivemind.with_events(events_tx.clone());
+                let hivemind = match (hive_enabled, &hive_identity) {
+                    (true, Some(identity)) => hivemind.with_hive(identity.clone()),
+                    _ => hivemind,
+                };
+                Ok(hivemind)
             }
         },
         Arc::new(LocalSessionManager::default()),
@@ -65,6 +74,8 @@ pub fn app_router(
         update_state,
         agent_for_status,
         guard_predefined_namespaces,
+        hive_enabled,
+        hive_identity,
     )
     .nest_service("/mcp", mcp)
 }
@@ -227,6 +238,16 @@ pub async fn run_up(
     };
     let mcp_url = format!("http://{}:{}/mcp", mcp_host, settings.port);
     let pairing_codes = Arc::new(crate::hive::pairing::PairingCodeStore::new());
+    // Bootstrapped up-front (rather than only inside the `settings.hive.enabled`
+    // block further down) so the REST/MCP write handlers wired into `app_router`
+    // below can spawn push-on-change attempts (Plan 2 Task 11) using this same
+    // identity, instead of each handler needing its own bootstrap call.
+    let hive_identity: Option<DeviceIdentity> = if settings.hive.enabled {
+        let key_store = crate::hive::keyring_store::KeyringHiveKeyStore;
+        Some(crate::hive::bootstrap_self_identity(&store, &key_store).await?)
+    } else {
+        None
+    };
     let app = app_router(
         store.clone(),
         settings.sync.clone(),
@@ -237,6 +258,8 @@ pub async fn run_up(
         mcp_url.clone(),
         update_state,
         settings.guard_predefined_namespaces,
+        settings.hive.enabled,
+        hive_identity.clone(),
     );
 
     if !matches!(settings.host.as_str(), "127.0.0.1" | "localhost" | "::1") {
@@ -275,8 +298,9 @@ pub async fn run_up(
     }
 
     if settings.hive.enabled {
-        let key_store = crate::hive::keyring_store::KeyringHiveKeyStore;
-        let identity = crate::hive::bootstrap_self_identity(&store, &key_store).await?;
+        let identity = hive_identity
+            .clone()
+            .expect("hive_identity is Some whenever settings.hive.enabled, bootstrapped above");
 
         // Self-join: this device always appears in its own roster, signed
         // exactly like any peer's join record would be. `merge_roster` is
@@ -621,6 +645,8 @@ mod tests {
                 crate::update::UpdateState::new_idle(),
             )),
             true,
+            false,
+            None,
         );
         let resp = app
             .oneshot(

@@ -61,6 +61,7 @@ pub(super) struct CreateMemoryBody {
 pub(super) async fn create_memory(
     State(store): State<Store>,
     Extension(events): Extension<Events>,
+    Extension(hive): Extension<HivePushConfig>,
     Json(b): Json<CreateMemoryBody>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     let layer = match &b.layer {
@@ -90,6 +91,7 @@ pub(super) async fn create_memory(
         })
         .await?;
     let _ = events.send(json!({ "type": "changed" }));
+    spawn_hive_push(&hive, &store, &id);
     Ok((StatusCode::CREATED, Json(json!({ "id": id }))))
 }
 
@@ -113,6 +115,7 @@ pub(super) struct PatchMemoryBody {
 pub(super) async fn patch_memory(
     State(store): State<Store>,
     Extension(events): Extension<Events>,
+    Extension(hive): Extension<HivePushConfig>,
     Path(id): Path<String>,
     Json(b): Json<PatchMemoryBody>,
 ) -> Result<Json<Value>, ApiError> {
@@ -133,6 +136,7 @@ pub(super) async fn patch_memory(
         .await?
         .ok_or_else(|| not_found(format!("no memory {id}")))?;
     let _ = events.send(json!({ "type": "changed" }));
+    spawn_hive_push(&hive, &store, &id);
     Ok(Json(entry_json(&entry)))
 }
 
@@ -144,6 +148,7 @@ pub(super) struct TagsBody {
 pub(super) async fn add_memory_tags(
     State(store): State<Store>,
     Extension(events): Extension<Events>,
+    Extension(hive): Extension<HivePushConfig>,
     Path(id): Path<String>,
     Json(b): Json<TagsBody>,
 ) -> Result<Json<Value>, ApiError> {
@@ -155,12 +160,14 @@ pub(super) async fn add_memory_tags(
         .await?
         .ok_or_else(|| not_found(format!("no memory {id}")))?;
     let _ = events.send(json!({ "type": "changed" }));
+    spawn_hive_push(&hive, &store, &id);
     Ok(Json(entry_json(&entry)))
 }
 
 pub(super) async fn remove_memory_tags(
     State(store): State<Store>,
     Extension(events): Extension<Events>,
+    Extension(hive): Extension<HivePushConfig>,
     Path(id): Path<String>,
     Json(b): Json<TagsBody>,
 ) -> Result<Json<Value>, ApiError> {
@@ -172,6 +179,7 @@ pub(super) async fn remove_memory_tags(
         .await?
         .ok_or_else(|| not_found(format!("no memory {id}")))?;
     let _ = events.send(json!({ "type": "changed" }));
+    spawn_hive_push(&hive, &store, &id);
     Ok(Json(entry_json(&entry)))
 }
 

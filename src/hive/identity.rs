@@ -1,5 +1,6 @@
 use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
 
+#[derive(Clone)]
 pub struct DeviceIdentity {
     pub device_id: String,
     pub signing_key: SigningKey,
