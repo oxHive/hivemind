@@ -306,12 +306,23 @@ pub async fn run_up(
             store.hive_upsert_roster_entry(entry).await?;
         }
 
-        let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])?;
-        let tls_config = axum_server::tls_rustls::RustlsConfig::from_pem(
-            cert.cert.pem().into_bytes(),
-            cert.signing_key.serialize_pem().into_bytes(),
-        )
-        .await?;
+        let certified = crate::hive::cert::self_signed_cert(&identity)?;
+        let current_roster = store.hive_list_roster().await?;
+        let client_verifier = std::sync::Arc::new(
+            crate::hive::tls_verify::RosterClientCertVerifier::new(current_roster),
+        );
+        let server_config = rustls::ServerConfig::builder()
+            .with_client_cert_verifier(client_verifier)
+            .with_single_cert(
+                vec![certified.cert.der().clone()],
+                rustls::pki_types::PrivateKeyDer::try_from(
+                    certified.signing_key.serialize_der(),
+                )
+                .map_err(|e| anyhow::anyhow!("invalid private key DER: {e}"))?,
+            )?;
+        let tls_config = axum_server::tls_rustls::RustlsConfig::from_config(
+            std::sync::Arc::new(server_config),
+        );
         // Only the hive-specific routes are served here (see Finding #1) —
         // the plaintext-equivalent full app is never mirrored onto this port.
         let hive_only_app = api::hive_router(store.clone(), pairing_codes.clone());
