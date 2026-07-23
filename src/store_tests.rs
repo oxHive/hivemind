@@ -1436,6 +1436,47 @@ async fn hive_manifest_lists_stored_memories_with_hash_and_updated_at() {
 }
 
 #[tokio::test]
+async fn hive_manifest_backfills_hash_for_pre_existing_memories() {
+    let (store, _dir) = make_store().await;
+    // Simulate a memory written before hive_content_hash existed (V9's
+    // migration added the column as nullable; nothing but a real write
+    // through store()/update()/etc. computes it -- a row untouched since
+    // before that point would have NULL here). Bypass store() and insert
+    // directly so hive_content_hash stays NULL, matching a genuinely legacy
+    // row rather than one that's already been backfilled by store()'s own
+    // hashing.
+    store
+        .conn
+        .execute(
+            "INSERT INTO memories (id, title, content, created_at, updated_at, token_count, layer, memory_type, hive_content_hash)
+             VALUES (?1, ?2, ?3, ?4, ?4, ?5, ?6, ?7, NULL)",
+            libsql::params![
+                "mem_legacynullhash000000000000001",
+                "legacy title",
+                "legacy content",
+                1000i64,
+                10i64,
+                "workspace",
+                "project",
+            ],
+        )
+        .await
+        .unwrap();
+
+    let manifest = store.hive_manifest().await.unwrap();
+    let (hash, _updated_at) = manifest
+        .memories
+        .get("mem_legacynullhash000000000000001")
+        .expect("legacy memory with a NULL hash must be backfilled and appear in the manifest");
+    assert!(!hash.is_empty());
+
+    let expected = crate::store::compute_hive_content_hash(
+        "legacy title", "legacy content", &[], "workspace", "project",
+    );
+    assert_eq!(hash, &expected);
+}
+
+#[tokio::test]
 async fn hive_manifest_lists_tombstones() {
     let (store, _dir) = make_store().await;
     store

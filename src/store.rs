@@ -1469,7 +1469,45 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// Backfills `hive_content_hash` for any memory written before that
+    /// column existed (V9 migration added it as nullable; only writes going
+    /// through store()/update()/add_tags()/remove_tags() after that point
+    /// compute it). Without this, a memory created before hive sync was ever
+    /// enabled would keep a NULL hash forever and silently never appear in
+    /// the manifest -- never syncing to any peer. Idempotent and cheap once
+    /// caught up (the WHERE clause finds nothing on subsequent calls).
+    async fn backfill_hive_content_hashes(&self) -> Result<()> {
+        let mut rows = self
+            .conn
+            .query(
+                "SELECT id, title, content, layer, memory_type FROM memories WHERE hive_content_hash IS NULL",
+                (),
+            )
+            .await?;
+        let mut to_backfill = Vec::new();
+        while let Some(row) = rows.next().await? {
+            let id: String = row.get(0)?;
+            let title: String = row.get(1)?;
+            let content: String = row.get(2)?;
+            let layer: String = row.get(3)?;
+            let memory_type: String = row.get(4)?;
+            to_backfill.push((id, title, content, layer, memory_type));
+        }
+        for (id, title, content, layer, memory_type) in to_backfill {
+            let tags = self.fetch_tags(&id).await?;
+            let hash = compute_hive_content_hash(&title, &content, &tags, &layer, &memory_type);
+            self.conn
+                .execute(
+                    "UPDATE memories SET hive_content_hash = ?2 WHERE id = ?1",
+                    params![id, hash],
+                )
+                .await?;
+        }
+        Ok(())
+    }
+
     pub async fn hive_manifest(&self) -> Result<HiveManifest> {
+        self.backfill_hive_content_hashes().await?;
         let mut memories = std::collections::HashMap::new();
         let mut rows = self
             .conn
