@@ -1493,16 +1493,29 @@ impl SqliteStore {
             let memory_type: String = row.get(4)?;
             to_backfill.push((id, title, content, layer, memory_type));
         }
-        for (id, title, content, layer, memory_type) in to_backfill {
-            let tags = self.fetch_tags(&id).await?;
-            let hash = compute_hive_content_hash(&title, &content, &tags, &layer, &memory_type);
-            self.conn
-                .execute(
-                    "UPDATE memories SET hive_content_hash = ?2 WHERE id = ?1",
-                    params![id, hash],
-                )
-                .await?;
+        if to_backfill.is_empty() {
+            return Ok(());
         }
+        // Tags are fetched before opening the transaction (fetch_tags reads
+        // via self.conn, not a transaction handle), then every UPDATE runs
+        // inside one transaction -- matching this file's convention
+        // elsewhere (store/update/add_tags/remove_tags all batch their
+        // writes in a single transaction) rather than one implicit
+        // autocommit per row.
+        let mut hashes = Vec::with_capacity(to_backfill.len());
+        for (id, title, content, layer, memory_type) in &to_backfill {
+            let tags = self.fetch_tags(id).await?;
+            hashes.push(compute_hive_content_hash(title, content, &tags, layer, memory_type));
+        }
+        let tx = self.conn.transaction().await?;
+        for ((id, ..), hash) in to_backfill.iter().zip(hashes.iter()) {
+            tx.execute(
+                "UPDATE memories SET hive_content_hash = ?2 WHERE id = ?1",
+                params![id.as_str(), hash.as_str()],
+            )
+            .await?;
+        }
+        tx.commit().await?;
         Ok(())
     }
 
