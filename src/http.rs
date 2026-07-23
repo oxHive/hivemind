@@ -246,6 +246,16 @@ pub async fn run_up(
              and can call POST /api/v1/suggest-sessions to spawn the configured agent command",
             settings.host
         );
+        if settings.hive.enabled {
+            tracing::warn!(
+                "binding to {}: the Hive pairing endpoint (port {}) is also reachable on this \
+                 address; anyone who can reach it can call POST /api/v1/hive/pairing-code and \
+                 immediately redeem it via POST /api/v1/hive/pair to join this device's roster \
+                 — only run Hive Mode on a network you trust",
+                settings.host,
+                settings.port + 1
+            );
+        }
     }
 
     let listener = bind_with_retry(settings.host.as_str(), settings.port).await?;
