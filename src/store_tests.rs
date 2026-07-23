@@ -1340,3 +1340,81 @@ async fn hive_upsert_updates_existing_entry_status() {
     assert_eq!(roster[0].status, crate::hive::roster::RosterStatus::Revoked);
     assert_eq!(roster[0].revoked_at, Some(2000));
 }
+
+#[test]
+fn hive_content_hash_is_stable_for_identical_input() {
+    let tags = vec!["topic:sync".to_string()];
+    let a = crate::store::compute_hive_content_hash("Title", "Content", &tags, "workspace", "project");
+    let b = crate::store::compute_hive_content_hash("Title", "Content", &tags, "workspace", "project");
+    assert_eq!(a, b);
+}
+
+#[test]
+fn hive_content_hash_changes_when_tags_change_but_content_does_not() {
+    let with_tag = crate::store::compute_hive_content_hash(
+        "Title", "Content", &["topic:sync".to_string()], "workspace", "project",
+    );
+    let without_tag = crate::store::compute_hive_content_hash(
+        "Title", "Content", &[], "workspace", "project",
+    );
+    assert_ne!(with_tag, without_tag, "a tag-only change must produce a different hash");
+}
+
+#[test]
+fn hive_content_hash_is_order_independent_for_tags() {
+    let a = crate::store::compute_hive_content_hash(
+        "Title", "Content", &["a".to_string(), "b".to_string()], "workspace", "project",
+    );
+    let b = crate::store::compute_hive_content_hash(
+        "Title", "Content", &["b".to_string(), "a".to_string()], "workspace", "project",
+    );
+    assert_eq!(a, b, "tag order must not affect the hash, since memory_tags has no defined order");
+}
+
+#[tokio::test]
+async fn delete_writes_a_tombstone() {
+    let (store, _dir) = make_store().await;
+    store
+        .store(&NewMemoryRow {
+            id: "mem_deltest0000000000000000000001",
+            title: "t",
+            content: "c",
+            tags: &[],
+            token_count: None,
+            layer: "workspace",
+            memory_type: "project",
+        })
+        .await
+        .unwrap();
+    store.delete("mem_deltest0000000000000000000001").await.unwrap();
+    let mut rows = store
+        .conn
+        .query(
+            "SELECT deleted_at FROM hive_tombstones WHERE memory_id = ?1",
+            libsql::params!["mem_deltest0000000000000000000001"],
+        )
+        .await
+        .unwrap();
+    assert!(rows.next().await.unwrap().is_some());
+}
+
+#[tokio::test]
+async fn delete_all_writes_a_tombstone_per_memory() {
+    let (store, _dir) = make_store().await;
+    store
+        .store(&NewMemoryRow {
+            id: "mem_delalltest000000000000000001",
+            title: "t",
+            content: "c",
+            tags: &[],
+            token_count: None,
+            layer: "workspace",
+            memory_type: "project",
+        })
+        .await
+        .unwrap();
+    store.delete_all().await.unwrap();
+    let mut rows = store.conn.query("SELECT COUNT(*) FROM hive_tombstones", ()).await.unwrap();
+    let count: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
+    assert_eq!(count, 1);
+}

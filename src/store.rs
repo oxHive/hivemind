@@ -232,6 +232,29 @@ fn validate_tag_format(tags: &[String]) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn compute_hive_content_hash(
+    title: &str,
+    content: &str,
+    tags: &[String],
+    layer: &str,
+    memory_type: &str,
+) -> String {
+    use sha2::{Digest, Sha256};
+    let mut sorted_tags: Vec<&str> = tags.iter().map(String::as_str).collect();
+    sorted_tags.sort_unstable();
+    let mut hasher = Sha256::new();
+    hasher.update(title.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(content.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(sorted_tags.join(",").as_bytes());
+    hasher.update(b"\0");
+    hasher.update(layer.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(memory_type.as_bytes());
+    hex::encode(hasher.finalize())
+}
+
 /// Seeded `tag_namespaces` registry, used both as the dashboard's initial
 /// suggestion set and as the fallback when the stored registry is missing
 /// or fails to parse. `description` is shown to human users in the
@@ -376,18 +399,20 @@ impl SqliteStore {
             .token_count
             .unwrap_or_else(|| crate::budget::count_entry_tokens(m.title, m.content) as i64);
 
+        let hive_hash = compute_hive_content_hash(m.title, m.content, m.tags, m.layer, m.memory_type);
         let tx = self.conn.transaction().await?;
         tx.execute(
-            "INSERT INTO memories (id, title, content, created_at, updated_at, token_count, layer, memory_type)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            "INSERT INTO memories (id, title, content, created_at, updated_at, token_count, layer, memory_type, hive_content_hash)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
              ON CONFLICT(id) DO UPDATE SET
                title = excluded.title,
                content = excluded.content,
                updated_at = excluded.updated_at,
                token_count = excluded.token_count,
                layer = excluded.layer,
-               memory_type = excluded.memory_type",
-            params![m.id, m.title, m.content, now, now, token_count, m.layer, m.memory_type],
+               memory_type = excluded.memory_type,
+               hive_content_hash = excluded.hive_content_hash",
+            params![m.id, m.title, m.content, now, now, token_count, m.layer, m.memory_type, hive_hash],
         )
         .await?;
 
@@ -490,13 +515,17 @@ impl SqliteStore {
     ) -> Result<bool> {
         validate_tag_format(tags)?;
         validate_tags_against_registry(self, tags).await?;
+        let Some(current) = self.recall_by_id(id).await? else {
+            return Ok(false);
+        };
         let now = chrono_now();
         let token_count = crate::budget::count_entry_tokens(title, content) as i64;
+        let hive_hash = compute_hive_content_hash(title, content, tags, &current.layer, &current.memory_type);
         let tx = self.conn.transaction().await?;
         let changed = tx
             .execute(
-                "UPDATE memories SET title = ?1, content = ?2, updated_at = ?3, token_count = ?4 WHERE id = ?5",
-                params![title, content, now, token_count, id],
+                "UPDATE memories SET title = ?1, content = ?2, updated_at = ?3, token_count = ?4, hive_content_hash = ?5 WHERE id = ?6",
+                params![title, content, now, token_count, hive_hash, id],
             )
             .await?;
         if changed == 0 {
@@ -548,6 +577,9 @@ impl SqliteStore {
         validate_tags_against_registry(self, &merged).await?;
 
         let now = chrono_now();
+        let hive_hash = compute_hive_content_hash(
+            &current.title, &current.content, &merged, &current.layer, &current.memory_type,
+        );
         let tx = self.conn.transaction().await?;
         for t in tags {
             tx.execute(
@@ -557,8 +589,8 @@ impl SqliteStore {
             .await?;
         }
         tx.execute(
-            "UPDATE memories SET updated_at = ?2 WHERE id = ?1",
-            params![id, now],
+            "UPDATE memories SET updated_at = ?2, hive_content_hash = ?3 WHERE id = ?1",
+            params![id, now, hive_hash],
         )
         .await?;
         tx.execute(
@@ -579,7 +611,17 @@ impl SqliteStore {
         let Some(current) = self.recall_by_id(id).await? else {
             return Ok(false);
         };
+        let removed_lower: Vec<String> = tags.iter().map(|t| t.to_lowercase()).collect();
+        let remaining: Vec<String> = current
+            .tags
+            .iter()
+            .filter(|t| !removed_lower.contains(t))
+            .cloned()
+            .collect();
         let now = chrono_now();
+        let hive_hash = compute_hive_content_hash(
+            &current.title, &current.content, &remaining, &current.layer, &current.memory_type,
+        );
         let tx = self.conn.transaction().await?;
         for t in tags {
             tx.execute(
@@ -589,8 +631,8 @@ impl SqliteStore {
             .await?;
         }
         tx.execute(
-            "UPDATE memories SET updated_at = ?2 WHERE id = ?1",
-            params![id, now],
+            "UPDATE memories SET updated_at = ?2, hive_content_hash = ?3 WHERE id = ?1",
+            params![id, now, hive_hash],
         )
         .await?;
         tx.execute(
@@ -606,10 +648,20 @@ impl SqliteStore {
     }
 
     pub async fn delete(&self, id: &str) -> Result<bool> {
-        let changed = self
-            .conn
+        let now = chrono_now();
+        let tx = self.conn.transaction().await?;
+        let changed = tx
             .execute("DELETE FROM memories WHERE id = ?1", params![id])
             .await?;
+        if changed > 0 {
+            tx.execute(
+                "INSERT INTO hive_tombstones (memory_id, deleted_at) VALUES (?1, ?2)
+                 ON CONFLICT(memory_id) DO UPDATE SET deleted_at = excluded.deleted_at",
+                params![id, now],
+            )
+            .await?;
+        }
+        tx.commit().await?;
         Ok(changed > 0)
     }
 
@@ -624,7 +676,15 @@ impl SqliteStore {
     }
 
     pub async fn delete_all(&self) -> Result<i64> {
-        let changed = self.conn.execute("DELETE FROM memories", ()).await?;
+        let now = chrono_now();
+        let tx = self.conn.transaction().await?;
+        tx.execute(
+            "INSERT OR REPLACE INTO hive_tombstones (memory_id, deleted_at) SELECT id, ? FROM memories",
+            params![now],
+        )
+        .await?;
+        let changed = tx.execute("DELETE FROM memories", ()).await?;
+        tx.commit().await?;
         Ok(changed as i64)
     }
 
