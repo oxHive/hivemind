@@ -1593,3 +1593,38 @@ async fn apply_incoming_memory_conflicts_on_implausible_future_skew() {
     let outcome = store.apply_incoming_memory(&incoming, &hash).await.unwrap();
     assert!(matches!(outcome, crate::store::ApplyOutcome::Conflicted));
 }
+
+#[tokio::test]
+async fn hive_upsert_peer_status_round_trips() {
+    let (store, _dir) = make_store().await;
+    store
+        .hive_upsert_peer_status("hive_peertest0001", true, Some(1000))
+        .await
+        .unwrap();
+    let status = store
+        .hive_get_peer_status("hive_peertest0001")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(status.online);
+    assert_eq!(status.last_synced_at, Some(1000));
+}
+
+#[tokio::test]
+async fn hive_upsert_peer_status_updates_existing_row() {
+    let (store, _dir) = make_store().await;
+    store
+        .hive_upsert_peer_status("hive_peertest0002", true, Some(1000))
+        .await
+        .unwrap();
+    store
+        .hive_upsert_peer_status("hive_peertest0002", false, Some(1000))
+        .await
+        .unwrap();
+    let status = store
+        .hive_get_peer_status("hive_peertest0002")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!status.online);
+}

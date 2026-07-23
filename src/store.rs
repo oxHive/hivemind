@@ -103,6 +103,12 @@ pub struct HiveManifest {
     pub tag_namespaces: (String, i64),
 }
 
+pub struct PeerStatusRow {
+    pub online: bool,
+    pub last_synced_at: Option<i64>,
+    pub pending_conflict_count: i64,
+}
+
 pub struct SqliteStore {
     pub(crate) conn: Connection,
 }
@@ -1594,6 +1600,43 @@ impl SqliteStore {
     ) -> Result<()> {
         let raw = serde_json::to_string(&(sync_interval_seconds, ping_interval_seconds, updated_at))?;
         self.set_meta("hive_settings_override", &raw).await
+    }
+
+    pub async fn hive_upsert_peer_status(
+        &self,
+        device_id: &str,
+        online: bool,
+        last_synced_at: Option<i64>,
+    ) -> Result<()> {
+        self.conn
+            .execute(
+                "INSERT INTO hive_peer_status (device_id, online, last_synced_at)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT(device_id) DO UPDATE SET
+                   online = excluded.online,
+                   last_synced_at = COALESCE(excluded.last_synced_at, hive_peer_status.last_synced_at)",
+                params![device_id, online, last_synced_at],
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub async fn hive_get_peer_status(&self, device_id: &str) -> Result<Option<PeerStatusRow>> {
+        let mut rows = self
+            .conn
+            .query(
+                "SELECT online, last_synced_at, pending_conflict_count FROM hive_peer_status WHERE device_id = ?1",
+                params![device_id],
+            )
+            .await?;
+        Ok(match rows.next().await? {
+            Some(row) => Some(PeerStatusRow {
+                online: row.get::<i64>(0)? != 0,
+                last_synced_at: row.get(1)?,
+                pending_conflict_count: row.get(2)?,
+            }),
+            None => None,
+        })
     }
 
     fn row_to_entry(&self, row: &libsql::Row) -> Result<MemoryEntry> {
