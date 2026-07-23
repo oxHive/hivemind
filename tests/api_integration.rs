@@ -61,6 +61,8 @@ async fn test_app() -> (axum::Router, TempDir) {
         true,
         false,
         None,
+        Arc::new(oxhivemind::hive::pairing::PairingCodeStore::new()),
+        None,
     );
     (router, dir)
 }

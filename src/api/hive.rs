@@ -130,9 +130,15 @@ pub(super) async fn hive_manifest(State(store): State<Store>) -> Result<Json<Val
 
 pub(super) async fn hive_issue_pairing_code(
     Extension(pairing_codes): Extension<Arc<PairingCodeStore>>,
+    Extension(pairing_window): Extension<Arc<crate::hive::pairing_window::PairingWindow>>,
 ) -> Json<Value> {
     let now = chrono::Utc::now().timestamp();
     let pairing = pairing_codes.issue(now);
+    // Open the server-TLS-only pairing listener for exactly as long as this
+    // code is valid; it auto-closes when the window elapses.
+    pairing_window.open_for(std::time::Duration::from_secs(
+        (pairing.expires_at - now).max(0) as u64,
+    ));
     Json(json!({ "code": pairing.code, "expires_at": pairing.expires_at }))
 }
 

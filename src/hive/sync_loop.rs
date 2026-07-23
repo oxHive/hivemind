@@ -101,6 +101,68 @@ pub async fn pull_from_peer(client: &HiveClient, base_url: &str, local: &SqliteS
         }
     }
 
+    // Finding I3: pull the peer's hive settings override if theirs is newer.
+    // The manifest already advertises a hash + updated_at for it; a full fetch
+    // + last-write-wins-by-timestamp closes the gap that made this dead code.
+    let remote_settings = &manifest_json["settings"];
+    if let (Some(remote_hash), Some(remote_updated_at)) = (
+        remote_settings["hash"].as_str(),
+        remote_settings["updated_at"].as_i64(),
+    ) {
+        let local_settings_updated_at = local
+            .hive_settings_override()
+            .await
+            .ok()
+            .flatten()
+            .map(|(_, _, updated_at)| updated_at)
+            .unwrap_or(0);
+        if remote_updated_at > local_settings_updated_at
+            && let Ok(resp) = client.get(&format!("{base_url}/api/v1/hive/settings")).await
+            && resp.status().is_success()
+            && let Ok(body) = resp.json::<serde_json::Value>().await
+            && let (Some(sync_s), Some(ping_s)) = (
+                body["sync_interval_seconds"].as_u64(),
+                body["ping_interval_seconds"].as_u64(),
+            )
+        {
+            let _ = local
+                .set_hive_settings_override(sync_s, ping_s, remote_updated_at)
+                .await;
+        }
+        let _ = remote_hash; // only the timestamp drives whether to fetch; a
+        // full fetch + LWW-by-timestamp already happens above, so the hash
+        // isn't separately needed here.
+    }
+
+    // Finding I3: pull the peer's tag-namespace registry if theirs is newer.
+    let remote_tag_namespaces = &manifest_json["tag_namespaces"];
+    if let (Some(_remote_hash), Some(remote_updated_at)) = (
+        remote_tag_namespaces["hash"].as_str(),
+        remote_tag_namespaces["updated_at"].as_i64(),
+    ) {
+        let local_tag_namespaces_updated_at: i64 = local
+            .get_meta("tag_namespaces_updated_at")
+            .await
+            .ok()
+            .flatten()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        if remote_updated_at > local_tag_namespaces_updated_at
+            && let Ok(resp) = client
+                .get(&format!("{base_url}/api/v1/hive/tag-namespaces"))
+                .await
+            && resp.status().is_success()
+            && let Ok(body) = resp.json::<serde_json::Value>().await
+        {
+            let _ = local
+                .set_meta("tag_namespaces", &body["namespaces"].to_string())
+                .await;
+            let _ = local
+                .set_meta("tag_namespaces_updated_at", &remote_updated_at.to_string())
+                .await;
+        }
+    }
+
     Ok(summary)
 }
 
@@ -160,6 +222,73 @@ pub async fn push_memory_change_to_online_peers(
         let _ = client.post_json(&format!("https://{address}/api/v1/hive/push"), &payload).await;
         // Best-effort: a failed push is silently dropped, per this plan's
         // spec decision -- the peer's own next pull round is the backstop.
+    }
+}
+
+/// Best-effort push of this device's hive settings override to every online
+/// peer (Finding I3), mirroring `push_memory_change_to_online_peers`. NOTE:
+/// nothing calls this yet — there is no local HTTP endpoint that writes the
+/// hive settings override (only the peer-receive `hive_push` handler does), so
+/// there is no local "settings changed" event to trigger from. It's defined
+/// here so whichever later work adds a settings-save endpoint (e.g. Plan 3's
+/// dashboard) can wire it up exactly like the tag-namespace push below.
+pub async fn push_settings_change_to_online_peers(
+    store: Arc<SqliteStore>,
+    identity: DeviceIdentity,
+) {
+    let Ok(Some((sync_s, ping_s, updated_at))) = store.hive_settings_override().await else {
+        return;
+    };
+    let payload = serde_json::json!({
+        "kind": "settings",
+        "sync_interval_seconds": sync_s,
+        "ping_interval_seconds": ping_s,
+        "updated_at": updated_at,
+    });
+    let Ok(online_peers) = crate::hive::peer_status::online_peers(&store).await else {
+        return;
+    };
+    for peer in online_peers {
+        let Ok(client) = crate::hive::client::HiveClient::new(&identity, &peer.public_key) else {
+            continue;
+        };
+        let Some(address) = peer.address else { continue };
+        let _ = client
+            .post_json(&format!("https://{address}/api/v1/hive/push"), &payload)
+            .await;
+    }
+}
+
+/// Best-effort push of this device's tag-namespace registry to every online
+/// peer (Finding I3). Triggered from `save_tag_settings` after it persists.
+pub async fn push_tag_namespaces_change_to_online_peers(
+    store: Arc<SqliteStore>,
+    identity: DeviceIdentity,
+) {
+    let namespaces = store.tag_namespace_registry().await;
+    let updated_at: i64 = store
+        .get_meta("tag_namespaces_updated_at")
+        .await
+        .ok()
+        .flatten()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    let payload = serde_json::json!({
+        "kind": "tag_namespaces",
+        "namespaces": namespaces,
+        "updated_at": updated_at,
+    });
+    let Ok(online_peers) = crate::hive::peer_status::online_peers(&store).await else {
+        return;
+    };
+    for peer in online_peers {
+        let Ok(client) = crate::hive::client::HiveClient::new(&identity, &peer.public_key) else {
+            continue;
+        };
+        let Some(address) = peer.address else { continue };
+        let _ = client
+            .post_json(&format!("https://{address}/api/v1/hive/push"), &payload)
+            .await;
     }
 }
 

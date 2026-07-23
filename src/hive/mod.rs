@@ -5,6 +5,7 @@ pub mod gossip;
 pub mod identity;
 pub mod keyring_store;
 pub mod pairing;
+pub mod pairing_window;
 pub mod peer_status;
 pub mod roster;
 pub mod sync_loop;

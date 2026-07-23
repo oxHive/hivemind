@@ -82,6 +82,8 @@ async fn test_router_with_guard(guard_predefined_namespaces: bool) -> (Router, T
         guard_predefined_namespaces,
         false,
         None,
+        Arc::new(crate::hive::pairing::PairingCodeStore::new()),
+        None,
     );
     (r, dir)
 }
@@ -100,6 +102,8 @@ async fn test_router_with_events() -> (Router, broadcast::Receiver<Value>, TempD
         test_agent_settings(),
         true,
         false,
+        None,
+        Arc::new(crate::hive::pairing::PairingCodeStore::new()),
         None,
     );
     (r, rx, dir)
@@ -120,6 +124,8 @@ async fn test_router_with_store() -> (Router, Arc<SqliteStore>, TempDir) {
         true,
         false,
         None,
+        Arc::new(crate::hive::pairing::PairingCodeStore::new()),
+        None,
     );
     (r, store, dir)
 }
@@ -132,14 +138,27 @@ async fn test_router_with_pairing_code(dir: &std::path::Path) -> (Router, String
     // so the code must be issued relative to that same clock, not `0` --
     // otherwise it reads as already-expired against any real epoch timestamp.
     let issued = pairing_codes.issue(chrono::Utc::now().timestamp());
-    let r = hive_router(store, pairing_codes);
+    // `/pair` now lives on the server-TLS-only pairing router (Finding C1).
+    let r = hive_pairing_router(store, pairing_codes);
     (r, issued.code)
 }
 
+/// The mandatory-mTLS sync router (roster/manifest/memories/settings/
+/// tag-namespaces/push). `/pair` and `/pairing-code` are NOT here — they moved
+/// to `hive_pairing_router` and the plaintext `router()` respectively.
 async fn test_hive_router() -> (Router, Arc<crate::hive::pairing::PairingCodeStore>, TempDir) {
     let (store, dir) = test_store().await;
     let pairing_codes = Arc::new(crate::hive::pairing::PairingCodeStore::new());
-    let r = hive_router(store, pairing_codes.clone());
+    let r = hive_sync_router(store);
+    (r, pairing_codes, dir)
+}
+
+/// A pairing router (server-TLS-only `/pair`) sharing a fresh code store, for
+/// the pairing-rejection test that doesn't need a pre-issued valid code.
+async fn test_pairing_router() -> (Router, Arc<crate::hive::pairing::PairingCodeStore>, TempDir) {
+    let (store, dir) = test_store().await;
+    let pairing_codes = Arc::new(crate::hive::pairing::PairingCodeStore::new());
+    let r = hive_pairing_router(store, pairing_codes.clone());
     (r, pairing_codes, dir)
 }
 
@@ -1074,7 +1093,7 @@ async fn revise_validates_session_and_edge() {
 
 #[tokio::test]
 async fn hive_pair_rejects_unknown_code() {
-    let (app, _codes, _dir) = test_hive_router().await;
+    let (app, _codes, _dir) = test_pairing_router().await;
     let (status, _) = req(
         app,
         "POST",
@@ -1146,16 +1165,40 @@ async fn hive_manifest_endpoint_reports_stored_memories() {
 
 #[tokio::test]
 async fn hive_pairing_code_endpoint_issues_a_redeemable_code() {
-    let (app, _codes, _dir) = test_hive_router().await;
-    let (status, body) = req(app.clone(), "POST", "/api/v1/hive/pairing-code", None).await;
+    // `/pairing-code` moved onto the plaintext app router (it's a local,
+    // dashboard-triggered action, Finding C1) and issuing a code now also
+    // opens the pairing-window listener. Build a minimal router exposing just
+    // that endpoint with the extensions the handler needs, sharing the same
+    // PairingCodeStore with the pairing router used to redeem below.
+    let (store, _dir) = test_store().await;
+    let pairing_codes = Arc::new(crate::hive::pairing::PairingCodeStore::new());
+    let identity = crate::hive::identity::generate();
+    // Port 0 → the OS assigns an ephemeral port, so opening the window binds a
+    // real (throwaway) listener without clashing with anything.
+    let pairing_window = Arc::new(crate::hive::pairing_window::PairingWindow::new(
+        "127.0.0.1".to_string(),
+        0,
+        identity,
+        crate::api::hive_pairing_router(Arc::clone(&store), pairing_codes.clone()),
+    ));
+    let issue_app = Router::new()
+        .route(
+            "/api/v1/hive/pairing-code",
+            axum::routing::post(hive_issue_pairing_code),
+        )
+        .layer(Extension(pairing_codes.clone()))
+        .layer(Extension(pairing_window));
+
+    let (status, body) = req(issue_app, "POST", "/api/v1/hive/pairing-code", None).await;
     assert_eq!(status, StatusCode::OK);
     let code = body["code"].as_str().unwrap().to_string();
     assert_eq!(code.len(), 8);
 
+    let pair_app = hive_pairing_router(store, pairing_codes);
     let identity = crate::hive::identity::generate();
     let join_record = crate::hive::roster::create_join_record(&identity, "carol-tablet", 1000);
     let (status2, _) = req(
-        app,
+        pair_app,
         "POST",
         "/api/v1/hive/pair",
         Some(json!({

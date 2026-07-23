@@ -37,6 +37,8 @@ pub fn app_router(
     guard_predefined_namespaces: bool,
     hive_enabled: bool,
     hive_identity: Option<DeviceIdentity>,
+    pairing_codes: Arc<crate::hive::pairing::PairingCodeStore>,
+    pairing_window: Option<Arc<crate::hive::pairing_window::PairingWindow>>,
 ) -> Router {
     // Fires whenever a memory or edge is created/updated/deleted, either via
     // an MCP tool call (below) or the REST API (api::router) — the dashboard
@@ -76,6 +78,8 @@ pub fn app_router(
         guard_predefined_namespaces,
         hive_enabled,
         hive_identity,
+        pairing_codes,
+        pairing_window,
     )
     .nest_service("/mcp", mcp)
 }
@@ -248,6 +252,23 @@ pub async fn run_up(
     } else {
         None
     };
+    // The pairing-window coordinator owns the server-TLS-only pairing listener,
+    // opened lazily (and time-bounded) each time a pairing code is issued via
+    // the plaintext `POST /api/v1/hive/pairing-code` handler. Built up-front so
+    // that handler (wired into `app_router` below) can reach it as an
+    // Extension; only present when hive is enabled.
+    let pairing_window: Option<Arc<crate::hive::pairing_window::PairingWindow>> =
+        if let Some(identity) = hive_identity.clone() {
+            let pairing_router = api::hive_pairing_router(store.clone(), pairing_codes.clone());
+            Some(Arc::new(crate::hive::pairing_window::PairingWindow::new(
+                settings.host.clone(),
+                settings.port + 2,
+                identity,
+                pairing_router,
+            )))
+        } else {
+            None
+        };
     let app = app_router(
         store.clone(),
         settings.sync.clone(),
@@ -260,6 +281,8 @@ pub async fn run_up(
         settings.guard_predefined_namespaces,
         settings.hive.enabled,
         hive_identity.clone(),
+        pairing_codes.clone(),
+        pairing_window.clone(),
     );
 
     if !matches!(settings.host.as_str(), "127.0.0.1" | "localhost" | "::1") {
@@ -271,12 +294,15 @@ pub async fn run_up(
         );
         if settings.hive.enabled {
             tracing::warn!(
-                "binding to {}: the Hive pairing endpoint (port {}) is also reachable on this \
-                 address; anyone who can reach it can call POST /api/v1/hive/pairing-code and \
-                 immediately redeem it via POST /api/v1/hive/pair to join this device's roster \
-                 — only run Hive Mode on a network you trust",
+                "binding to {}: Hive Mode exposes a mandatory-mTLS sync port ({}) and, only \
+                 while a pairing code is outstanding, a server-TLS-only pairing port ({}); the \
+                 pairing code itself is issued via the local plaintext POST \
+                 /api/v1/hive/pairing-code — anyone who can reach that endpoint can open a \
+                 pairing window and join this device's roster, so only run Hive Mode on a \
+                 network you trust",
                 settings.host,
-                settings.port + 1
+                settings.port + 1,
+                settings.port + 2
             );
         }
     }
@@ -330,46 +356,62 @@ pub async fn run_up(
             store.hive_upsert_roster_entry(entry).await?;
         }
 
+        // Sync listener: mandatory mTLS, always bound while hive is enabled.
+        // Its trust config is rebuilt and hot-reloaded (not a full rebind)
+        // every ping interval by the ping loop below (Finding I2), so
+        // revocations and newly-paired devices take effect within one ping
+        // interval instead of requiring a process restart.
         let certified = crate::hive::cert::self_signed_cert(&identity)?;
-        let current_roster = store.hive_list_roster().await?;
-        let client_verifier = std::sync::Arc::new(
-            crate::hive::tls_verify::RosterClientCertVerifier::new(current_roster),
+        // A closure that rebuilds the sync listener's ServerConfig from a given
+        // roster snapshot. Captures the cert/key DER bytes by value (cloning
+        // them on each call, since `PrivateKeyDer` construction consumes the
+        // bytes) so it can be called both now (initial config) and repeatedly
+        // from the ping loop. Explicit provider selection (not the bare
+        // `builder()`) since both `ring` and `aws-lc-rs` end up compiled in via
+        // axum-server's own rustls dependency -- the bare builder panics at
+        // runtime when it can't unambiguously pick a process-default.
+        let build_sync_server_config = {
+            let certified_cert_der = certified.cert.der().clone();
+            let certified_key_der = certified.signing_key.serialize_der();
+            move |roster: Vec<crate::hive::roster::RosterEntry>| -> anyhow::Result<rustls::ServerConfig> {
+                let client_verifier = std::sync::Arc::new(
+                    crate::hive::tls_verify::RosterClientCertVerifier::new(roster),
+                );
+                Ok(rustls::ServerConfig::builder_with_provider(std::sync::Arc::new(
+                    rustls::crypto::ring::default_provider(),
+                ))
+                .with_protocol_versions(rustls::DEFAULT_VERSIONS)
+                .map_err(|e| anyhow::anyhow!("failed to select TLS protocol versions: {e}"))?
+                .with_client_cert_verifier(client_verifier)
+                .with_single_cert(
+                    vec![certified_cert_der.clone()],
+                    rustls::pki_types::PrivateKeyDer::try_from(certified_key_der.clone())
+                        .map_err(|e| anyhow::anyhow!("invalid private key DER: {e}"))?,
+                )?)
+            }
+        };
+        let initial_roster = store.hive_list_roster().await?;
+        let sync_server_config = build_sync_server_config(initial_roster)?;
+        let sync_tls_config = axum_server::tls_rustls::RustlsConfig::from_config(
+            std::sync::Arc::new(sync_server_config),
         );
-        // Explicit provider selection (not the bare `builder()`), since both
-        // `ring` and `aws-lc-rs` end up compiled in via axum-server's own
-        // dependency on rustls -- the bare builder panics at runtime when it
-        // can't unambiguously pick a process-default between the two.
-        let server_config = rustls::ServerConfig::builder_with_provider(std::sync::Arc::new(
-            rustls::crypto::ring::default_provider(),
-        ))
-        .with_protocol_versions(rustls::DEFAULT_VERSIONS)
-        .map_err(|e| anyhow::anyhow!("failed to select TLS protocol versions: {e}"))?
-        .with_client_cert_verifier(client_verifier)
-            .with_single_cert(
-                vec![certified.cert.der().clone()],
-                rustls::pki_types::PrivateKeyDer::try_from(
-                    certified.signing_key.serialize_der(),
-                )
-                .map_err(|e| anyhow::anyhow!("invalid private key DER: {e}"))?,
-            )?;
-        let tls_config = axum_server::tls_rustls::RustlsConfig::from_config(
-            std::sync::Arc::new(server_config),
-        );
-        // Only the hive-specific routes are served here (see Finding #1) —
-        // the plaintext-equivalent full app is never mirrored onto this port.
-        let hive_only_app = api::hive_router(store.clone(), pairing_codes.clone());
-        let hive_addr: std::net::SocketAddr =
+        let sync_tls_config_for_reload = sync_tls_config.clone();
+        // Only the mTLS-guarded sync routes are served here (see Finding C1) —
+        // pairing lives on the separate server-TLS-only pairing window, and the
+        // plaintext-equivalent full app is never mirrored onto this port.
+        let sync_only_app = api::hive_sync_router(store.clone());
+        let sync_addr: std::net::SocketAddr =
             format!("{}:{}", settings.host, settings.port + 1).parse()?;
         tokio::spawn(async move {
-            if let Err(e) = axum_server::bind_rustls(hive_addr, tls_config)
-                .serve(hive_only_app.into_make_service())
+            if let Err(e) = axum_server::bind_rustls(sync_addr, sync_tls_config)
+                .serve(sync_only_app.into_make_service())
                 .await
             {
-                tracing::error!("hive TLS listener failed to bind/serve: {e:#}");
+                tracing::error!("hive sync TLS listener failed to bind/serve: {e:#}");
             }
         });
         tracing::info!(
-            "Hive pairing/sync (TLS): https://{}:{}",
+            "Hive sync (mTLS): https://{}:{}",
             settings.host,
             settings.port + 1
         );
@@ -410,7 +452,11 @@ pub async fn run_up(
             store.clone(), identity.clone(), settings.hive.sync_interval_seconds,
         ));
         tokio::spawn(crate::hive::peer_status::run_ping_loop(
-            store.clone(), identity.clone(), settings.hive.ping_interval_seconds,
+            store.clone(),
+            identity.clone(),
+            settings.hive.ping_interval_seconds,
+            sync_tls_config_for_reload,
+            build_sync_server_config,
         ));
     }
 
@@ -664,6 +710,8 @@ mod tests {
             )),
             true,
             false,
+            None,
+            std::sync::Arc::new(crate::hive::pairing::PairingCodeStore::new()),
             None,
         );
         let resp = app

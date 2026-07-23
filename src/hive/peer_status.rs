@@ -56,7 +56,16 @@ pub async fn online_peers(store: &SqliteStore) -> anyhow::Result<Vec<PeerStatus>
     Ok(out)
 }
 
-pub async fn run_ping_loop(store: Arc<SqliteStore>, identity: DeviceIdentity, interval_seconds_default: u64) {
+pub async fn run_ping_loop(
+    store: Arc<SqliteStore>,
+    identity: DeviceIdentity,
+    interval_seconds_default: u64,
+    sync_tls_config: axum_server::tls_rustls::RustlsConfig,
+    rebuild_sync_server_config: impl Fn(Vec<crate::hive::roster::RosterEntry>) -> anyhow::Result<rustls::ServerConfig>
+        + Send
+        + Sync
+        + 'static,
+) {
     loop {
         let interval_seconds = store
             .hive_settings_override()
@@ -67,6 +76,21 @@ pub async fn run_ping_loop(store: Arc<SqliteStore>, identity: DeviceIdentity, in
             .unwrap_or(interval_seconds_default);
         tokio::time::sleep(Duration::from_secs(interval_seconds)).await;
         ping_once(&store, &identity).await;
+
+        // `ping_once` above already re-merged every reachable peer's roster
+        // view (gossip refresh, including revocations). Rebuild the sync
+        // listener's client-cert verifier from the now-current roster and
+        // hot-swap it in (no rebind), so a revoked device stops being
+        // accepted, and a newly-paired device starts being accepted, within
+        // one ping interval instead of requiring a process restart.
+        if let Ok(current_roster) = store.hive_list_roster().await {
+            match rebuild_sync_server_config(current_roster) {
+                Ok(new_config) => {
+                    sync_tls_config.reload_from_config(std::sync::Arc::new(new_config))
+                }
+                Err(e) => tracing::warn!("failed to rebuild hive sync TLS config: {e:#}"),
+            }
+        }
     }
 }
 

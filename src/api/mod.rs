@@ -103,6 +103,8 @@ pub fn router(
     guard_predefined_namespaces: bool,
     hive_enabled: bool,
     hive_identity: Option<crate::hive::identity::DeviceIdentity>,
+    pairing_codes: Arc<crate::hive::pairing::PairingCodeStore>,
+    pairing_window: Option<Arc<crate::hive::pairing_window::PairingWindow>>,
 ) -> Router {
     let hive_push_config = HivePushConfig {
         enabled: hive_enabled,
@@ -167,8 +169,17 @@ pub fn router(
             post(revise_suggest_session),
         )
         .route("/api/v1/hive/join", post(hive_join))
+        // Local, dashboard-triggered "invite a device now" action — it lives
+        // on the plaintext app router (never a hive TLS port) because only the
+        // local user issues codes, never a remote peer. Issuing a code opens
+        // the time-limited pairing-window listener (see PairingWindow).
+        .route(
+            "/api/v1/hive/pairing-code",
+            post(hive_issue_pairing_code),
+        )
         .with_state(store)
         .layer(Extension(sync))
+        .layer(Extension(pairing_codes))
         .layer(Extension(events))
         .layer(Extension(suggest))
         .layer(Extension(update_state))
@@ -179,6 +190,15 @@ pub fn router(
         .layer(Extension(hive_push_config));
     let router = if let Some(identity) = identity_extension {
         router.layer(Extension(identity))
+    } else {
+        router
+    };
+    // The pairing-code issue handler needs the window coordinator; it's only
+    // present when hive is enabled (built in `http::run_up`). When absent, the
+    // route still exists but returns 500 if hit — acceptable, since issuing a
+    // pairing code is meaningless with hive disabled.
+    let router = if let Some(pairing_window) = pairing_window {
+        router.layer(Extension(pairing_window))
     } else {
         router
     };
@@ -196,29 +216,34 @@ pub fn router(
     )
 }
 
-/// Hive pairing/roster/pairing-code routes only. Served exclusively on the
-/// TLS-fronted hive port (see `http::run_up`) — never merged into the main
-/// plaintext app router, so pairing cannot be reached unencrypted and the
-/// rest of the (unauthenticated) memory/agent API is not exposed on the
-/// hive port.
-pub fn hive_router(
+/// Server-TLS-only (no client-cert verifier) — this is where a brand-new,
+/// not-yet-in-anyone's-roster device pairs. Bound only for a limited window
+/// (see `hive::pairing_window::PairingWindow`, opened per pairing code
+/// issued), never always-on, since it has no roster-membership check of its
+/// own. Never merged into the plaintext `router()`.
+pub fn hive_pairing_router(
     store: Store,
     pairing_codes: Arc<crate::hive::pairing::PairingCodeStore>,
 ) -> Router {
     Router::new()
         .route("/api/v1/hive/pair", post(hive_pair))
+        .with_state(store)
+        .layer(Extension(pairing_codes))
+}
+
+/// Mandatory mutual-TLS (client cert must match an `Active` roster member) —
+/// every route here assumes the caller is already a paired hive member.
+/// Always bound while hive is enabled (this is the mDNS-advertised port real
+/// peer sync uses continuously); never merged into the plaintext `router()`.
+pub fn hive_sync_router(store: Store) -> Router {
+    Router::new()
         .route("/api/v1/hive/roster", get(hive_roster))
         .route("/api/v1/hive/manifest", get(hive_manifest))
-        .route(
-            "/api/v1/hive/pairing-code",
-            post(hive_issue_pairing_code),
-        )
         .route("/api/v1/hive/memories/{id}", get(hive_get_memory))
         .route("/api/v1/hive/settings", get(hive_get_settings))
         .route("/api/v1/hive/tag-namespaces", get(hive_get_tag_namespaces))
         .route("/api/v1/hive/push", post(hive_push))
         .with_state(store)
-        .layer(Extension(pairing_codes))
 }
 
 async fn sse_events(
@@ -242,6 +267,22 @@ pub(crate) fn spawn_hive_push(hive: &HivePushConfig, store: &Store, memory_id: &
             identity,
             memory_id.to_string(),
         ));
+    }
+}
+
+/// Best-effort push of a just-changed tag-namespace registry to online peers
+/// (Finding I3), mirroring `spawn_hive_push` for memories. Spawned, never
+/// awaited, so a slow/unreachable peer never delays the settings-save response.
+pub(crate) fn spawn_hive_tag_namespaces_push(hive: &HivePushConfig, store: &Store) {
+    if hive.enabled
+        && let Some(identity) = hive.identity.clone()
+    {
+        tokio::spawn(
+            crate::hive::sync_loop::push_tag_namespaces_change_to_online_peers(
+                store.clone(),
+                identity,
+            ),
+        );
     }
 }
 
