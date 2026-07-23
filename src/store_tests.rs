@@ -1628,3 +1628,26 @@ async fn hive_upsert_peer_status_updates_existing_row() {
         .unwrap();
     assert!(!status.online);
 }
+
+#[tokio::test]
+async fn hive_upsert_peer_status_none_preserves_existing_last_synced_at() {
+    // This is the exact case ping_once relies on: marking a peer offline
+    // (online: false) after a failed contact attempt must not erase the
+    // last known-good sync timestamp, only flip the online flag.
+    let (store, _dir) = make_store().await;
+    store
+        .hive_upsert_peer_status("hive_peertest0003", true, Some(1000))
+        .await
+        .unwrap();
+    store
+        .hive_upsert_peer_status("hive_peertest0003", false, None)
+        .await
+        .unwrap();
+    let status = store
+        .hive_get_peer_status("hive_peertest0003")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!status.online);
+    assert_eq!(status.last_synced_at, Some(1000));
+}
