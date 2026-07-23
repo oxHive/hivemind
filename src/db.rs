@@ -112,6 +112,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "V8__hive_roster",
         include_str!("../migrations/V8__hive_roster.sql"),
     ),
+    (
+        "V9__hive_sync",
+        include_str!("../migrations/V9__hive_sync.sql"),
+    ),
 ];
 
 pub async fn run_migrations(conn: &libsql::Connection) -> Result<()> {
@@ -411,5 +415,39 @@ mod tests {
             got,
             vec![("parent".to_string(), 1), ("sibling".to_string(), 1)]
         );
+    }
+
+    #[tokio::test]
+    async fn migrations_add_v9_hive_content_hash_and_tombstones() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.db");
+        let sync = crate::config::SyncSettings::default();
+        let db = open_database(&sync, path.to_str().unwrap()).await.unwrap();
+        let conn = db.connect().unwrap();
+        run_migrations(&conn).await.unwrap();
+        // idempotent
+        run_migrations(&conn).await.unwrap();
+
+        // Check that hive_content_hash column exists in memories
+        conn.query("SELECT hive_content_hash FROM memories LIMIT 0", ())
+            .await
+            .expect("hive_content_hash column must exist in memories");
+
+        // Check that hive_tombstones table exists
+        let mut rows = conn
+            .query(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='hive_tombstones'",
+                (),
+            )
+            .await
+            .unwrap();
+        let row = rows.next().await.unwrap().unwrap();
+        let n: i64 = row.get(0).unwrap();
+        assert_eq!(n, 1, "hive_tombstones table must exist");
+
+        // Check that hive_tombstones has the expected columns
+        conn.query("SELECT memory_id, deleted_at FROM hive_tombstones LIMIT 0", ())
+            .await
+            .expect("hive_tombstones must have memory_id and deleted_at columns");
     }
 }
