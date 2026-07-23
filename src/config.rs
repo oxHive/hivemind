@@ -195,6 +195,18 @@ impl Default for UpdateSettings {
     }
 }
 
+/// NOTE (Plan 2, Task 7): these two interval fields are resolved from TOML
+/// only, at config-load time, before the DB is opened — there is no
+/// `SqliteStore` handle available yet here. But `SqliteStore::hive_settings_override`
+/// / `set_hive_settings_override` let a device persist a runtime override to
+/// `_meta`, and `SqliteStore::hive_manifest` hashes whichever value is
+/// currently in effect (override if present, else these TOML defaults) for
+/// sync comparison. Whatever loop actually *uses* these intervals (sync loop:
+/// Task 10, ping loop: Task 12) MUST check `hive_settings_override()` first
+/// and fall back to `settings.hive.sync_interval_seconds` /
+/// `ping_interval_seconds` at the point it reads the interval — not rely on
+/// these TOML-sourced fields alone — or a device-side override saved via the
+/// API will silently have no effect on the loop's actual cadence.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HiveSettings {
     pub enabled: bool,

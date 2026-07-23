@@ -1123,6 +1123,22 @@ async fn hive_roster_lists_current_members() {
 }
 
 #[tokio::test]
+async fn hive_manifest_endpoint_reports_stored_memories() {
+    let (app, _codes, _dir) = test_hive_router().await;
+    // test_hive_router's underlying store is empty; this test only checks
+    // the endpoint's shape, not specific content, since seeding a memory
+    // requires the store handle test_hive_router doesn't currently expose --
+    // if a later task needs a seeded variant, extend test_hive_router rather
+    // than duplicating its setup here.
+    let (status, body) = req(app, "GET", "/api/v1/hive/manifest", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["memories"], json!({}));
+    assert_eq!(body["tombstones"], json!({}));
+    assert!(body["settings"]["hash"].is_string());
+    assert!(body["tag_namespaces"]["hash"].is_string());
+}
+
+#[tokio::test]
 async fn hive_pairing_code_endpoint_issues_a_redeemable_code() {
     let (app, _codes, _dir) = test_hive_router().await;
     let (status, body) = req(app.clone(), "POST", "/api/v1/hive/pairing-code", None).await;

@@ -1418,3 +1418,44 @@ async fn delete_all_writes_a_tombstone_per_memory() {
     let count: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
     assert_eq!(count, 1);
 }
+
+#[tokio::test]
+async fn hive_manifest_lists_stored_memories_with_hash_and_updated_at() {
+    let (store, _dir) = make_store().await;
+    store
+        .store(&NewMemoryRow {
+            id: "mem_manifesttest0000000000000001",
+            title: "t", content: "c", tags: &[], token_count: None,
+            layer: "workspace", memory_type: "project",
+        })
+        .await
+        .unwrap();
+    let manifest = store.hive_manifest().await.unwrap();
+    let (hash, _updated_at) = manifest.memories.get("mem_manifesttest0000000000000001").unwrap();
+    assert!(!hash.is_empty());
+}
+
+#[tokio::test]
+async fn hive_manifest_lists_tombstones() {
+    let (store, _dir) = make_store().await;
+    store
+        .store(&NewMemoryRow {
+            id: "mem_tombmanifest00000000000000001",
+            title: "t", content: "c", tags: &[], token_count: None,
+            layer: "workspace", memory_type: "project",
+        })
+        .await
+        .unwrap();
+    store.delete("mem_tombmanifest00000000000000001").await.unwrap();
+    let manifest = store.hive_manifest().await.unwrap();
+    assert!(manifest.tombstones.contains_key("mem_tombmanifest00000000000000001"));
+}
+
+#[tokio::test]
+async fn hive_settings_override_round_trips() {
+    let (store, _dir) = make_store().await;
+    assert!(store.hive_settings_override().await.unwrap().is_none());
+    store.set_hive_settings_override(120, 30, 1000).await.unwrap();
+    let (sync_s, ping_s, updated_at) = store.hive_settings_override().await.unwrap().unwrap();
+    assert_eq!((sync_s, ping_s, updated_at), (120, 30, 1000));
+}

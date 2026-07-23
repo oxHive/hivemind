@@ -96,6 +96,13 @@ pub struct JournalRow {
     pub updated_at: i64,
 }
 
+pub struct HiveManifest {
+    pub memories: std::collections::HashMap<String, (String, i64)>,
+    pub tombstones: std::collections::HashMap<String, i64>,
+    pub settings: (String, i64),
+    pub tag_namespaces: (String, i64),
+}
+
 pub struct SqliteStore {
     pub(crate) conn: Connection,
 }
@@ -1460,6 +1467,82 @@ impl SqliteStore {
             )
             .await?;
         Ok(())
+    }
+
+    pub async fn hive_manifest(&self) -> Result<HiveManifest> {
+        let mut memories = std::collections::HashMap::new();
+        let mut rows = self
+            .conn
+            .query(
+                "SELECT id, hive_content_hash, updated_at FROM memories WHERE hive_content_hash IS NOT NULL",
+                (),
+            )
+            .await?;
+        while let Some(row) = rows.next().await? {
+            let id: String = row.get(0)?;
+            let hash: String = row.get(1)?;
+            let updated_at: i64 = row.get(2)?;
+            memories.insert(id, (hash, updated_at));
+        }
+
+        let mut tombstones = std::collections::HashMap::new();
+        let mut rows = self
+            .conn
+            .query("SELECT memory_id, deleted_at FROM hive_tombstones", ())
+            .await?;
+        while let Some(row) = rows.next().await? {
+            let id: String = row.get(0)?;
+            let deleted_at: i64 = row.get(1)?;
+            tombstones.insert(id, deleted_at);
+        }
+
+        let settings_override = self.hive_settings_override().await?;
+        let (sync_s, ping_s, settings_updated_at) = settings_override.unwrap_or((300, 60, 0));
+        let settings_hash = {
+            use sha2::{Digest, Sha256};
+            let mut hasher = Sha256::new();
+            hasher.update(sync_s.to_le_bytes());
+            hasher.update(ping_s.to_le_bytes());
+            hex::encode(hasher.finalize())
+        };
+
+        let tag_namespaces_updated_at: i64 = self
+            .get_meta("tag_namespaces_updated_at")
+            .await?
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        let tag_namespaces_json = self.tag_namespace_registry().await;
+        let tag_namespaces_hash = {
+            use sha2::{Digest, Sha256};
+            let mut hasher = Sha256::new();
+            hasher.update(tag_namespaces_json.to_string().as_bytes());
+            hex::encode(hasher.finalize())
+        };
+
+        Ok(HiveManifest {
+            memories,
+            tombstones,
+            settings: (settings_hash, settings_updated_at),
+            tag_namespaces: (tag_namespaces_hash, tag_namespaces_updated_at),
+        })
+    }
+
+    pub async fn hive_settings_override(&self) -> Result<Option<(u64, u64, i64)>> {
+        let Some(raw) = self.get_meta("hive_settings_override").await? else {
+            return Ok(None);
+        };
+        let parsed: (u64, u64, i64) = serde_json::from_str(&raw)?;
+        Ok(Some(parsed))
+    }
+
+    pub async fn set_hive_settings_override(
+        &self,
+        sync_interval_seconds: u64,
+        ping_interval_seconds: u64,
+        updated_at: i64,
+    ) -> Result<()> {
+        let raw = serde_json::to_string(&(sync_interval_seconds, ping_interval_seconds, updated_at))?;
+        self.set_meta("hive_settings_override", &raw).await
     }
 
     fn row_to_entry(&self, row: &libsql::Row) -> Result<MemoryEntry> {

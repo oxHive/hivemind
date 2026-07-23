@@ -184,6 +184,7 @@ pub fn hive_router(
     Router::new()
         .route("/api/v1/hive/pair", post(hive_pair))
         .route("/api/v1/hive/roster", get(hive_roster))
+        .route("/api/v1/hive/manifest", get(hive_manifest))
         .route(
             "/api/v1/hive/pairing-code",
             post(hive_issue_pairing_code),

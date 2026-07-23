@@ -122,6 +122,12 @@ pub(super) async fn save_tag_settings(
             .map_err(|e| ApiError(StatusCode::UNPROCESSABLE_ENTITY, e))?;
     }
     store.set_meta("tag_namespaces", &body.to_string()).await?;
+    store
+        .set_meta(
+            "tag_namespaces_updated_at",
+            &chrono::Utc::now().timestamp().to_string(),
+        )
+        .await?;
     Ok(Json(json!({ "saved": true })))
 }
 

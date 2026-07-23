@@ -54,6 +54,16 @@ pub(super) async fn hive_roster(State(store): State<Store>) -> Result<Json<Value
     Ok(Json(json!({ "roster": roster })))
 }
 
+pub(super) async fn hive_manifest(State(store): State<Store>) -> Result<Json<Value>, ApiError> {
+    let manifest = store.hive_manifest().await?;
+    Ok(Json(json!({
+        "memories": manifest.memories,
+        "tombstones": manifest.tombstones,
+        "settings": { "hash": manifest.settings.0, "updated_at": manifest.settings.1 },
+        "tag_namespaces": { "hash": manifest.tag_namespaces.0, "updated_at": manifest.tag_namespaces.1 },
+    })))
+}
+
 pub(super) async fn hive_issue_pairing_code(
     Extension(pairing_codes): Extension<Arc<PairingCodeStore>>,
 ) -> Json<Value> {
