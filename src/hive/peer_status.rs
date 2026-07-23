@@ -1,8 +1,29 @@
 use crate::hive::identity::DeviceIdentity;
 use crate::hive::roster::RosterStatus;
 use crate::store::SqliteStore;
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
+
+/// Process-wide map of device_id -> last-seen "ip:port" from mDNS discovery.
+/// A `Mutex<HashMap<..>>` behind a `once_cell`-style static is the simplest
+/// way to share this between the mDNS browse task (which only writes to it)
+/// and the ping/sync loops (which only read from it) without threading a
+/// new parameter through every function that might need an address.
+static DISCOVERED_ADDRESSES: std::sync::OnceLock<Mutex<HashMap<String, String>>> = std::sync::OnceLock::new();
+
+fn discovered_addresses() -> &'static Mutex<HashMap<String, String>> {
+    DISCOVERED_ADDRESSES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub fn record_discovered_address(device_id: &str, address: String) {
+    discovered_addresses().lock().unwrap().insert(device_id.to_string(), address);
+}
+
+pub fn resolve_address(device_id: &str) -> Option<String> {
+    discovered_addresses().lock().unwrap().get(device_id).cloned()
+}
 
 pub struct PeerStatus {
     pub device_id: String,
@@ -52,18 +73,35 @@ pub async fn run_ping_loop(store: Arc<SqliteStore>, identity: DeviceIdentity, in
 async fn ping_once(store: &Arc<SqliteStore>, identity: &DeviceIdentity) {
     let Ok(roster) = store.hive_list_roster().await else { return };
     for peer in roster.iter().filter(|e| e.status == RosterStatus::Active && e.device_id != identity.device_id) {
-        // Address resolution: this plan's mDNS discovery (Plan 1's
-        // `HiveDiscovery::browse`) needs to feed resolved addresses into a
-        // device_id -> address map for this ping to actually have somewhere
-        // to connect. A later task (Task 13) wires `HiveDiscovery::browse`'s
-        // event stream into updating that map; until then this loop can mark
-        // peers reachable/unreachable structurally but has no real address to
-        // dial. Implement the reachability check itself now (a later task's
-        // step assumes a `resolve_address` helper exists); Task 13 supplies it.
-        let now = crate::store::chrono_now();
+        let Some(address) = resolve_address(&peer.device_id) else {
+            let _ = store.hive_upsert_peer_status(&peer.device_id, false, None).await;
+            continue;
+        };
         let Ok(client) = crate::hive::client::HiveClient::new(identity, &peer.public_key) else { continue };
-        let _ = client; // real ping call wired in Task 13 once address resolution exists
-        let _ = store.hive_upsert_peer_status(&peer.device_id, false, None).await;
-        let _ = now;
+        let now = crate::store::chrono_now();
+        match client.get(&format!("https://{address}/api/v1/hive/roster")).await {
+            Ok(resp) if resp.status().is_success() => {
+                let _ = store.hive_upsert_peer_status(&peer.device_id, true, Some(now)).await;
+                if let Ok(body) = resp.json::<serde_json::Value>().await
+                    && let Some(remote_roster_json) = body["roster"].as_array()
+                {
+                    // Re-merge this peer's roster view, continuing Plan 1's
+                    // gossip propagation (including revocations) on the same
+                    // round-trip as the liveness check.
+                    if let Ok(remote_roster) = serde_json::from_value::<Vec<crate::hive::roster::RosterEntry>>(
+                        serde_json::Value::Array(remote_roster_json.clone()),
+                    ) {
+                        let local_roster = store.hive_list_roster().await.unwrap_or_default();
+                        let merged = crate::hive::gossip::merge_roster(local_roster, remote_roster);
+                        for entry in &merged {
+                            let _ = store.hive_upsert_roster_entry(entry).await;
+                        }
+                    }
+                }
+            }
+            _ => {
+                let _ = store.hive_upsert_peer_status(&peer.device_id, false, None).await;
+            }
+        }
     }
 }

@@ -388,12 +388,30 @@ pub async fn run_up(
                     while let Ok(event) = receiver.recv_async().await {
                         if let mdns_sd::ServiceEvent::ServiceResolved(info) = event {
                             tracing::info!("hive peer discovered: {}", info.get_fullname());
+                            // The service name is `{device_id}._hivemind._tcp.local.`
+                            // (per Plan 1's `discovery::service_name`) -- strip the
+                            // suffix to recover the device_id.
+                            let fullname = info.get_fullname();
+                            if let Some(device_id) = fullname.strip_suffix("._hivemind._tcp.local.") {
+                                let addresses = info.get_addresses();
+                                if let Some(addr) = addresses.iter().next() {
+                                    let hive_addr = format!("{addr}:{}", info.get_port());
+                                    crate::hive::peer_status::record_discovered_address(device_id, hive_addr);
+                                }
+                            }
                         }
                     }
                 }
                 Err(e) => tracing::error!("hive mDNS browse failed: {e:#}"),
             }
         });
+
+        tokio::spawn(crate::hive::sync_loop::run_sync_loop(
+            store.clone(), identity.clone(), settings.hive.sync_interval_seconds,
+        ));
+        tokio::spawn(crate::hive::peer_status::run_ping_loop(
+            store.clone(), identity.clone(), settings.hive.ping_interval_seconds,
+        ));
     }
 
     let mut dashboard_url = None;

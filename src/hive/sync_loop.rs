@@ -125,15 +125,17 @@ pub async fn run_sync_loop(store: Arc<SqliteStore>, identity: DeviceIdentity, in
 async fn sync_once(store: &Arc<SqliteStore>, identity: &DeviceIdentity) {
     let Ok(roster) = store.hive_list_roster().await else { return };
     for peer in roster.iter().filter(|e| e.status == crate::hive::roster::RosterStatus::Active && e.device_id != identity.device_id) {
+        let Some(address) = crate::hive::peer_status::resolve_address(&peer.device_id) else { continue };
         let Ok(client) = crate::hive::client::HiveClient::new(identity, &peer.public_key) else { continue };
-        // Peer address resolution (mDNS-discovered IP:port per device_id) is
-        // Task 12's job (the presence loop maintains reachable addresses) --
-        // this loop assumes a `peer_address` lookup exists by the time both
-        // tasks are wired together in Task 13. Call
-        // `crate::hive::peer_status::resolve_address(&peer.device_id)` here
-        // once Task 12 lands; until then, this function is structurally
-        // complete but not yet reachable from `run_up` (Task 13 wires it in).
-        let _ = (&client, peer); // placeholder use to avoid an unused-var warning until Task 13 wires in the real address lookup
+        let base_url = format!("https://{address}");
+        match pull_from_peer(&client, &base_url, store).await {
+            Ok(summary) => {
+                if summary.conflicts > 0 {
+                    tracing::warn!("{} hive sync conflict(s) with {}; review in the dashboard", summary.conflicts, peer.device_id);
+                }
+            }
+            Err(e) => tracing::warn!("hive sync with {} failed: {e:#}", peer.device_id),
+        }
     }
 }
 

@@ -106,9 +106,10 @@ pub fn router(
 ) -> Router {
     let hive_push_config = HivePushConfig {
         enabled: hive_enabled,
-        identity: hive_identity,
+        identity: hive_identity.clone(),
     };
-    Router::new()
+    let identity_extension = hive_identity.map(Arc::new);
+    let router = Router::new()
         .route("/api/v1/memories", get(list_memories).post(create_memory))
         .route("/api/v1/memories/count-tokens", post(count_tokens))
         .route(
@@ -165,6 +166,7 @@ pub fn router(
             "/api/v1/suggest-sessions/current/revise",
             post(revise_suggest_session),
         )
+        .route("/api/v1/hive/join", post(hive_join))
         .with_state(store)
         .layer(Extension(sync))
         .layer(Extension(events))
@@ -174,19 +176,24 @@ pub fn router(
         .layer(Extension(GuardPredefinedNamespaces(
             guard_predefined_namespaces,
         )))
-        .layer(Extension(hive_push_config))
-        .layer(
-            CorsLayer::new()
-                .allow_origin(localhost_origins(dashboard_origin))
-                .allow_methods([
-                    Method::GET,
-                    Method::POST,
-                    Method::PATCH,
-                    Method::DELETE,
-                    Method::OPTIONS,
-                ])
-                .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]),
-        )
+        .layer(Extension(hive_push_config));
+    let router = if let Some(identity) = identity_extension {
+        router.layer(Extension(identity))
+    } else {
+        router
+    };
+    router.layer(
+        CorsLayer::new()
+            .allow_origin(localhost_origins(dashboard_origin))
+            .allow_methods([
+                Method::GET,
+                Method::POST,
+                Method::PATCH,
+                Method::DELETE,
+                Method::OPTIONS,
+            ])
+            .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]),
+    )
 }
 
 /// Hive pairing/roster/pairing-code routes only. Served exclusively on the

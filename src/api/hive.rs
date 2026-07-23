@@ -49,6 +49,70 @@ pub(super) async fn hive_pair(
     Ok(Json(json!({ "roster": merged })))
 }
 
+#[derive(Deserialize)]
+pub(super) struct JoinHiveBody {
+    peer_address: String,
+    pairing_code: String,
+}
+
+pub(super) async fn hive_join(
+    State(store): State<Store>,
+    Extension(identity): Extension<Arc<crate::hive::identity::DeviceIdentity>>,
+    Json(body): Json<JoinHiveBody>,
+) -> Result<Json<Value>, ApiError> {
+    let join_record = crate::hive::roster::create_join_record(&identity, &identity.device_id, chrono::Utc::now().timestamp());
+    let pair_body = json!({
+        "code": body.pairing_code,
+        "join_record": {
+            "device_id": join_record.device_id, "public_key": join_record.public_key,
+            "name": join_record.name, "joined_at": join_record.joined_at, "signature": join_record.signature,
+        }
+    });
+
+    // The pairing call itself keeps Plan 1's blind-trust TOFU bootstrap --
+    // there is no roster entry to pin against yet on either side.
+    let insecure_client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let resp = insecure_client
+        .post(format!("https://{}/api/v1/hive/pair", body.peer_address))
+        .json(&pair_body)
+        .send()
+        .await
+        .map_err(|e| ApiError(StatusCode::BAD_GATEWAY, format!("could not reach peer: {e}")))?;
+    if !resp.status().is_success() {
+        return Err(ApiError(StatusCode::BAD_GATEWAY, "peer rejected the pairing code".to_string()));
+    }
+    let pair_response: Value = resp.json().await.map_err(|e| ApiError(StatusCode::BAD_GATEWAY, e.to_string()))?;
+    let remote_roster: Vec<crate::hive::roster::RosterEntry> =
+        serde_json::from_value(pair_response["roster"].clone())
+            .map_err(|e| ApiError(StatusCode::BAD_GATEWAY, format!("malformed roster in pairing response: {e}")))?;
+
+    let local_roster = store.hive_list_roster().await?;
+    let merged = crate::hive::gossip::merge_roster(local_roster, remote_roster);
+    for entry in &merged {
+        store.hive_upsert_roster_entry(entry).await?;
+    }
+
+    // Eager first-sync against every newly-known Active peer, rather than
+    // waiting up to sync_interval_seconds for the next timer tick.
+    let roster_size = merged.len();
+    let store_for_sync = store.clone();
+    let identity_for_sync = (*identity).clone();
+    tokio::spawn(async move {
+        for peer in merged.iter().filter(|e| e.status == crate::hive::roster::RosterStatus::Active && e.device_id != identity_for_sync.device_id) {
+            if let Some(address) = crate::hive::peer_status::resolve_address(&peer.device_id)
+                && let Ok(client) = crate::hive::client::HiveClient::new(&identity_for_sync, &peer.public_key)
+            {
+                let _ = crate::hive::sync_loop::pull_from_peer(&client, &format!("https://{address}"), &store_for_sync).await;
+            }
+        }
+    });
+
+    Ok(Json(json!({ "joined": true, "roster_size": roster_size })))
+}
+
 pub(super) async fn hive_roster(State(store): State<Store>) -> Result<Json<Value>, ApiError> {
     let roster = store.hive_list_roster().await?;
     Ok(Json(json!({ "roster": roster })))
