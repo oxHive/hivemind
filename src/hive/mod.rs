@@ -5,6 +5,7 @@ pub mod identity;
 pub mod keyring_store;
 pub mod pairing;
 pub mod roster;
+pub mod tls_verify;
 
 /// Loads this device's persisted Ed25519 identity, or generates and
 /// persists a fresh one on first run. The device_id is stored in the
