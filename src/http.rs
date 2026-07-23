@@ -311,8 +311,16 @@ pub async fn run_up(
         let client_verifier = std::sync::Arc::new(
             crate::hive::tls_verify::RosterClientCertVerifier::new(current_roster),
         );
-        let server_config = rustls::ServerConfig::builder()
-            .with_client_cert_verifier(client_verifier)
+        // Explicit provider selection (not the bare `builder()`), since both
+        // `ring` and `aws-lc-rs` end up compiled in via axum-server's own
+        // dependency on rustls -- the bare builder panics at runtime when it
+        // can't unambiguously pick a process-default between the two.
+        let server_config = rustls::ServerConfig::builder_with_provider(std::sync::Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_protocol_versions(rustls::DEFAULT_VERSIONS)
+        .map_err(|e| anyhow::anyhow!("failed to select TLS protocol versions: {e}"))?
+        .with_client_cert_verifier(client_verifier)
             .with_single_cert(
                 vec![certified.cert.der().clone()],
                 rustls::pki_types::PrivateKeyDer::try_from(
@@ -500,6 +508,22 @@ pub async fn run_dashboard(settings: &ServerSettings, open: bool) -> Result<()> 
 mod tests {
     use super::*;
     use crate::{config::SyncSettings, db, store::SqliteStore};
+
+    #[test]
+    fn hive_tls_uses_explicit_crypto_provider_not_ambiguous_default() {
+        // Both `ring` and `aws-lc-rs` end up compiled in (our own rustls
+        // feature selects `ring`; axum-server's own rustls dependency pulls
+        // in `aws-lc-rs`), so rustls's implicit per-process default
+        // resolution is genuinely ambiguous. `rustls::ServerConfig::builder()`
+        // panics in that situation -- this test proves the explicit
+        // `builder_with_provider(ring::default_provider())` path used in
+        // `run_up` avoids that panic, which a plain `cargo build`/compile
+        // check can't catch since the panic only fires at runtime.
+        let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
+        let result = rustls::ServerConfig::builder_with_provider(provider)
+            .with_protocol_versions(rustls::DEFAULT_VERSIONS);
+        assert!(result.is_ok(), "explicit provider selection must not fail");
+    }
 
     #[tokio::test]
     async fn unbundled_dashboard_serves_placeholder() {
