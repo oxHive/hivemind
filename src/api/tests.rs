@@ -1166,3 +1166,34 @@ async fn hive_pairing_code_endpoint_issues_a_redeemable_code() {
     .await;
     assert_eq!(status2, StatusCode::OK, "a code issued by the new endpoint must be redeemable via /pair");
 }
+
+#[tokio::test]
+async fn hive_get_memory_returns_404_for_unknown_id() {
+    let (app, _codes, _dir) = test_hive_router().await;
+    let (status, _) = req(app, "GET", "/api/v1/hive/memories/mem_doesnotexist00000000000001", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn hive_push_memory_applies_a_brand_new_memory() {
+    let (app, _codes, _dir) = test_hive_router().await;
+    let (status, body) = req(
+        app.clone(),
+        "POST",
+        "/api/v1/hive/push",
+        Some(json!({
+            "kind": "memory", "id": "mem_pushtest00000000000000000001",
+            "title": "from peer", "content": "pushed content", "tags": [],
+            "layer": "workspace", "memory_type": "project",
+            "updated_at": 1000,
+            "hive_content_hash": crate::store::compute_hive_content_hash("from peer", "pushed content", &[], "workspace", "project"),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["outcome"], "Applied");
+
+    let (status2, body2) = req(app, "GET", "/api/v1/hive/memories/mem_pushtest00000000000000000001", None).await;
+    assert_eq!(status2, StatusCode::OK);
+    assert_eq!(body2["title"], "from peer");
+}

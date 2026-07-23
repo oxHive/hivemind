@@ -189,6 +189,10 @@ pub fn hive_router(
             "/api/v1/hive/pairing-code",
             post(hive_issue_pairing_code),
         )
+        .route("/api/v1/hive/memories/{id}", get(hive_get_memory))
+        .route("/api/v1/hive/settings", get(hive_get_settings))
+        .route("/api/v1/hive/tag-namespaces", get(hive_get_tag_namespaces))
+        .route("/api/v1/hive/push", post(hive_push))
         .with_state(store)
         .layer(Extension(pairing_codes))
 }

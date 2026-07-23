@@ -1500,3 +1500,96 @@ async fn hive_settings_override_round_trips() {
     let (sync_s, ping_s, updated_at) = store.hive_settings_override().await.unwrap().unwrap();
     assert_eq!((sync_s, ping_s, updated_at), (120, 30, 1000));
 }
+
+#[tokio::test]
+async fn apply_incoming_memory_applies_when_remote_is_newer() {
+    let (store, _dir) = make_store().await;
+    store
+        .store(&crate::store::NewMemoryRow {
+            id: "mem_applytest0000000000000000001",
+            title: "old", content: "old content", tags: &[], token_count: None,
+            layer: "workspace", memory_type: "project",
+        })
+        .await
+        .unwrap();
+    let mut incoming = store.recall_by_id("mem_applytest0000000000000000001").await.unwrap().unwrap();
+    incoming.title = "new".to_string();
+    incoming.content = "new content".to_string();
+    incoming.updated_at += 100;
+    let hash = crate::store::compute_hive_content_hash(
+        &incoming.title, &incoming.content, &incoming.tags, &incoming.layer, &incoming.memory_type,
+    );
+    let outcome = store.apply_incoming_memory(&incoming, &hash).await.unwrap();
+    assert!(matches!(outcome, crate::store::ApplyOutcome::Applied));
+    let after = store.recall_by_id("mem_applytest0000000000000000001").await.unwrap().unwrap();
+    assert_eq!(after.title, "new");
+}
+
+#[tokio::test]
+async fn apply_incoming_memory_keeps_local_when_local_is_newer() {
+    let (store, _dir) = make_store().await;
+    store
+        .store(&crate::store::NewMemoryRow {
+            id: "mem_applytest0000000000000000002",
+            title: "local", content: "local content", tags: &[], token_count: None,
+            layer: "workspace", memory_type: "project",
+        })
+        .await
+        .unwrap();
+    let local = store.recall_by_id("mem_applytest0000000000000000002").await.unwrap().unwrap();
+    let mut incoming = local.clone();
+    incoming.title = "stale remote".to_string();
+    incoming.updated_at -= 100;
+    let hash = crate::store::compute_hive_content_hash(
+        &incoming.title, &incoming.content, &incoming.tags, &incoming.layer, &incoming.memory_type,
+    );
+    let outcome = store.apply_incoming_memory(&incoming, &hash).await.unwrap();
+    assert!(matches!(outcome, crate::store::ApplyOutcome::KeptLocal));
+    let after = store.recall_by_id("mem_applytest0000000000000000002").await.unwrap().unwrap();
+    assert_eq!(after.title, "local");
+}
+
+#[tokio::test]
+async fn apply_incoming_memory_conflicts_on_equal_timestamps() {
+    let (store, _dir) = make_store().await;
+    store
+        .store(&crate::store::NewMemoryRow {
+            id: "mem_applytest0000000000000000003",
+            title: "local", content: "local content", tags: &[], token_count: None,
+            layer: "workspace", memory_type: "project",
+        })
+        .await
+        .unwrap();
+    let local = store.recall_by_id("mem_applytest0000000000000000003").await.unwrap().unwrap();
+    let mut incoming = local.clone();
+    incoming.title = "conflicting remote".to_string();
+    // same updated_at as local -- ambiguous, must conflict rather than pick a winner
+    let hash = crate::store::compute_hive_content_hash(
+        &incoming.title, &incoming.content, &incoming.tags, &incoming.layer, &incoming.memory_type,
+    );
+    let outcome = store.apply_incoming_memory(&incoming, &hash).await.unwrap();
+    assert!(matches!(outcome, crate::store::ApplyOutcome::Conflicted));
+    assert_eq!(store.pending_conflict_count().await.unwrap(), 1);
+}
+
+#[tokio::test]
+async fn apply_incoming_memory_conflicts_on_implausible_future_skew() {
+    let (store, _dir) = make_store().await;
+    store
+        .store(&crate::store::NewMemoryRow {
+            id: "mem_applytest0000000000000000004",
+            title: "local", content: "local content", tags: &[], token_count: None,
+            layer: "workspace", memory_type: "project",
+        })
+        .await
+        .unwrap();
+    let local = store.recall_by_id("mem_applytest0000000000000000004").await.unwrap().unwrap();
+    let mut incoming = local.clone();
+    incoming.title = "clock-skewed remote".to_string();
+    incoming.updated_at = crate::store::chrono_now() + 301; // just past the 300s skew threshold
+    let hash = crate::store::compute_hive_content_hash(
+        &incoming.title, &incoming.content, &incoming.tags, &incoming.layer, &incoming.memory_type,
+    );
+    let outcome = store.apply_incoming_memory(&incoming, &hash).await.unwrap();
+    assert!(matches!(outcome, crate::store::ApplyOutcome::Conflicted));
+}

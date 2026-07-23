@@ -1611,11 +1611,82 @@ impl SqliteStore {
     }
 }
 
-fn chrono_now() -> i64 {
+pub(crate) fn chrono_now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64
+}
+
+#[derive(Debug, PartialEq)]
+pub enum ApplyOutcome {
+    Applied,
+    KeptLocal,
+    Conflicted,
+}
+
+const HIVE_CLOCK_SKEW_TOLERANCE_SECONDS: i64 = 300;
+
+impl SqliteStore {
+    pub async fn apply_incoming_memory(
+        &self,
+        incoming: &MemoryEntry,
+        incoming_hash: &str,
+    ) -> Result<ApplyOutcome> {
+        let Some(local) = self.recall_by_id(&incoming.id).await? else {
+            // Not present locally at all -- no conflict is possible, this is
+            // a plain new-to-us memory. Apply directly.
+            self.store(&NewMemoryRow {
+                id: &incoming.id,
+                title: &incoming.title,
+                content: &incoming.content,
+                tags: &incoming.tags,
+                token_count: incoming.token_count,
+                layer: &incoming.layer,
+                memory_type: &incoming.memory_type,
+            })
+            .await?;
+            return Ok(ApplyOutcome::Applied);
+        };
+
+        let local_hash = compute_hive_content_hash(
+            &local.title, &local.content, &local.tags, &local.layer, &local.memory_type,
+        );
+        if local_hash == incoming_hash {
+            return Ok(ApplyOutcome::KeptLocal); // identical, nothing to do
+        }
+
+        let now = chrono_now();
+        if incoming.updated_at > now + HIVE_CLOCK_SKEW_TOLERANCE_SECONDS {
+            self.write_conflict(
+                &incoming.id, &incoming.content, &local.content, incoming.updated_at, local.updated_at,
+            )
+            .await?;
+            return Ok(ApplyOutcome::Conflicted);
+        }
+
+        if incoming.updated_at > local.updated_at {
+            self.store(&NewMemoryRow {
+                id: &incoming.id,
+                title: &incoming.title,
+                content: &incoming.content,
+                tags: &incoming.tags,
+                token_count: incoming.token_count,
+                layer: &incoming.layer,
+                memory_type: &incoming.memory_type,
+            })
+            .await?;
+            Ok(ApplyOutcome::Applied)
+        } else if incoming.updated_at < local.updated_at {
+            Ok(ApplyOutcome::KeptLocal)
+        } else {
+            self.write_conflict(
+                &incoming.id, &incoming.content, &local.content, incoming.updated_at, local.updated_at,
+            )
+            .await?;
+            Ok(ApplyOutcome::Conflicted)
+        }
+    }
 }
 
 #[cfg(test)]
