@@ -65,6 +65,7 @@ pub async fn run_ping_loop(
         + Send
         + Sync
         + 'static,
+    events: tokio::sync::broadcast::Sender<serde_json::Value>,
 ) {
     loop {
         let interval_seconds = store
@@ -75,7 +76,7 @@ pub async fn run_ping_loop(
             .map(|(_, ping_s, _)| ping_s)
             .unwrap_or(interval_seconds_default);
         tokio::time::sleep(Duration::from_secs(interval_seconds)).await;
-        ping_once(&store, &identity).await;
+        ping_once(&store, &identity, &events).await;
 
         // `ping_once` above already re-merged every reachable peer's roster
         // view (gossip refresh, including revocations). Rebuild the sync
@@ -94,38 +95,118 @@ pub async fn run_ping_loop(
     }
 }
 
-async fn ping_once(store: &Arc<SqliteStore>, identity: &DeviceIdentity) {
+async fn ping_once(
+    store: &Arc<SqliteStore>,
+    identity: &DeviceIdentity,
+    events: &tokio::sync::broadcast::Sender<serde_json::Value>,
+) {
     let Ok(roster) = store.hive_list_roster().await else { return };
     for peer in roster.iter().filter(|e| e.status == RosterStatus::Active && e.device_id != identity.device_id) {
-        let Some(address) = resolve_address(&peer.device_id) else {
-            let _ = store.hive_upsert_peer_status(&peer.device_id, false, None).await;
-            continue;
-        };
-        let Ok(client) = crate::hive::client::HiveClient::new(identity, &peer.public_key) else { continue };
-        let now = crate::store::chrono_now();
-        match client.get(&format!("https://{address}/api/v1/hive/roster")).await {
-            Ok(resp) if resp.status().is_success() => {
-                let _ = store.hive_upsert_peer_status(&peer.device_id, true, Some(now)).await;
-                if let Ok(body) = resp.json::<serde_json::Value>().await
-                    && let Some(remote_roster_json) = body["roster"].as_array()
-                {
-                    // Re-merge this peer's roster view, continuing Plan 1's
-                    // gossip propagation (including revocations) on the same
-                    // round-trip as the liveness check.
-                    if let Ok(remote_roster) = serde_json::from_value::<Vec<crate::hive::roster::RosterEntry>>(
-                        serde_json::Value::Array(remote_roster_json.clone()),
-                    ) {
-                        let local_roster = store.hive_list_roster().await.unwrap_or_default();
-                        let merged = crate::hive::gossip::merge_roster(local_roster, remote_roster);
-                        for entry in &merged {
-                            let _ = store.hive_upsert_roster_entry(entry).await;
+        let previously_online = store
+            .hive_get_peer_status(&peer.device_id)
+            .await
+            .ok()
+            .flatten()
+            .map(|s| s.online);
+
+        let now_online = match resolve_address(&peer.device_id) {
+            None => {
+                let _ = store.hive_upsert_peer_status(&peer.device_id, false, None).await;
+                false
+            }
+            Some(address) => {
+                let Ok(client) = crate::hive::client::HiveClient::new(identity, &peer.public_key) else { continue };
+                let now = crate::store::chrono_now();
+                match client.get(&format!("https://{address}/api/v1/hive/roster")).await {
+                    Ok(resp) if resp.status().is_success() => {
+                        let _ = store.hive_upsert_peer_status(&peer.device_id, true, Some(now)).await;
+                        // Re-merge this peer's roster view, continuing Plan 1's
+                        // gossip propagation (including revocations) on the same
+                        // round-trip as the liveness check.
+                        if let Ok(body) = resp.json::<serde_json::Value>().await
+                            && let Some(remote_roster_json) = body["roster"].as_array()
+                            && let Ok(remote_roster) = serde_json::from_value::<Vec<crate::hive::roster::RosterEntry>>(
+                                serde_json::Value::Array(remote_roster_json.clone()),
+                            )
+                        {
+                            let local_roster = store.hive_list_roster().await.unwrap_or_default();
+                            let merged = crate::hive::gossip::merge_roster(local_roster, remote_roster);
+                            for entry in &merged {
+                                let _ = store.hive_upsert_roster_entry(entry).await;
+                            }
                         }
+                        true
+                    }
+                    _ => {
+                        let _ = store.hive_upsert_peer_status(&peer.device_id, false, None).await;
+                        false
                     }
                 }
             }
-            _ => {
-                let _ = store.hive_upsert_peer_status(&peer.device_id, false, None).await;
-            }
+        };
+
+        // Only a real flip from a previously-*known* state emits -- the
+        // very first observation of a peer (no prior hive_peer_status row)
+        // is not a "transition" worth a toast.
+        if let Some(previous) = previously_online
+            && previous != now_online
+        {
+            let _ = events.send(serde_json::json!({ "type": "hive_peer_status_changed" }));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn test_store() -> crate::store::SqliteStore {
+        let sync = crate::config::SyncSettings::default();
+        let database = crate::db::open_database(&sync, ":memory:").await.unwrap();
+        let conn = database.connect().unwrap();
+        crate::db::run_migrations(&conn).await.unwrap();
+        crate::store::SqliteStore::new(conn)
+    }
+
+    #[tokio::test]
+    async fn ping_once_emits_event_only_on_an_actual_online_flip() {
+        let store = std::sync::Arc::new(test_store().await);
+        let identity = crate::hive::identity::generate();
+        let peer = crate::hive::identity::generate();
+        let join = crate::hive::roster::create_join_record(&peer, "peer", 1000);
+        store
+            .hive_upsert_roster_entry(&crate::hive::roster::RosterEntry {
+                device_id: peer.device_id.clone(),
+                public_key: crate::hive::identity::public_key_hex(&peer),
+                name: "peer".to_string(),
+                status: crate::hive::roster::RosterStatus::Active,
+                joined_at: 1000,
+                revoked_at: None,
+                revoked_by: None,
+                join_record: join,
+                revocation_record: None,
+            })
+            .await
+            .unwrap();
+        // No mDNS address recorded for this peer -- ping_once will mark it
+        // offline. Starting with no hive_peer_status row at all, the first
+        // ping_once call transitions "unknown" -> "offline", which is NOT a
+        // flip from a known online state and must not emit.
+        let (events, mut rx) = tokio::sync::broadcast::channel(16);
+        ping_once(&store, &identity, &events).await;
+        assert!(rx.try_recv().is_err(), "first-ever offline status must not emit (no prior known state)");
+
+        // Force it online directly (bypassing a real network contact, which
+        // this unit test has no interest in exercising), then run ping_once
+        // again -- still offline (no address), so this is a real online ->
+        // offline flip and must emit.
+        store.hive_upsert_peer_status(&peer.device_id, true, Some(1234)).await.unwrap();
+        ping_once(&store, &identity, &events).await;
+        let evt = rx.try_recv().expect("online->offline flip must emit hive_peer_status_changed");
+        assert_eq!(evt["type"], "hive_peer_status_changed");
+
+        // Immediately calling it again with no change must not emit again.
+        ping_once(&store, &identity, &events).await;
+        assert!(rx.try_recv().is_err(), "no-change tick must not emit");
     }
 }

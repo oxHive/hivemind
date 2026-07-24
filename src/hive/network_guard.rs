@@ -130,6 +130,7 @@ pub async fn spawn_hive_stack(
     port: u16,
     sync_interval_seconds: u64,
     ping_interval_seconds: u64,
+    events: tokio::sync::broadcast::Sender<serde_json::Value>,
 ) -> anyhow::Result<HiveStackHandle> {
     let self_join = crate::hive::roster::create_join_record(
         &identity,
@@ -228,6 +229,7 @@ pub async fn spawn_hive_stack(
         ping_interval_seconds,
         sync_tls_config_for_reload,
         build_sync_server_config,
+        events,
     ));
 
     Ok(HiveStackHandle {
@@ -251,6 +253,7 @@ pub async fn run_guard_loop(
     port: u16,
     sync_interval_seconds: u64,
     ping_interval_seconds: u64,
+    events: tokio::sync::broadcast::Sender<serde_json::Value>,
     stack: Arc<tokio::sync::Mutex<Option<HiveStackHandle>>>,
 ) {
     loop {
@@ -281,6 +284,7 @@ pub async fn run_guard_loop(
                     port,
                     sync_interval_seconds,
                     ping_interval_seconds,
+                    events.clone(),
                 )
                 .await
                 {

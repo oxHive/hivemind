@@ -372,6 +372,7 @@ pub async fn run_up(
                 settings.port,
                 settings.hive.sync_interval_seconds,
                 settings.hive.ping_interval_seconds,
+                events_tx.clone(),
             )
             .await?;
             *stack.lock().await = Some(handle);
@@ -388,6 +389,7 @@ pub async fn run_up(
             settings.port,
             settings.hive.sync_interval_seconds,
             settings.hive.ping_interval_seconds,
+            events_tx.clone(),
             stack,
         ));
     }
