@@ -328,135 +328,41 @@ pub async fn run_up(
             .clone()
             .expect("hive_identity is Some whenever settings.hive.enabled, bootstrapped above");
 
-        // Self-join: this device always appears in its own roster, signed
-        // exactly like any peer's join record would be. `merge_roster` is
-        // idempotent, so re-running this on every restart is safe — it
-        // will not duplicate or regress an already-Active entry, and if
-        // this device_id was ever revoked by a peer, the sticky-revocation
-        // rule keeps it revoked rather than letting a restart un-revoke it.
-        let self_join = crate::hive::roster::create_join_record(
-            &identity,
-            &identity.device_id,
-            chrono::Utc::now().timestamp(),
-        );
-        let local_roster = store.hive_list_roster().await?;
-        let self_entry = crate::hive::roster::RosterEntry {
-            device_id: self_join.device_id.clone(),
-            public_key: self_join.public_key.clone(),
-            name: self_join.name.clone(),
-            status: crate::hive::roster::RosterStatus::Active,
-            joined_at: self_join.joined_at,
-            revoked_at: None,
-            revoked_by: None,
-            join_record: self_join,
-            revocation_record: None,
-        };
-        let merged = crate::hive::gossip::merge_roster(local_roster, vec![self_entry]);
-        for entry in &merged {
-            store.hive_upsert_roster_entry(entry).await?;
+        let trusted = store.hive_trusted_networks().await?;
+        let current = crate::hive::network::current_network_key();
+        let start_now = trusted.is_empty()
+            || current
+                .as_deref()
+                .map(|c| trusted.iter().any(|t| t.id == c))
+                .unwrap_or(false);
+
+        let stack: Arc<tokio::sync::Mutex<Option<crate::hive::network_guard::HiveStackHandle>>> =
+            Arc::new(tokio::sync::Mutex::new(None));
+        if start_now {
+            let handle = crate::hive::network_guard::spawn_hive_stack(
+                store.clone(),
+                identity.clone(),
+                settings.host.clone(),
+                settings.port,
+                settings.hive.sync_interval_seconds,
+                settings.hive.ping_interval_seconds,
+            )
+            .await?;
+            *stack.lock().await = Some(handle);
+        } else {
+            tracing::warn!(
+                "current network is not in the trusted-networks list; Hive Mode starting paused"
+            );
         }
 
-        // Sync listener: mandatory mTLS, always bound while hive is enabled.
-        // Its trust config is rebuilt and hot-reloaded (not a full rebind)
-        // every ping interval by the ping loop below (Finding I2), so
-        // revocations and newly-paired devices take effect within one ping
-        // interval instead of requiring a process restart.
-        let certified = crate::hive::cert::self_signed_cert(&identity)?;
-        // A closure that rebuilds the sync listener's ServerConfig from a given
-        // roster snapshot. Captures the cert/key DER bytes by value (cloning
-        // them on each call, since `PrivateKeyDer` construction consumes the
-        // bytes) so it can be called both now (initial config) and repeatedly
-        // from the ping loop. Explicit provider selection (not the bare
-        // `builder()`) since both `ring` and `aws-lc-rs` end up compiled in via
-        // axum-server's own rustls dependency -- the bare builder panics at
-        // runtime when it can't unambiguously pick a process-default.
-        let build_sync_server_config = {
-            let certified_cert_der = certified.cert.der().clone();
-            let certified_key_der = certified.signing_key.serialize_der();
-            move |roster: Vec<crate::hive::roster::RosterEntry>| -> anyhow::Result<rustls::ServerConfig> {
-                let client_verifier = std::sync::Arc::new(
-                    crate::hive::tls_verify::RosterClientCertVerifier::new(roster),
-                );
-                Ok(rustls::ServerConfig::builder_with_provider(std::sync::Arc::new(
-                    rustls::crypto::ring::default_provider(),
-                ))
-                .with_protocol_versions(rustls::DEFAULT_VERSIONS)
-                .map_err(|e| anyhow::anyhow!("failed to select TLS protocol versions: {e}"))?
-                .with_client_cert_verifier(client_verifier)
-                .with_single_cert(
-                    vec![certified_cert_der.clone()],
-                    rustls::pki_types::PrivateKeyDer::try_from(certified_key_der.clone())
-                        .map_err(|e| anyhow::anyhow!("invalid private key DER: {e}"))?,
-                )?)
-            }
-        };
-        let initial_roster = store.hive_list_roster().await?;
-        let sync_server_config = build_sync_server_config(initial_roster)?;
-        let sync_tls_config = axum_server::tls_rustls::RustlsConfig::from_config(
-            std::sync::Arc::new(sync_server_config),
-        );
-        let sync_tls_config_for_reload = sync_tls_config.clone();
-        // Only the mTLS-guarded sync routes are served here (see Finding C1) —
-        // pairing lives on the separate server-TLS-only pairing window, and the
-        // plaintext-equivalent full app is never mirrored onto this port.
-        let sync_only_app = api::hive_sync_router(store.clone());
-        let sync_addr: std::net::SocketAddr =
-            format!("{}:{}", settings.host, settings.port + 1).parse()?;
-        tokio::spawn(async move {
-            if let Err(e) = axum_server::bind_rustls(sync_addr, sync_tls_config)
-                .serve(sync_only_app.into_make_service())
-                .await
-            {
-                tracing::error!("hive sync TLS listener failed to bind/serve: {e:#}");
-            }
-        });
-        tracing::info!(
-            "Hive sync (mTLS): https://{}:{}",
-            settings.host,
-            settings.port + 1
-        );
-
-        let discovery = crate::hive::discovery::HiveDiscovery::new()?;
-        discovery.advertise(&identity.device_id, &identity.device_id, settings.port + 1)?;
-        tracing::info!("Hive mDNS: advertising as {}", identity.device_id);
-        tokio::spawn(async move {
-            // `discovery` is moved in here so the underlying ServiceDaemon
-            // (and thus the mDNS advertisement) stays alive for the life of
-            // this task. This loop only logs discovered peers for
-            // visibility — actually contacting/syncing with them is the
-            // data-sync plan's job, not this one's.
-            match discovery.browse() {
-                Ok(receiver) => {
-                    while let Ok(event) = receiver.recv_async().await {
-                        if let mdns_sd::ServiceEvent::ServiceResolved(info) = event {
-                            tracing::info!("hive peer discovered: {}", info.get_fullname());
-                            // The service name is `{device_id}._hivemind._tcp.local.`
-                            // (per Plan 1's `discovery::service_name`) -- strip the
-                            // suffix to recover the device_id.
-                            let fullname = info.get_fullname();
-                            if let Some(device_id) = fullname.strip_suffix("._hivemind._tcp.local.") {
-                                let addresses = info.get_addresses();
-                                if let Some(addr) = addresses.iter().next() {
-                                    let hive_addr = format!("{addr}:{}", info.get_port());
-                                    crate::hive::peer_status::record_discovered_address(device_id, hive_addr);
-                                }
-                            }
-                        }
-                    }
-                }
-                Err(e) => tracing::error!("hive mDNS browse failed: {e:#}"),
-            }
-        });
-
-        tokio::spawn(crate::hive::sync_loop::run_sync_loop(
-            store.clone(), identity.clone(), settings.hive.sync_interval_seconds,
-        ));
-        tokio::spawn(crate::hive::peer_status::run_ping_loop(
+        tokio::spawn(crate::hive::network_guard::run_guard_loop(
             store.clone(),
-            identity.clone(),
+            identity,
+            settings.host.clone(),
+            settings.port,
+            settings.hive.sync_interval_seconds,
             settings.hive.ping_interval_seconds,
-            sync_tls_config_for_reload,
-            build_sync_server_config,
+            stack,
         ));
     }
 
