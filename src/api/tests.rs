@@ -1331,3 +1331,75 @@ async fn trusted_networks_endpoint_rejects_non_loopback_peer() {
     let resp = app.oneshot(request).await.unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 }
+
+#[tokio::test]
+async fn revoke_device_flips_roster_entry_to_revoked() {
+    let (app, store, _dir) = test_router_with_store().await;
+    let identity = crate::hive::identity::generate();
+    let other = crate::hive::identity::generate();
+    // Seed the local device as an Active roster member -- production always
+    // does this via `network_guard::spawn_hive_stack`'s idempotent self-join
+    // before any revoke can be issued. `merge_roster` only applies a
+    // revocation when the *revoker* (this local identity) is a currently-Active
+    // roster member in the pre-merge snapshot, so this precondition must hold
+    // for the handler's gossip-based revoke to take effect.
+    let self_join = crate::hive::roster::create_join_record(&identity, &identity.device_id, 900);
+    store
+        .hive_upsert_roster_entry(&crate::hive::roster::RosterEntry {
+            device_id: identity.device_id.clone(),
+            public_key: crate::hive::identity::public_key_hex(&identity),
+            name: identity.device_id.clone(),
+            status: crate::hive::roster::RosterStatus::Active,
+            joined_at: 900,
+            revoked_at: None,
+            revoked_by: None,
+            join_record: self_join,
+            revocation_record: None,
+        })
+        .await
+        .unwrap();
+    let join = crate::hive::roster::create_join_record(&other, "bob-phone", 1000);
+    store
+        .hive_upsert_roster_entry(&crate::hive::roster::RosterEntry {
+            device_id: other.device_id.clone(),
+            public_key: crate::hive::identity::public_key_hex(&other),
+            name: "bob-phone".to_string(),
+            status: crate::hive::roster::RosterStatus::Active,
+            joined_at: 1000,
+            revoked_at: None,
+            revoked_by: None,
+            join_record: join,
+            revocation_record: None,
+        })
+        .await
+        .unwrap();
+
+    // This handler needs a local identity Extension to sign the revocation
+    // as -- test_router_with_store() builds with hive disabled (no
+    // identity), so this test builds its own tiny router the same way
+    // test_router_with_pairing_code does for a hive-specific extension need.
+    let app = app.layer(axum::extract::Extension(std::sync::Arc::new(identity)));
+
+    let (status, body) = req(
+        app,
+        "POST",
+        &format!("/api/v1/hive/roster/{}/revoke", other.device_id),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["revoked"], true);
+
+    let roster = store.hive_list_roster().await.unwrap();
+    let entry = roster.iter().find(|e| e.device_id == other.device_id).unwrap();
+    assert_eq!(entry.status, crate::hive::roster::RosterStatus::Revoked);
+}
+
+#[tokio::test]
+async fn revoke_device_404s_for_unknown_device() {
+    let (app, _store, _dir) = test_router_with_store().await;
+    let identity = crate::hive::identity::generate();
+    let app = app.layer(axum::extract::Extension(std::sync::Arc::new(identity)));
+    let (status, _) = req(app, "POST", "/api/v1/hive/roster/hive_unknown/revoke", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

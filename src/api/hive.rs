@@ -266,6 +266,38 @@ pub(super) async fn hive_status(
     })))
 }
 
+pub(super) async fn hive_revoke_device(
+    State(store): State<Store>,
+    Extension(identity): Extension<Arc<crate::hive::identity::DeviceIdentity>>,
+    Path(device_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let local_roster = store.hive_list_roster().await?;
+    let Some(target) = local_roster.iter().find(|e| e.device_id == device_id) else {
+        return Err(ApiError(StatusCode::NOT_FOUND, format!("no roster entry for {device_id}")));
+    };
+    if target.status == crate::hive::roster::RosterStatus::Revoked {
+        return Err(ApiError(StatusCode::NOT_FOUND, format!("{device_id} is already revoked")));
+    }
+
+    let revocation = crate::hive::roster::create_revocation_record(
+        &identity, &device_id, chrono::Utc::now().timestamp(),
+    );
+    let mut revoked_entry = target.clone();
+    revoked_entry.revocation_record = Some(revocation);
+    let merged = crate::hive::gossip::merge_roster(local_roster, vec![revoked_entry]);
+    for entry in &merged {
+        store.hive_upsert_roster_entry(entry).await?;
+    }
+
+    let store_for_push = store.clone();
+    let identity_for_push = (*identity).clone();
+    tokio::spawn(crate::hive::sync_loop::push_revocation_to_online_peers(
+        store_for_push, identity_for_push,
+    ));
+
+    Ok(Json(json!({ "revoked": true })))
+}
+
 pub(super) async fn hive_get_settings(State(store): State<Store>) -> Result<Json<Value>, ApiError> {
     let (sync_s, ping_s, updated_at) = store.hive_settings_override().await?.unwrap_or((300, 60, 0));
     Ok(Json(json!({
@@ -293,6 +325,7 @@ pub(super) enum HivePushBody {
     Tombstone { memory_id: String, deleted_at: i64 },
     Settings { sync_interval_seconds: u64, ping_interval_seconds: u64, updated_at: i64 },
     TagNamespaces { namespaces: Value, updated_at: i64 },
+    Roster { roster: Vec<crate::hive::roster::RosterEntry> },
 }
 
 pub(super) async fn hive_push(
@@ -335,6 +368,14 @@ pub(super) async fn hive_push(
                 store.set_meta("tag_namespaces_updated_at", &updated_at.to_string()).await?;
             }
             Ok(Json(json!({ "outcome": if updated_at > current_updated_at { "applied" } else { "kept_local" } })))
+        }
+        HivePushBody::Roster { roster } => {
+            let local_roster = store.hive_list_roster().await?;
+            let merged = crate::hive::gossip::merge_roster(local_roster, roster);
+            for entry in &merged {
+                store.hive_upsert_roster_entry(entry).await?;
+            }
+            Ok(Json(json!({ "outcome": "merged" })))
         }
     }
 }

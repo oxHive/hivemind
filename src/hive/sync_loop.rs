@@ -292,6 +292,32 @@ pub async fn push_tag_namespaces_change_to_online_peers(
     }
 }
 
+/// Best-effort push of a just-created revocation to every peer this device
+/// currently believes is online, mirroring `push_memory_change_to_online_peers`.
+/// Peers that don't get this push directly still receive the revocation on
+/// their own next ping/sync contact with any Active member (Finding I2's
+/// existing gossip-on-ping path), so this is purely a latency optimization,
+/// not the only propagation path.
+pub async fn push_revocation_to_online_peers(
+    store: Arc<SqliteStore>,
+    identity: DeviceIdentity,
+) {
+    let Ok(roster) = store.hive_list_roster().await else { return };
+    let Ok(online_peers) = crate::hive::peer_status::online_peers(&store).await else {
+        return;
+    };
+    let payload = serde_json::json!({ "kind": "roster", "roster": roster });
+    for peer in online_peers {
+        let Ok(client) = crate::hive::client::HiveClient::new(&identity, &peer.public_key) else {
+            continue;
+        };
+        let Some(address) = peer.address else { continue };
+        let _ = client
+            .post_json(&format!("https://{address}/api/v1/hive/push"), &payload)
+            .await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

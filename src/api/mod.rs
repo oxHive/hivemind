@@ -230,7 +230,7 @@ pub fn router(
         )))
         .layer(Extension(hive_push_config.clone()))
         .layer(Extension(hive_sync_port));
-    let router = if let Some(identity) = identity_extension {
+    let router = if let Some(identity) = identity_extension.clone() {
         router.layer(Extension(identity))
     } else {
         router
@@ -261,6 +261,14 @@ pub fn router(
     // above) so `require_loopback` -- via `route_layer`, which applies to
     // every route already registered in the *same* router value -- only
     // gates these two routes, not the entire plaintext API (see issue #27).
+    // `hive_revoke_device` needs `Extension<Arc<DeviceIdentity>>` to sign the
+    // revocation. The main router's `.layer(...)` extensions don't propagate
+    // across `merge` into this separately-built sub-router (same finding as
+    // `hive_status`'s push-config/sync-port below), so the identity is
+    // re-supplied directly onto this router. The first `identity_extension`
+    // local was already cloned onto the main `router` above; this reuses the
+    // same clone.
+    let identity_extension_for_trusted_networks = identity_extension;
     let trusted_networks_router = Router::new()
         .route(
             "/api/v1/hive/trusted-networks",
@@ -271,6 +279,10 @@ pub fn router(
             axum::routing::delete(hive_remove_trusted_network),
         )
         .route("/api/v1/hive/status", get(hive_status))
+        .route(
+            "/api/v1/hive/roster/{device_id}/revoke",
+            post(hive_revoke_device),
+        )
         .route_layer(middleware::from_fn(require_loopback))
         // `hive_status` needs the hive push-config (for its identity/enabled
         // state) and the sync port; the main router's `.layer(...)` extensions
@@ -279,6 +291,12 @@ pub fn router(
         .layer(Extension(hive_push_config))
         .layer(Extension(hive_sync_port))
         .with_state(store);
+    let trusted_networks_router =
+        if let Some(identity) = identity_extension_for_trusted_networks {
+            trusted_networks_router.layer(Extension(identity))
+        } else {
+            trusted_networks_router
+        };
 
     router.merge(trusted_networks_router)
 }
