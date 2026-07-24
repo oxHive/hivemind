@@ -1,6 +1,8 @@
 use crate::hive::identity::DeviceIdentity;
 use anyhow::{Context, Result};
 use ed25519_dalek::pkcs8::EncodePrivateKey;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 
 /// Converts this device's existing Ed25519 signing key into an `rcgen`
 /// keypair, so the TLS certificate is a wrapper around the same identity
@@ -16,8 +18,7 @@ pub fn identity_to_rcgen_keypair(identity: &DeviceIdentity) -> Result<rcgen::Key
 }
 
 /// A self-signed certificate for this device, using its own persisted
-/// identity key. Regenerated fresh each call (cheap — no network I/O),
-/// since only the *public key* inside it needs to be stable across
+/// identity key. Only the *public key* inside it needs to be stable across
 /// restarts, and it always is, because it's derived from the persisted
 /// signing key every time.
 pub fn self_signed_cert(identity: &DeviceIdentity) -> Result<rcgen::CertifiedKey<rcgen::KeyPair>> {
@@ -28,6 +29,37 @@ pub fn self_signed_cert(identity: &DeviceIdentity) -> Result<rcgen::CertifiedKey
         .self_signed(&keypair)
         .context("self-signing certificate")?;
     Ok(rcgen::CertifiedKey { cert, signing_key: keypair })
+}
+
+/// Process-wide cache of `(certificate DER, PKCS#8 private-key DER)` keyed by
+/// `device_id`. The self-signed cert is fully deterministic from the device
+/// identity, which is fixed for the process lifetime — yet `self_signed_cert`
+/// does non-trivial CPU work each call (PKCS#8 decode, rcgen keypair build,
+/// ASN.1 cert construction, an Ed25519 self-signature). `HiveClient::new`
+/// rebuilds a client per online peer on *every* memory write (push-on-change),
+/// so recomputing the identical cert every time is pure waste. Memoize the DER
+/// bytes once per identity; keying by `device_id` keeps multiple identities
+/// (tests, and in principle any future multi-identity use) correct rather than
+/// assuming a single process-global identity.
+static CERT_DER_CACHE: OnceLock<Mutex<HashMap<String, (Vec<u8>, Vec<u8>)>>> = OnceLock::new();
+
+/// Returns the cached `(cert DER, PKCS#8 key DER)` for this identity,
+/// computing and caching it on first use. This is what both the outbound
+/// mTLS client and the inbound sync listener actually need — they only ever
+/// pull these two byte vectors out of the `CertifiedKey`.
+pub fn self_signed_cert_der(identity: &DeviceIdentity) -> Result<(Vec<u8>, Vec<u8>)> {
+    let cache = CERT_DER_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(cached) = cache.lock().unwrap().get(&identity.device_id) {
+        return Ok(cached.clone());
+    }
+    let certified = self_signed_cert(identity)?;
+    let cert_der = certified.cert.der().to_vec();
+    let key_der = certified.signing_key.serialize_der();
+    cache
+        .lock()
+        .unwrap()
+        .insert(identity.device_id.clone(), (cert_der.clone(), key_der.clone()));
+    Ok((cert_der, key_der))
 }
 
 #[cfg(test)]

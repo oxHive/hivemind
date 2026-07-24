@@ -329,7 +329,7 @@ pub async fn run_up(
             .expect("hive_identity is Some whenever settings.hive.enabled, bootstrapped above");
 
         let trusted = store.hive_trusted_networks().await?;
-        let current = crate::hive::network::current_network_key();
+        let current = crate::hive::network::current_network_key_async().await;
         let start_now = trusted.is_empty()
             || current
                 .as_deref()

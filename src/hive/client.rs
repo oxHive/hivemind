@@ -19,9 +19,13 @@ impl HiveClient {
             .try_into()
             .map_err(|_| anyhow::anyhow!("target public key must be 32 bytes"))?;
 
-        let certified = crate::hive::cert::self_signed_cert(identity)?;
-        let client_cert_der = certified.cert.der().clone();
-        let client_key_der = certified.signing_key.serialize_der();
+        // Cached per-identity: the self-signed cert is deterministic from the
+        // fixed device identity, and this constructor runs per online peer on
+        // every memory write (push-on-change), so recomputing it each time
+        // would be pure waste. See `cert::self_signed_cert_der`.
+        let (client_cert_der, client_key_der) =
+            crate::hive::cert::self_signed_cert_der(identity)?;
+        let client_cert_der = rustls::pki_types::CertificateDer::from(client_cert_der);
 
         let verifier = std::sync::Arc::new(crate::hive::tls_verify::PinnedServerCertVerifier::new(
             target_public_key,

@@ -171,7 +171,7 @@ pub(super) async fn hive_get_trusted_networks(
     State(store): State<Store>,
 ) -> Result<Json<Value>, ApiError> {
     let trusted = store.hive_trusted_networks().await?;
-    let current_network = crate::hive::network::current_network_key();
+    let current_network = crate::hive::network::current_network_key_async().await;
     Ok(Json(json!({ "current_network": current_network, "trusted": trusted })))
 }
 

@@ -262,7 +262,7 @@ pub async fn run_guard_loop(
                 continue;
             }
         };
-        let current = crate::hive::network::current_network_key();
+        let current = crate::hive::network::current_network_key_async().await;
         let mut guard = stack.lock().await;
         let action = decide_action(guard.is_some(), &trusted, current.as_deref());
         match action {
