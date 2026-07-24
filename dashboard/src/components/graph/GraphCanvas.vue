@@ -687,7 +687,11 @@ onMounted(() => {
   const dragBehavior = d3.drag()
     .filter(() => !panMode.value)
     .subject(event => {
-      const [mx, my] = toWorld(event.x, event.y)
+      // `event.x`/`event.y` here are relative to d3.drag's container (the
+      // canvas's parentNode by default), not the canvas itself -- every
+      // other hit-test in this file uses the raw event's canvas-relative
+      // `offsetX`/`offsetY` instead, so use the same via `sourceEvent`.
+      const [mx, my] = toWorld(event.sourceEvent.offsetX, event.sourceEvent.offsetY)
       return hitTestNode(mx, my)
     })
     .on('start', event => {
