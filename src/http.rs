@@ -39,6 +39,7 @@ pub fn app_router(
     hive_identity: Option<DeviceIdentity>,
     pairing_codes: Arc<crate::hive::pairing::PairingCodeStore>,
     pairing_window: Option<Arc<crate::hive::pairing_window::PairingWindow>>,
+    hive_sync_port: u16,
 ) -> Router {
     // Fires whenever a memory or edge is created/updated/deleted, either via
     // an MCP tool call (below) or the REST API (api::router) — the dashboard
@@ -80,6 +81,7 @@ pub fn app_router(
         hive_identity,
         pairing_codes,
         pairing_window,
+        crate::api::HiveSyncPort(hive_sync_port),
     )
     .nest_service("/mcp", mcp)
 }
@@ -291,6 +293,7 @@ pub async fn run_up(
         hive_identity.clone(),
         pairing_codes.clone(),
         pairing_window.clone(),
+        if hive_enabled { settings.port + 1 } else { 0 },
     );
 
     if !matches!(settings.host.as_str(), "127.0.0.1" | "localhost" | "::1") {
@@ -637,6 +640,7 @@ mod tests {
             None,
             std::sync::Arc::new(crate::hive::pairing::PairingCodeStore::new()),
             None,
+            0,
         );
         let resp = app
             .oneshot(

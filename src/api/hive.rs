@@ -228,6 +228,44 @@ pub(super) async fn hive_remove_trusted_network(
     Ok(Json(json!({ "trusted": store.hive_trusted_networks().await? })))
 }
 
+pub(super) async fn hive_status(
+    State(store): State<Store>,
+    Extension(hive): Extension<HivePushConfig>,
+    Extension(sync_port): Extension<HiveSyncPort>,
+) -> Result<Json<Value>, ApiError> {
+    let identity_json = hive.identity.as_ref().map(|identity| {
+        json!({
+            "device_id": identity.device_id,
+            "name": identity.device_id,
+            "public_key": crate::hive::identity::public_key_hex(identity),
+        })
+    });
+    let roster = store.hive_list_roster().await?;
+    let mut roster_json = Vec::with_capacity(roster.len());
+    for entry in &roster {
+        let status = store.hive_get_peer_status(&entry.device_id).await?;
+        roster_json.push(json!({
+            "device_id": entry.device_id,
+            "name": entry.name,
+            "status": match entry.status {
+                crate::hive::roster::RosterStatus::Active => "active",
+                crate::hive::roster::RosterStatus::Revoked => "revoked",
+            },
+            "online": status.as_ref().map(|s| s.online).unwrap_or(false),
+            "last_synced_at": status.as_ref().and_then(|s| s.last_synced_at),
+            "pending_conflict_count": status.as_ref().map(|s| s.pending_conflict_count).unwrap_or(0),
+            "joined_at": entry.joined_at,
+        }));
+    }
+    Ok(Json(json!({
+        "enabled": hive.enabled,
+        "identity": identity_json,
+        "sync_port": if sync_port.0 == 0 { Value::Null } else { json!(sync_port.0) },
+        "pending_conflict_count": store.pending_conflict_count().await?,
+        "roster": roster_json,
+    })))
+}
+
 pub(super) async fn hive_get_settings(State(store): State<Store>) -> Result<Json<Value>, ApiError> {
     let (sync_s, ping_s, updated_at) = store.hive_settings_override().await?.unwrap_or((300, 60, 0));
     Ok(Json(json!({

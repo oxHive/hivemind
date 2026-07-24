@@ -32,6 +32,19 @@ type Events = broadcast::Sender<serde_json::Value>;
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct GuardPredefinedNamespaces(pub bool);
 
+/// The hive mTLS sync port (`settings.port + 1`), threaded through as its own
+/// Extension type (not a bare `u16`) so `GET /api/v1/hive/status` can surface
+/// it to the dashboard's invite-QR payload without ambiguity against any
+/// other `u16` extension. `0` when hive was never enabled at boot (no port
+/// was ever chosen) -- `hive_status` reports it as `null` in that case.
+///
+/// `pub` (not `pub(crate)` like `GuardPredefinedNamespaces`) because it appears
+/// directly in `router()`'s public signature, so out-of-crate callers -- the
+/// `tests/api_integration.rs` integration harness -- must be able to name and
+/// construct it.
+#[derive(Debug, Clone, Copy)]
+pub struct HiveSyncPort(pub u16);
+
 /// Whether push-on-change (Plan 2 Task 11) should fire after a successful
 /// memory write, and the identity to sign/authenticate those pushes with.
 /// `identity` is only `Some` when `enabled` is true (see `http::run_up`,
@@ -132,6 +145,7 @@ pub fn router(
     hive_identity: Option<crate::hive::identity::DeviceIdentity>,
     pairing_codes: Arc<crate::hive::pairing::PairingCodeStore>,
     pairing_window: Option<Arc<crate::hive::pairing_window::PairingWindow>>,
+    hive_sync_port: HiveSyncPort,
 ) -> Router {
     let hive_push_config = HivePushConfig {
         enabled: hive_enabled,
@@ -214,7 +228,8 @@ pub fn router(
         .layer(Extension(GuardPredefinedNamespaces(
             guard_predefined_namespaces,
         )))
-        .layer(Extension(hive_push_config));
+        .layer(Extension(hive_push_config.clone()))
+        .layer(Extension(hive_sync_port));
     let router = if let Some(identity) = identity_extension {
         router.layer(Extension(identity))
     } else {
@@ -255,7 +270,14 @@ pub fn router(
             "/api/v1/hive/trusted-networks/{id}",
             axum::routing::delete(hive_remove_trusted_network),
         )
+        .route("/api/v1/hive/status", get(hive_status))
         .route_layer(middleware::from_fn(require_loopback))
+        // `hive_status` needs the hive push-config (for its identity/enabled
+        // state) and the sync port; the main router's `.layer(...)` extensions
+        // don't propagate across `merge` into this separately-built sub-router,
+        // so they're re-supplied here.
+        .layer(Extension(hive_push_config))
+        .layer(Extension(hive_sync_port))
         .with_state(store);
 
     router.merge(trusted_networks_router)

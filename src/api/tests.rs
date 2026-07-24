@@ -84,6 +84,7 @@ async fn test_router_with_guard(guard_predefined_namespaces: bool) -> (Router, T
         None,
         Arc::new(crate::hive::pairing::PairingCodeStore::new()),
         None,
+        crate::api::HiveSyncPort(0),
     );
     (r, dir)
 }
@@ -105,6 +106,7 @@ async fn test_router_with_events() -> (Router, broadcast::Receiver<Value>, TempD
         None,
         Arc::new(crate::hive::pairing::PairingCodeStore::new()),
         None,
+        crate::api::HiveSyncPort(0),
     );
     (r, rx, dir)
 }
@@ -126,6 +128,7 @@ async fn test_router_with_store() -> (Router, Arc<SqliteStore>, TempDir) {
         None,
         Arc::new(crate::hive::pairing::PairingCodeStore::new()),
         None,
+        crate::api::HiveSyncPort(0),
     );
     (r, store, dir)
 }
@@ -1256,6 +1259,21 @@ async fn hive_push_memory_applies_a_brand_new_memory() {
     let (status2, body2) = req(app, "GET", "/api/v1/hive/memories/mem_pushtest00000000000000000001", None).await;
     assert_eq!(status2, StatusCode::OK);
     assert_eq!(body2["title"], "from peer");
+}
+
+#[tokio::test]
+async fn hive_status_reports_disabled_with_no_identity() {
+    // test_router_with_store() builds the router with hive disabled (its
+    // `hive_enabled` arg is `false`, `hive_identity` is `None`) -- confirms
+    // the endpoint degrades gracefully rather than 500ing on a missing
+    // Extension when hive was never turned on.
+    let (app, _store, _dir) = test_router_with_store().await;
+    let (status, body) = req(app, "GET", "/api/v1/hive/status", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["enabled"], false);
+    assert!(body["identity"].is_null());
+    assert_eq!(body["roster"], json!([]));
+    assert_eq!(body["pending_conflict_count"], 0);
 }
 
 #[tokio::test]
