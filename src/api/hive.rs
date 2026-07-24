@@ -133,7 +133,7 @@ pub(super) async fn hive_join(
             if let Some(address) = crate::hive::peer_status::resolve_address(&peer.device_id)
                 && let Ok(client) = crate::hive::client::HiveClient::new(&identity_for_sync, &peer.public_key)
             {
-                let _ = crate::hive::sync_loop::pull_from_peer(&client, &format!("https://{address}"), &store_for_sync).await;
+                let _ = crate::hive::sync_loop::pull_from_peer(&client, &format!("https://{address}"), &store_for_sync, &peer.device_id).await;
             }
         }
     });

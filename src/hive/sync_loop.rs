@@ -50,7 +50,7 @@ async fn diff_and_apply(
 
 use crate::hive::client::HiveClient;
 
-pub async fn pull_from_peer(client: &HiveClient, base_url: &str, local: &SqliteStore) -> Result<PullSummary> {
+pub async fn pull_from_peer(client: &HiveClient, base_url: &str, local: &SqliteStore, source_device_id: &str) -> Result<PullSummary> {
     let manifest_resp = client.get(&format!("{base_url}/api/v1/hive/manifest")).await?;
     let manifest_json: serde_json::Value = manifest_resp.json().await?;
 
@@ -83,7 +83,7 @@ pub async fn pull_from_peer(client: &HiveClient, base_url: &str, local: &SqliteS
             layer: mem_json["layer"].as_str().unwrap_or("workspace").to_string(),
             memory_type: mem_json["memory_type"].as_str().unwrap_or("project").to_string(),
         };
-        match local.apply_incoming_memory(&remote_entry, remote_hash, None).await? {
+        match local.apply_incoming_memory(&remote_entry, remote_hash, Some(source_device_id)).await? {
             crate::store::ApplyOutcome::Applied => summary.memories_pulled += 1,
             crate::store::ApplyOutcome::Conflicted => summary.conflicts += 1,
             crate::store::ApplyOutcome::KeptLocal => {}
@@ -190,7 +190,7 @@ async fn sync_once(store: &Arc<SqliteStore>, identity: &DeviceIdentity) {
         let Some(address) = crate::hive::peer_status::resolve_address(&peer.device_id) else { continue };
         let Ok(client) = crate::hive::client::HiveClient::new(identity, &peer.public_key) else { continue };
         let base_url = format!("https://{address}");
-        match pull_from_peer(&client, &base_url, store).await {
+        match pull_from_peer(&client, &base_url, store, &peer.device_id).await {
             Ok(summary) => {
                 if summary.conflicts > 0 {
                     tracing::warn!("{} hive sync conflict(s) with {}; review in the dashboard", summary.conflicts, peer.device_id);
@@ -357,5 +357,36 @@ mod tests {
         let summary = diff_and_apply(&local_store, &remote_store, &remote_manifest).await.unwrap();
         assert_eq!(summary.tombstones_applied, 1);
         assert!(local_store.recall_by_id("mem_pulltest0000000000000000002").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn diff_and_apply_conflict_is_unattributed_for_the_test_helper() {
+        // diff_and_apply is the pure-function test helper (no HTTP/TLS) and
+        // has no peer identity concept of its own -- it always passes None,
+        // proven here so a future refactor doesn't accidentally wire a real
+        // device_id through it without a test noticing the behavior change.
+        let local_store = test_store().await;
+        let remote_store = test_store().await;
+        local_store
+            .store(&NewMemoryRow {
+                id: "mem_diffconflict00000000000000001",
+                title: "local", content: "local content", tags: &[], token_count: None,
+                layer: "workspace", memory_type: "project",
+            })
+            .await
+            .unwrap();
+        remote_store
+            .store(&NewMemoryRow {
+                id: "mem_diffconflict00000000000000001",
+                title: "remote", content: "remote content", tags: &[], token_count: None,
+                layer: "workspace", memory_type: "project",
+            })
+            .await
+            .unwrap();
+        let remote_manifest = remote_store.hive_manifest().await.unwrap();
+        let summary = diff_and_apply(&local_store, &remote_store, &remote_manifest).await.unwrap();
+        assert_eq!(summary.conflicts, 1);
+        let conflicts = local_store.list_conflicts(None).await.unwrap();
+        assert!(conflicts[0].source_device_id.is_none());
     }
 }
