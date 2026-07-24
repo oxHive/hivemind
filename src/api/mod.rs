@@ -283,6 +283,17 @@ pub fn router(
             "/api/v1/hive/roster/{device_id}/revoke",
             post(hive_revoke_device),
         )
+        // Loopback-gated (dashboard-only) live enable/disable toggle: it
+        // persists the DB override (Task 3) and signals `run_up`'s restart
+        // race via the `Arc<tokio::sync::Notify>` Extension. That Extension is
+        // deliberately NOT layered here on the sub-router (nor anywhere inside
+        // `router()`): the restart lifecycle belongs to the process owner
+        // (`http::app_router`/`run_up`), which layers it on the fully-composed
+        // outer app. Layering it inside `router()` would make it an innermost
+        // Extension that shadows any outer one a caller supplies -- see
+        // `api::tests::set_hive_enabled_persists_override_and_signals_restart`,
+        // which layers its own Notify to observe the signal.
+        .route("/api/v1/hive/enabled", post(hive_set_enabled))
         .route_layer(middleware::from_fn(require_loopback))
         // `hive_status` needs the hive push-config (for its identity/enabled
         // state) and the sync port; the main router's `.layer(...)` extensions

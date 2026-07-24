@@ -298,6 +298,25 @@ pub(super) async fn hive_revoke_device(
     Ok(Json(json!({ "revoked": true })))
 }
 
+#[derive(Deserialize)]
+pub(super) struct SetHiveEnabledBody {
+    enabled: bool,
+}
+
+pub(super) async fn hive_set_enabled(
+    State(store): State<Store>,
+    Extension(restart_notify): Extension<Arc<tokio::sync::Notify>>,
+    Json(body): Json<SetHiveEnabledBody>,
+) -> Result<Json<Value>, ApiError> {
+    store.set_hive_enabled_override(body.enabled).await?;
+    // `run_up`'s tail races this Notify against its normal serve-awaits and
+    // performs the same abort-listeners+re-exec sequence the TUI's detach
+    // key already uses -- the re-exec'd child re-reads the override on its
+    // own fresh boot, so no other state needs to travel through the restart.
+    restart_notify.notify_one();
+    Ok(Json(json!({ "restarting": true })))
+}
+
 pub(super) async fn hive_get_settings(State(store): State<Store>) -> Result<Json<Value>, ApiError> {
     let (sync_s, ping_s, updated_at) = store.hive_settings_override().await?.unwrap_or((300, 60, 0));
     Ok(Json(json!({

@@ -1457,3 +1457,28 @@ async fn revoke_device_404s_for_already_revoked_device() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn set_hive_enabled_persists_override_and_signals_restart() {
+    let (app, store, _dir) = test_router_with_store().await;
+    let restart_notify = Arc::new(tokio::sync::Notify::new());
+    let app = app.layer(axum::extract::Extension(restart_notify.clone()));
+
+    let notified = restart_notify.notified();
+    let (status, body) = req(
+        app,
+        "POST",
+        "/api/v1/hive/enabled",
+        Some(json!({ "enabled": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["restarting"], true);
+    assert_eq!(store.hive_enabled_override().await.unwrap(), Some(true));
+
+    // The handler must have called .notify_one() -- this resolves
+    // immediately rather than hanging if it did.
+    tokio::time::timeout(std::time::Duration::from_secs(1), notified)
+        .await
+        .expect("hive_set_enabled must signal the restart Notify");
+}

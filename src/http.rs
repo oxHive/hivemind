@@ -40,6 +40,7 @@ pub fn app_router(
     pairing_codes: Arc<crate::hive::pairing::PairingCodeStore>,
     pairing_window: Option<Arc<crate::hive::pairing_window::PairingWindow>>,
     hive_sync_port: u16,
+    restart_notify: Arc<tokio::sync::Notify>,
 ) -> Router {
     // Fires whenever a memory or edge is created/updated/deleted, either via
     // an MCP tool call (below) or the REST API (api::router) — the dashboard
@@ -84,6 +85,15 @@ pub fn app_router(
         crate::api::HiveSyncPort(hive_sync_port),
     )
     .nest_service("/mcp", mcp)
+    // Layered on the fully-composed outer app (not inside `api::router`): the
+    // `POST /api/v1/hive/enabled` handler lives on `router()`'s merged
+    // loopback-gated sub-router, and an outer Extension layer here reaches it
+    // (unlike extensions layered on the *main* router before the merge). It is
+    // provided at this boundary rather than inside `router()` because the
+    // restart lifecycle it drives is owned by `run_up`, and because an inner
+    // layer would shadow any Notify a `router()` caller supplies from outside
+    // (see `api::tests::set_hive_enabled_persists_override_and_signals_restart`).
+    .layer(axum::Extension(restart_notify))
 }
 
 pub fn dashboard_router(api_url: &str) -> Router {
@@ -244,6 +254,10 @@ pub async fn run_up(
     };
     let mcp_url = format!("http://{}:{}/mcp", mcp_host, settings.port);
     let pairing_codes = Arc::new(crate::hive::pairing::PairingCodeStore::new());
+    // Fired by `POST /api/v1/hive/enabled` after it persists the DB override;
+    // `run_up`'s tail races it against the normal serve-await and re-execs
+    // this process so the child re-reads the override on a fresh boot.
+    let restart_notify = Arc::new(tokio::sync::Notify::new());
     // The DB override (set via the dashboard's enable/disable toggle, a
     // later plan) wins when present; config.toml's [hive] enabled remains
     // the default otherwise -- same relationship hive_settings_override
@@ -294,6 +308,7 @@ pub async fn run_up(
         pairing_codes.clone(),
         pairing_window.clone(),
         if hive_enabled { settings.port + 1 } else { 0 },
+        restart_notify.clone(),
     );
 
     if !matches!(settings.host.as_str(), "127.0.0.1" | "localhost" | "::1") {
@@ -382,7 +397,7 @@ pub async fn run_up(
     // handlers/middleware via the `ConnectInfo` extractor (used by
     // `api::require_loopback` to gate the trusted-networks endpoints,
     // issue #27) -- unlike a header, it can't be spoofed by the client.
-    let api_handle = tokio::spawn(async move {
+    let mut api_handle = tokio::spawn(async move {
         axum::serve(
             listener,
             app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
@@ -450,7 +465,29 @@ pub async fn run_up(
         std::process::exit(0);
     }
 
-    api_handle.await??;
+    tokio::select! {
+        result = &mut api_handle => { result??; }
+        _ = restart_notify.notified() => {
+            // Same sequence the TUI's detach key already runs: stop this
+            // process's listeners so the re-exec'd child can rebind the now-
+            // free port, hand off the pidfile, and exit. The child re-reads
+            // hive_enabled_override on its own fresh boot (Task 3), which is
+            // the whole point -- no other state travels through the restart.
+            api_handle.abort();
+            if let Some(h) = &dash_handle {
+                h.abort();
+            }
+            for _ in 0..20 {
+                if !crate::cli::probe_server_up(settings) {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+            drop(_pid_guard);
+            spawn_detached_child(headless)?;
+            std::process::exit(0);
+        }
+    }
     if let Some(h) = dash_handle {
         h.await??;
     }
@@ -641,6 +678,7 @@ mod tests {
             std::sync::Arc::new(crate::hive::pairing::PairingCodeStore::new()),
             None,
             0,
+            std::sync::Arc::new(tokio::sync::Notify::new()),
         );
         let resp = app
             .oneshot(
