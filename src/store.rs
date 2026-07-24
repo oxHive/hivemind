@@ -1615,6 +1615,34 @@ impl SqliteStore {
         self.set_meta("hive_settings_override", &raw).await
     }
 
+    pub async fn hive_trusted_networks(&self) -> Result<Vec<crate::hive::network::TrustedNetwork>> {
+        let Some(raw) = self.get_meta("hive_trusted_networks").await? else {
+            return Ok(Vec::new());
+        };
+        Ok(serde_json::from_str(&raw)?)
+    }
+
+    pub async fn add_hive_trusted_network(&self, id: &str, label: Option<String>) -> Result<()> {
+        let mut current = self.hive_trusted_networks().await?;
+        if !current.iter().any(|n| n.id == id) {
+            current.push(crate::hive::network::TrustedNetwork {
+                id: id.to_string(),
+                label,
+                added_at: chrono::Utc::now().timestamp(),
+            });
+            self.set_meta("hive_trusted_networks", &serde_json::to_string(&current)?)
+                .await?;
+        }
+        Ok(())
+    }
+
+    pub async fn remove_hive_trusted_network(&self, id: &str) -> Result<()> {
+        let mut current = self.hive_trusted_networks().await?;
+        current.retain(|n| n.id != id);
+        self.set_meta("hive_trusted_networks", &serde_json::to_string(&current)?)
+            .await
+    }
+
     pub async fn hive_upsert_peer_status(
         &self,
         device_id: &str,

@@ -1502,6 +1502,42 @@ async fn hive_settings_override_round_trips() {
 }
 
 #[tokio::test]
+async fn hive_trusted_networks_round_trip() {
+    let (store, _dir) = make_store().await;
+    assert!(store.hive_trusted_networks().await.unwrap().is_empty());
+
+    store
+        .add_hive_trusted_network("ssid:home-wifi", Some("Home".to_string()))
+        .await
+        .unwrap();
+    let list = store.hive_trusted_networks().await.unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].id, "ssid:home-wifi");
+    assert_eq!(list[0].label, Some("Home".to_string()));
+
+    // Adding the same id again does not duplicate it.
+    store
+        .add_hive_trusted_network("ssid:home-wifi", None)
+        .await
+        .unwrap();
+    assert_eq!(store.hive_trusted_networks().await.unwrap().len(), 1);
+
+    store
+        .add_hive_trusted_network("mac:aabbccddeeff", None)
+        .await
+        .unwrap();
+    assert_eq!(store.hive_trusted_networks().await.unwrap().len(), 2);
+
+    store
+        .remove_hive_trusted_network("ssid:home-wifi")
+        .await
+        .unwrap();
+    let list = store.hive_trusted_networks().await.unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].id, "mac:aabbccddeeff");
+}
+
+#[tokio::test]
 async fn apply_incoming_memory_applies_when_remote_is_newer() {
     let (store, _dir) = make_store().await;
     store
