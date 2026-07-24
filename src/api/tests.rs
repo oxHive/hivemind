@@ -756,7 +756,7 @@ async fn resolve_conflict_success() {
         .await
         .unwrap();
     let conflict = store
-        .write_conflict("mem_rc", "remote content", "content", 2, 1)
+        .write_conflict("mem_rc", "remote content", "content", 2, 1, None)
         .await
         .unwrap();
 

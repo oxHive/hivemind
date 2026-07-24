@@ -74,6 +74,7 @@ pub struct ConflictEntry {
     pub local_updated_at: i64,
     pub status: String,
     pub created_at: i64,
+    pub source_device_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1177,6 +1178,16 @@ impl SqliteStore {
                 params![resolution, id],
             )
             .await?;
+        if changed > 0
+            && let Some(device_id) = &conflict.source_device_id
+        {
+            self.conn
+                .execute(
+                    "UPDATE hive_peer_status SET pending_conflict_count = MAX(0, pending_conflict_count - 1) WHERE device_id = ?1",
+                    params![device_id.as_str()],
+                )
+                .await?;
+        }
         Ok(changed > 0)
     }
 
@@ -1212,6 +1223,7 @@ impl SqliteStore {
                     &j.content,
                     cur.updated_at,
                     j.updated_at,
+                    None,
                 )
                 .await?;
                 found += 1;
@@ -1298,7 +1310,7 @@ impl SqliteStore {
         let mut rows = if let Some(status) = status {
             self.conn
                 .query(
-                    "SELECT id, memory_id, remote_content, local_content, remote_updated_at, local_updated_at, status, created_at
+                    "SELECT id, memory_id, remote_content, local_content, remote_updated_at, local_updated_at, status, created_at, source_device_id
                      FROM conflicts WHERE status = ?1 ORDER BY created_at DESC",
                     params![status],
                 )
@@ -1306,7 +1318,7 @@ impl SqliteStore {
         } else {
             self.conn
                 .query(
-                    "SELECT id, memory_id, remote_content, local_content, remote_updated_at, local_updated_at, status, created_at
+                    "SELECT id, memory_id, remote_content, local_content, remote_updated_at, local_updated_at, status, created_at, source_device_id
                      FROM conflicts ORDER BY created_at DESC",
                     (),
                 )
@@ -1323,6 +1335,7 @@ impl SqliteStore {
                 local_updated_at: row.get(5)?,
                 status: row.get(6)?,
                 created_at: row.get(7)?,
+                source_device_id: row.get(8)?,
             });
         }
         Ok(results)
@@ -1332,7 +1345,7 @@ impl SqliteStore {
         let mut rows = self
             .conn
             .query(
-                "SELECT id, memory_id, remote_content, local_content, remote_updated_at, local_updated_at, status, created_at
+                "SELECT id, memory_id, remote_content, local_content, remote_updated_at, local_updated_at, status, created_at, source_device_id
                  FROM conflicts WHERE id = ?1",
                 params![id],
             )
@@ -1347,6 +1360,7 @@ impl SqliteStore {
                 local_updated_at: row.get(5)?,
                 status: row.get(6)?,
                 created_at: row.get(7)?,
+                source_device_id: row.get(8)?,
             }))
         } else {
             Ok(None)
@@ -1360,16 +1374,20 @@ impl SqliteStore {
         local_content: &str,
         remote_updated_at: i64,
         local_updated_at: i64,
+        source_device_id: Option<&str>,
     ) -> Result<ConflictEntry> {
         let id = format!("conflict_{}", uuid::Uuid::new_v4().simple());
         let now = chrono_now();
         self.conn
             .execute(
-                "INSERT INTO conflicts (id, memory_id, remote_content, local_content, remote_updated_at, local_updated_at, status, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7)",
-                params![id.as_str(), memory_id, remote_content, local_content, remote_updated_at, local_updated_at, now],
+                "INSERT INTO conflicts (id, memory_id, remote_content, local_content, remote_updated_at, local_updated_at, status, created_at, source_device_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7, ?8)",
+                params![id.as_str(), memory_id, remote_content, local_content, remote_updated_at, local_updated_at, now, source_device_id],
             )
             .await?;
+        if let Some(device_id) = source_device_id {
+            self.increment_peer_conflict_count(device_id).await?;
+        }
         Ok(ConflictEntry {
             id,
             memory_id: memory_id.to_string(),
@@ -1379,7 +1397,23 @@ impl SqliteStore {
             local_updated_at,
             status: "pending".to_string(),
             created_at: now,
+            source_device_id: source_device_id.map(String::from),
         })
+    }
+
+    /// Upserts `hive_peer_status` if the device has no row yet (e.g. a
+    /// conflict from a peer before its first ping), otherwise increments.
+    async fn increment_peer_conflict_count(&self, device_id: &str) -> Result<()> {
+        self.conn
+            .execute(
+                "INSERT INTO hive_peer_status (device_id, online, last_synced_at, pending_conflict_count)
+                 VALUES (?1, 0, NULL, 1)
+                 ON CONFLICT(device_id) DO UPDATE SET
+                   pending_conflict_count = pending_conflict_count + 1",
+                params![device_id],
+            )
+            .await?;
+        Ok(())
     }
 
     async fn fetch_tags(&self, memory_id: &str) -> Result<Vec<String>> {
@@ -1716,6 +1750,7 @@ impl SqliteStore {
         &self,
         incoming: &MemoryEntry,
         incoming_hash: &str,
+        source_device_id: Option<&str>,
     ) -> Result<ApplyOutcome> {
         let Some(local) = self.recall_by_id(&incoming.id).await? else {
             // Not present locally at all -- no conflict is possible, this is
@@ -1744,6 +1779,7 @@ impl SqliteStore {
         if incoming.updated_at > now + HIVE_CLOCK_SKEW_TOLERANCE_SECONDS {
             self.write_conflict(
                 &incoming.id, &incoming.content, &local.content, incoming.updated_at, local.updated_at,
+                source_device_id,
             )
             .await?;
             return Ok(ApplyOutcome::Conflicted);
@@ -1766,6 +1802,7 @@ impl SqliteStore {
         } else {
             self.write_conflict(
                 &incoming.id, &incoming.content, &local.content, incoming.updated_at, local.updated_at,
+                source_device_id,
             )
             .await?;
             Ok(ApplyOutcome::Conflicted)

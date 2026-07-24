@@ -267,7 +267,7 @@ pub(super) async fn hive_push(
                 id, title, content, tags, created_at: updated_at, updated_at,
                 token_count: None, layer, memory_type,
             };
-            let outcome = store.apply_incoming_memory(&incoming, &hive_content_hash).await?;
+            let outcome = store.apply_incoming_memory(&incoming, &hive_content_hash, None).await?;
             Ok(Json(json!({ "outcome": format!("{outcome:?}") })))
         }
         HivePushBody::Tombstone { memory_id, deleted_at } => {

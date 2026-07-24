@@ -120,6 +120,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "V10__hive_peer_status",
         include_str!("../migrations/V10__hive_peer_status.sql"),
     ),
+    (
+        "V11__conflict_source_device",
+        include_str!("../migrations/V11__conflict_source_device.sql"),
+    ),
 ];
 
 pub async fn run_migrations(conn: &libsql::Connection) -> Result<()> {

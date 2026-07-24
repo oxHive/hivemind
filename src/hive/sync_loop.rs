@@ -29,7 +29,7 @@ async fn diff_and_apply(
             continue;
         }
         let Some(remote_entry) = remote.recall_by_id(id).await? else { continue };
-        match local.apply_incoming_memory(&remote_entry, remote_hash).await? {
+        match local.apply_incoming_memory(&remote_entry, remote_hash, None).await? {
             crate::store::ApplyOutcome::Applied => summary.memories_pulled += 1,
             crate::store::ApplyOutcome::Conflicted => summary.conflicts += 1,
             crate::store::ApplyOutcome::KeptLocal => {}
@@ -83,7 +83,7 @@ pub async fn pull_from_peer(client: &HiveClient, base_url: &str, local: &SqliteS
             layer: mem_json["layer"].as_str().unwrap_or("workspace").to_string(),
             memory_type: mem_json["memory_type"].as_str().unwrap_or("project").to_string(),
         };
-        match local.apply_incoming_memory(&remote_entry, remote_hash).await? {
+        match local.apply_incoming_memory(&remote_entry, remote_hash, None).await? {
             crate::store::ApplyOutcome::Applied => summary.memories_pulled += 1,
             crate::store::ApplyOutcome::Conflicted => summary.conflicts += 1,
             crate::store::ApplyOutcome::KeptLocal => {}

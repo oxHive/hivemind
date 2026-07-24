@@ -358,6 +358,7 @@ async fn conflict_round_trip() {
             "local content",
             entry.updated_at + 1,
             entry.updated_at,
+            None,
         )
         .await
         .unwrap();
@@ -645,6 +646,7 @@ async fn list_conflicts_returns_entries() {
         "local",
         entry.updated_at + 1,
         entry.updated_at,
+        None,
     )
     .await
     .unwrap();
@@ -1190,7 +1192,7 @@ async fn resolve_keep_local_restores_content() {
         .await
         .unwrap();
     let c = s
-        .write_conflict("mem_r", "remote won", "my local text", 20, 10)
+        .write_conflict("mem_r", "remote won", "my local text", 20, 10, None)
         .await
         .unwrap();
     assert!(s.resolve_conflict(&c.id, "keep_local").await.unwrap());
@@ -1538,6 +1540,89 @@ async fn hive_trusted_networks_round_trip() {
 }
 
 #[tokio::test]
+async fn write_conflict_with_source_device_increments_peer_pending_count() {
+    let (s, _dir) = make_store().await;
+    s.store(&test_row("mem_srcconf", "SC", "local", &[]))
+        .await
+        .unwrap();
+    let entry = s.recall_by_id("mem_srcconf").await.unwrap().unwrap();
+
+    let conflict = s
+        .write_conflict(
+            "mem_srcconf", "remote", "local",
+            entry.updated_at + 1, entry.updated_at,
+            Some("hive_devicea"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(conflict.source_device_id.as_deref(), Some("hive_devicea"));
+
+    let status = s.hive_get_peer_status("hive_devicea").await.unwrap().unwrap();
+    assert_eq!(status.pending_conflict_count, 1);
+
+    // A second conflict from the same device increments again.
+    s.write_conflict(
+        "mem_srcconf", "remote2", "local",
+        entry.updated_at + 2, entry.updated_at,
+        Some("hive_devicea"),
+    )
+    .await
+    .unwrap();
+    let status = s.hive_get_peer_status("hive_devicea").await.unwrap().unwrap();
+    assert_eq!(status.pending_conflict_count, 2);
+}
+
+#[tokio::test]
+async fn resolving_a_sourced_conflict_decrements_peer_pending_count() {
+    let (s, _dir) = make_store().await;
+    s.store(&test_row("mem_resconf", "RC", "local", &[]))
+        .await
+        .unwrap();
+    let entry = s.recall_by_id("mem_resconf").await.unwrap().unwrap();
+    let conflict = s
+        .write_conflict(
+            "mem_resconf", "remote", "local",
+            entry.updated_at + 1, entry.updated_at,
+            Some("hive_deviceb"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        s.hive_get_peer_status("hive_deviceb").await.unwrap().unwrap().pending_conflict_count,
+        1
+    );
+
+    assert!(s.resolve_conflict(&conflict.id, "keep_local").await.unwrap());
+    assert_eq!(
+        s.hive_get_peer_status("hive_deviceb").await.unwrap().unwrap().pending_conflict_count,
+        0
+    );
+}
+
+#[tokio::test]
+async fn resolving_an_unsourced_conflict_touches_no_peer_status() {
+    // The cloud-sync ([sync]) path's conflicts have no source device --
+    // resolving one must not panic or create a spurious hive_peer_status row.
+    let (s, _dir) = make_store().await;
+    s.store(&test_row("mem_nosrc", "NS", "local", &[]))
+        .await
+        .unwrap();
+    let entry = s.recall_by_id("mem_nosrc").await.unwrap().unwrap();
+    let conflict = s
+        .write_conflict(
+            "mem_nosrc", "remote", "local",
+            entry.updated_at + 1, entry.updated_at,
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(conflict.source_device_id.is_none());
+    assert!(s.resolve_conflict(&conflict.id, "keep_local").await.unwrap());
+    // No panic, and no phantom peer-status row for an empty device id.
+    assert!(s.hive_get_peer_status("").await.unwrap().is_none());
+}
+
+#[tokio::test]
 async fn apply_incoming_memory_applies_when_remote_is_newer() {
     let (store, _dir) = make_store().await;
     store
@@ -1555,7 +1640,7 @@ async fn apply_incoming_memory_applies_when_remote_is_newer() {
     let hash = crate::store::compute_hive_content_hash(
         &incoming.title, &incoming.content, &incoming.tags, &incoming.layer, &incoming.memory_type,
     );
-    let outcome = store.apply_incoming_memory(&incoming, &hash).await.unwrap();
+    let outcome = store.apply_incoming_memory(&incoming, &hash, None).await.unwrap();
     assert!(matches!(outcome, crate::store::ApplyOutcome::Applied));
     let after = store.recall_by_id("mem_applytest0000000000000000001").await.unwrap().unwrap();
     assert_eq!(after.title, "new");
@@ -1579,7 +1664,7 @@ async fn apply_incoming_memory_keeps_local_when_local_is_newer() {
     let hash = crate::store::compute_hive_content_hash(
         &incoming.title, &incoming.content, &incoming.tags, &incoming.layer, &incoming.memory_type,
     );
-    let outcome = store.apply_incoming_memory(&incoming, &hash).await.unwrap();
+    let outcome = store.apply_incoming_memory(&incoming, &hash, None).await.unwrap();
     assert!(matches!(outcome, crate::store::ApplyOutcome::KeptLocal));
     let after = store.recall_by_id("mem_applytest0000000000000000002").await.unwrap().unwrap();
     assert_eq!(after.title, "local");
@@ -1603,7 +1688,7 @@ async fn apply_incoming_memory_conflicts_on_equal_timestamps() {
     let hash = crate::store::compute_hive_content_hash(
         &incoming.title, &incoming.content, &incoming.tags, &incoming.layer, &incoming.memory_type,
     );
-    let outcome = store.apply_incoming_memory(&incoming, &hash).await.unwrap();
+    let outcome = store.apply_incoming_memory(&incoming, &hash, None).await.unwrap();
     assert!(matches!(outcome, crate::store::ApplyOutcome::Conflicted));
     assert_eq!(store.pending_conflict_count().await.unwrap(), 1);
 }
@@ -1626,7 +1711,7 @@ async fn apply_incoming_memory_conflicts_on_implausible_future_skew() {
     let hash = crate::store::compute_hive_content_hash(
         &incoming.title, &incoming.content, &incoming.tags, &incoming.layer, &incoming.memory_type,
     );
-    let outcome = store.apply_incoming_memory(&incoming, &hash).await.unwrap();
+    let outcome = store.apply_incoming_memory(&incoming, &hash, None).await.unwrap();
     assert!(matches!(outcome, crate::store::ApplyOutcome::Conflicted));
 }
 
