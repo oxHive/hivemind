@@ -6,6 +6,7 @@ pub fn service_name(device_id: &str) -> String {
     format!("{device_id}.{SERVICE_TYPE}")
 }
 
+#[derive(Clone)]
 pub struct HiveDiscovery {
     daemon: ServiceDaemon,
 }
@@ -31,6 +32,17 @@ impl HiveDiscovery {
 
     pub fn browse(&self) -> anyhow::Result<mdns_sd::Receiver<ServiceEvent>> {
         Ok(self.daemon.browse(SERVICE_TYPE)?)
+    }
+
+    /// Stops the mDNS daemon entirely -- both advertising this device's
+    /// presence and any in-flight browse. Used by the network guard to fully
+    /// stop leaking this device's `device_id` when off a trusted network;
+    /// resuming re-creates a fresh `HiveDiscovery` rather than restarting
+    /// this one, since `ServiceDaemon` has no documented re-open-after-
+    /// shutdown guarantee.
+    pub fn shutdown(&self) -> anyhow::Result<()> {
+        self.daemon.shutdown()?;
+        Ok(())
     }
 }
 
