@@ -289,6 +289,24 @@ pub(super) async fn hive_revoke_device(
         store.hive_upsert_roster_entry(entry).await?;
     }
 
+    // `merge_roster` only actually flips the target to Revoked if the local
+    // device is itself a trusted (Active, pre-merge) roster member -- a
+    // deliberate gossip-safety gate, not something to route around here. If
+    // that gate rejected the revocation (e.g. this device hasn't completed
+    // its own self-join yet, such as right after a paused/auto-paused hive
+    // start), report failure instead of a false `{"revoked": true}` success.
+    let actually_revoked = merged
+        .iter()
+        .find(|e| e.device_id == device_id)
+        .map(|e| e.status == crate::hive::roster::RosterStatus::Revoked)
+        .unwrap_or(false);
+    if !actually_revoked {
+        return Err(ApiError(
+            StatusCode::CONFLICT,
+            "revocation was not applied -- this device may not yet be an Active member of its own roster (hive may still be starting up)".to_string(),
+        ));
+    }
+
     let store_for_push = store.clone();
     let identity_for_push = (*identity).clone();
     tokio::spawn(crate::hive::sync_loop::push_revocation_to_online_peers(

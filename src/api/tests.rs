@@ -1405,6 +1405,51 @@ async fn revoke_device_404s_for_unknown_device() {
 }
 
 #[tokio::test]
+async fn revoke_device_errors_when_local_device_not_yet_active_member() {
+    let (app, store, _dir) = test_router_with_store().await;
+    let identity = crate::hive::identity::generate();
+    let other = crate::hive::identity::generate();
+    // Deliberately do NOT seed the local identity as an Active roster member
+    // -- this mirrors production before `network_guard::spawn_hive_stack`'s
+    // self-join has run (e.g. hive started paused on an untrusted network).
+    // `merge_roster` requires the revoker to already be Active in the
+    // pre-merge snapshot, so the revocation below must be silently rejected.
+    let join = crate::hive::roster::create_join_record(&other, "bob-phone", 1000);
+    store
+        .hive_upsert_roster_entry(&crate::hive::roster::RosterEntry {
+            device_id: other.device_id.clone(),
+            public_key: crate::hive::identity::public_key_hex(&other),
+            name: "bob-phone".to_string(),
+            status: crate::hive::roster::RosterStatus::Active,
+            joined_at: 1000,
+            revoked_at: None,
+            revoked_by: None,
+            join_record: join,
+            revocation_record: None,
+        })
+        .await
+        .unwrap();
+
+    let app = app.layer(axum::extract::Extension(std::sync::Arc::new(identity)));
+
+    let (status, body) = req(
+        app,
+        "POST",
+        &format!("/api/v1/hive/roster/{}/revoke", other.device_id),
+        None,
+    )
+    .await;
+    // Must NOT be the false-success 200 `{"revoked": true}` -- the merge
+    // silently no-oped because the local device isn't a trusted revoker yet.
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_ne!(body["revoked"], true);
+
+    let roster = store.hive_list_roster().await.unwrap();
+    let entry = roster.iter().find(|e| e.device_id == other.device_id).unwrap();
+    assert_eq!(entry.status, crate::hive::roster::RosterStatus::Active);
+}
+
+#[tokio::test]
 async fn revoke_device_404s_for_already_revoked_device() {
     let (app, store, _dir) = test_router_with_store().await;
     let identity = crate::hive::identity::generate();
