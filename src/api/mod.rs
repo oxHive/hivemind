@@ -177,6 +177,14 @@ pub fn router(
             "/api/v1/hive/pairing-code",
             post(hive_issue_pairing_code),
         )
+        .route(
+            "/api/v1/hive/trusted-networks",
+            get(hive_get_trusted_networks).post(hive_add_trusted_network),
+        )
+        .route(
+            "/api/v1/hive/trusted-networks/{id}",
+            axum::routing::delete(hive_remove_trusted_network),
+        )
         .with_state(store)
         .layer(Extension(sync))
         .layer(Extension(pairing_codes))

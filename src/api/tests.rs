@@ -1246,3 +1246,37 @@ async fn hive_push_memory_applies_a_brand_new_memory() {
     assert_eq!(status2, StatusCode::OK);
     assert_eq!(body2["title"], "from peer");
 }
+
+#[tokio::test]
+async fn trusted_networks_crud_roundtrip() {
+    let (app, _store, _dir) = test_router_with_store().await;
+
+    let (status, body) = req(app.clone(), "GET", "/api/v1/hive/trusted-networks", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["trusted"], json!([]));
+
+    let (status, body) = req(
+        app.clone(),
+        "POST",
+        "/api/v1/hive/trusted-networks",
+        Some(json!({ "id": "ssid:home-wifi", "label": "Home" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["trusted"][0]["id"], "ssid:home-wifi");
+    assert_eq!(body["trusted"][0]["label"], "Home");
+
+    let (status, body) = req(app.clone(), "GET", "/api/v1/hive/trusted-networks", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["trusted"].as_array().unwrap().len(), 1);
+
+    let (status, body) = req(
+        app.clone(),
+        "DELETE",
+        "/api/v1/hive/trusted-networks/ssid:home-wifi",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["trusted"], json!([]));
+}

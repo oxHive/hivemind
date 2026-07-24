@@ -161,6 +161,36 @@ pub(super) async fn hive_get_memory(
     }
 }
 
+#[derive(Deserialize)]
+pub(super) struct AddTrustedNetworkBody {
+    id: String,
+    label: Option<String>,
+}
+
+pub(super) async fn hive_get_trusted_networks(
+    State(store): State<Store>,
+) -> Result<Json<Value>, ApiError> {
+    let trusted = store.hive_trusted_networks().await?;
+    let current_network = crate::hive::network::current_network_key();
+    Ok(Json(json!({ "current_network": current_network, "trusted": trusted })))
+}
+
+pub(super) async fn hive_add_trusted_network(
+    State(store): State<Store>,
+    Json(body): Json<AddTrustedNetworkBody>,
+) -> Result<Json<Value>, ApiError> {
+    store.add_hive_trusted_network(&body.id, body.label).await?;
+    Ok(Json(json!({ "trusted": store.hive_trusted_networks().await? })))
+}
+
+pub(super) async fn hive_remove_trusted_network(
+    State(store): State<Store>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    store.remove_hive_trusted_network(&id).await?;
+    Ok(Json(json!({ "trusted": store.hive_trusted_networks().await? })))
+}
+
 pub(super) async fn hive_get_settings(State(store): State<Store>) -> Result<Json<Value>, ApiError> {
     let (sync_s, ping_s, updated_at) = store.hive_settings_override().await?.unwrap_or((300, 60, 0));
     Ok(Json(json!({
