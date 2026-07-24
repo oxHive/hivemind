@@ -6,14 +6,16 @@ use crate::{
 };
 use axum::{
     Json, Router,
-    extract::{Extension, Path, Query, State},
+    extract::{ConnectInfo, Extension, Path, Query, State},
     http::{Method, StatusCode, header},
+    middleware::{self, Next},
     response::{
         IntoResponse, Response,
         sse::{Event, KeepAlive, Sse},
     },
     routing::{get, post},
 };
+use std::net::SocketAddr;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -56,6 +58,31 @@ impl From<anyhow::Error> for ApiError {
 
 fn not_found(msg: impl Into<String>) -> ApiError {
     ApiError(StatusCode::NOT_FOUND, msg.into())
+}
+
+/// Rejects any request whose real TCP peer address isn't loopback, regardless
+/// of what host the server itself bound to. Used to gate the trusted-networks
+/// auto-pause control endpoints (see issue #27): they live on the plaintext
+/// app router alongside routes that are only ever safe when bound to
+/// loopback, but auto-pause specifically protects a device that may have
+/// bound to a wider host -- so it must not be flippable by whoever it's
+/// meant to defend against. Reads the real peer address via `ConnectInfo`
+/// (populated by `into_make_service_with_connect_info`, not a spoofable
+/// header), so this can't be bypassed with a forged `X-Forwarded-For` or
+/// `Host` header.
+async fn require_loopback(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    req: axum::extract::Request,
+    next: Next,
+) -> Result<Response, ApiError> {
+    if addr.ip().is_loopback() {
+        Ok(next.run(req).await)
+    } else {
+        Err(ApiError(
+            StatusCode::FORBIDDEN,
+            "this endpoint is only reachable from localhost".to_string(),
+        ))
+    }
 }
 
 /// Returns an `AllowOrigin` that accepts both the configured dashboard origin and
@@ -177,15 +204,7 @@ pub fn router(
             "/api/v1/hive/pairing-code",
             post(hive_issue_pairing_code),
         )
-        .route(
-            "/api/v1/hive/trusted-networks",
-            get(hive_get_trusted_networks).post(hive_add_trusted_network),
-        )
-        .route(
-            "/api/v1/hive/trusted-networks/{id}",
-            axum::routing::delete(hive_remove_trusted_network),
-        )
-        .with_state(store)
+        .with_state(store.clone())
         .layer(Extension(sync))
         .layer(Extension(pairing_codes))
         .layer(Extension(events))
@@ -210,7 +229,7 @@ pub fn router(
     } else {
         router
     };
-    router.layer(
+    let router = router.layer(
         CorsLayer::new()
             .allow_origin(localhost_origins(dashboard_origin))
             .allow_methods([
@@ -221,7 +240,25 @@ pub fn router(
                 Method::OPTIONS,
             ])
             .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]),
-    )
+    );
+
+    // Merged in as its own sub-router (rather than chained into the routes
+    // above) so `require_loopback` -- via `route_layer`, which applies to
+    // every route already registered in the *same* router value -- only
+    // gates these two routes, not the entire plaintext API (see issue #27).
+    let trusted_networks_router = Router::new()
+        .route(
+            "/api/v1/hive/trusted-networks",
+            get(hive_get_trusted_networks).post(hive_add_trusted_network),
+        )
+        .route(
+            "/api/v1/hive/trusted-networks/{id}",
+            axum::routing::delete(hive_remove_trusted_network),
+        )
+        .route_layer(middleware::from_fn(require_loopback))
+        .with_state(store);
+
+    router.merge(trusted_networks_router)
 }
 
 /// Server-TLS-only (no client-cert verifier) — this is where a brand-new,

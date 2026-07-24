@@ -367,7 +367,17 @@ pub async fn run_up(
     }
 
     let mut dashboard_url = None;
-    let api_handle = tokio::spawn(async move { axum::serve(listener, app).await });
+    // `with_connect_info` makes the real TCP peer address available to
+    // handlers/middleware via the `ConnectInfo` extractor (used by
+    // `api::require_loopback` to gate the trusted-networks endpoints,
+    // issue #27) -- unlike a header, it can't be spoofed by the client.
+    let api_handle = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+    });
 
     let dash_handle = if headless {
         None

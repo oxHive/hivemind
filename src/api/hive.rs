@@ -53,6 +53,13 @@ pub(super) async fn hive_pair(
 pub(super) struct JoinHiveBody {
     peer_address: String,
     pairing_code: String,
+    // Obtained out-of-band alongside the pairing code itself (e.g. shown next
+    // to the code on the peer's own screen) -- see issue #26. Pinning the
+    // pairing TLS connection to this key, rather than accepting any
+    // certificate, closes the on-path MITM gap in the original blind-trust
+    // bootstrap: an attacker impersonating the peer during pairing now fails
+    // the TLS handshake instead of being silently trusted.
+    peer_public_key: String,
 }
 
 pub(super) async fn hive_join(
@@ -69,13 +76,34 @@ pub(super) async fn hive_join(
         }
     });
 
-    // The pairing call itself keeps Plan 1's blind-trust TOFU bootstrap --
-    // there is no roster entry to pin against yet on either side.
-    let insecure_client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
+    let target_public_key: [u8; 32] = hex::decode(&body.peer_public_key)
+        .ok()
+        .and_then(|bytes| bytes.try_into().ok())
+        .ok_or_else(|| {
+            ApiError(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "peer_public_key must be 32 bytes of hex".to_string(),
+            )
+        })?;
+    let verifier = std::sync::Arc::new(crate::hive::tls_verify::PinnedServerCertVerifier::new(
+        target_public_key,
+    ));
+    // Pinned, not blind-trust: the pairing endpoint itself needs no client
+    // cert (its server-TLS-only listener uses `with_no_client_auth()`), but
+    // the server cert it presents must match the expected peer's key exactly.
+    let tls_config = rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_protocol_versions(rustls::DEFAULT_VERSIONS)
+    .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, format!("failed to select TLS protocol versions: {e}")))?
+    .dangerous()
+    .with_custom_certificate_verifier(verifier)
+    .with_no_client_auth();
+    let pinned_client = reqwest::Client::builder()
+        .use_preconfigured_tls(tls_config)
         .build()
         .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    let resp = insecure_client
+    let resp = pinned_client
         .post(format!("https://{}/api/v1/hive/pair", body.peer_address))
         .json(&pair_body)
         .send()
@@ -131,6 +159,7 @@ pub(super) async fn hive_manifest(State(store): State<Store>) -> Result<Json<Val
 pub(super) async fn hive_issue_pairing_code(
     Extension(pairing_codes): Extension<Arc<PairingCodeStore>>,
     Extension(pairing_window): Extension<Arc<crate::hive::pairing_window::PairingWindow>>,
+    Extension(identity): Extension<Arc<crate::hive::identity::DeviceIdentity>>,
 ) -> Json<Value> {
     let now = chrono::Utc::now().timestamp();
     let pairing = pairing_codes.issue(now);
@@ -139,7 +168,15 @@ pub(super) async fn hive_issue_pairing_code(
     pairing_window.open_for(std::time::Duration::from_secs(
         (pairing.expires_at - now).max(0) as u64,
     ));
-    Json(json!({ "code": pairing.code, "expires_at": pairing.expires_at }))
+    // `public_key` is meant to travel alongside `code` out-of-band (shown on
+    // this device's own screen) so the joiner can pin the pairing TLS
+    // connection to it instead of blindly trusting whatever cert answers on
+    // `peer_address` -- see issue #26 / `JoinHiveBody::peer_public_key`.
+    Json(json!({
+        "code": pairing.code,
+        "expires_at": pairing.expires_at,
+        "public_key": crate::hive::identity::public_key_hex(&identity),
+    }))
 }
 
 pub(super) async fn hive_get_memory(

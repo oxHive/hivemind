@@ -164,12 +164,20 @@ async fn test_pairing_router() -> (Router, Arc<crate::hive::pairing::PairingCode
 
 async fn req(app: Router, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
     let builder = Request::builder().method(method).uri(uri);
+    // `.oneshot()` bypasses `into_make_service_with_connect_info` entirely
+    // (no real accepted connection), so `ConnectInfo` would otherwise be
+    // absent for every test request. Attach a loopback address by default --
+    // matching how every real dashboard/local request actually arrives -- so
+    // ordinary tests don't need to know about `require_loopback` at all; the
+    // one test that needs a non-loopback address builds its own request.
+    let loopback = axum::extract::ConnectInfo(std::net::SocketAddr::from(([127, 0, 0, 1], 0)));
     let request = match body {
         Some(v) => builder
             .header("content-type", "application/json")
+            .extension(loopback)
             .body(Body::from(v.to_string()))
             .unwrap(),
-        None => builder.body(Body::empty()).unwrap(),
+        None => builder.extension(loopback).body(Body::empty()).unwrap(),
     };
     let resp = app.oneshot(request).await.unwrap();
     let status = resp.status();
@@ -1173,12 +1181,13 @@ async fn hive_pairing_code_endpoint_issues_a_redeemable_code() {
     let (store, _dir) = test_store().await;
     let pairing_codes = Arc::new(crate::hive::pairing::PairingCodeStore::new());
     let identity = crate::hive::identity::generate();
+    let identity_public_key = crate::hive::identity::public_key_hex(&identity);
     // Port 0 → the OS assigns an ephemeral port, so opening the window binds a
     // real (throwaway) listener without clashing with anything.
     let pairing_window = Arc::new(crate::hive::pairing_window::PairingWindow::new(
         "127.0.0.1".to_string(),
         0,
-        identity,
+        identity.clone(),
         crate::api::hive_pairing_router(Arc::clone(&store), pairing_codes.clone()),
     ));
     let issue_app = Router::new()
@@ -1187,12 +1196,14 @@ async fn hive_pairing_code_endpoint_issues_a_redeemable_code() {
             axum::routing::post(hive_issue_pairing_code),
         )
         .layer(Extension(pairing_codes.clone()))
-        .layer(Extension(pairing_window));
+        .layer(Extension(pairing_window))
+        .layer(Extension(Arc::new(identity)));
 
     let (status, body) = req(issue_app, "POST", "/api/v1/hive/pairing-code", None).await;
     assert_eq!(status, StatusCode::OK);
     let code = body["code"].as_str().unwrap().to_string();
     assert_eq!(code.len(), 8);
+    assert_eq!(body["public_key"].as_str().unwrap(), identity_public_key);
 
     let pair_app = hive_pairing_router(store, pairing_codes);
     let identity = crate::hive::identity::generate();
@@ -1279,4 +1290,26 @@ async fn trusted_networks_crud_roundtrip() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["trusted"], json!([]));
+}
+
+#[tokio::test]
+async fn trusted_networks_endpoint_rejects_non_loopback_peer() {
+    // Issue #27: these routes control the auto-pause safety feature itself,
+    // so they must not be reachable by whatever reached the plaintext API
+    // over a non-loopback bind -- unlike `req()`'s default loopback
+    // ConnectInfo, this builds the request with a real LAN-looking peer
+    // address to prove `require_loopback` actually rejects it.
+    let (app, _store, _dir) = test_router_with_store().await;
+    let non_loopback = axum::extract::ConnectInfo(std::net::SocketAddr::from((
+        [192, 168, 1, 50],
+        54321,
+    )));
+    let request = Request::builder()
+        .method("GET")
+        .uri("/api/v1/hive/trusted-networks")
+        .extension(non_loopback)
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(request).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 }
