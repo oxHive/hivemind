@@ -242,11 +242,19 @@ pub async fn run_up(
     };
     let mcp_url = format!("http://{}:{}/mcp", mcp_host, settings.port);
     let pairing_codes = Arc::new(crate::hive::pairing::PairingCodeStore::new());
-    // Bootstrapped up-front (rather than only inside the `settings.hive.enabled`
+    // The DB override (set via the dashboard's enable/disable toggle, a
+    // later plan) wins when present; config.toml's [hive] enabled remains
+    // the default otherwise -- same relationship hive_settings_override
+    // already has to config.toml's [hive] interval fields.
+    let hive_enabled = store
+        .hive_enabled_override()
+        .await?
+        .unwrap_or(settings.hive.enabled);
+    // Bootstrapped up-front (rather than only inside the `hive_enabled`
     // block further down) so the REST/MCP write handlers wired into `app_router`
     // below can spawn push-on-change attempts (Plan 2 Task 11) using this same
     // identity, instead of each handler needing its own bootstrap call.
-    let hive_identity: Option<DeviceIdentity> = if settings.hive.enabled {
+    let hive_identity: Option<DeviceIdentity> = if hive_enabled {
         let key_store = crate::hive::keyring_store::KeyringHiveKeyStore;
         Some(crate::hive::bootstrap_self_identity(&store, &key_store).await?)
     } else {
@@ -279,7 +287,7 @@ pub async fn run_up(
         mcp_url.clone(),
         update_state,
         settings.guard_predefined_namespaces,
-        settings.hive.enabled,
+        hive_enabled,
         hive_identity.clone(),
         pairing_codes.clone(),
         pairing_window.clone(),
@@ -292,7 +300,7 @@ pub async fn run_up(
              and can call POST /api/v1/suggest-sessions to spawn the configured agent command",
             settings.host
         );
-        if settings.hive.enabled {
+        if hive_enabled {
             tracing::warn!(
                 "binding to {}: Hive Mode exposes a mandatory-mTLS sync port ({}) and, only \
                  while a pairing code is outstanding, a server-TLS-only pairing port ({}); the \
@@ -323,10 +331,10 @@ pub async fn run_up(
         tracing::info!("Sync:          enabled → {}", settings.sync.remote_url);
     }
 
-    if settings.hive.enabled {
+    if hive_enabled {
         let identity = hive_identity
             .clone()
-            .expect("hive_identity is Some whenever settings.hive.enabled, bootstrapped above");
+            .expect("hive_identity is Some whenever hive_enabled, bootstrapped above");
 
         let trusted = store.hive_trusted_networks().await?;
         let current = crate::hive::network::current_network_key_async().await;

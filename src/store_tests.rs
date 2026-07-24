@@ -1504,6 +1504,16 @@ async fn hive_settings_override_round_trips() {
 }
 
 #[tokio::test]
+async fn hive_enabled_override_round_trips() {
+    let (store, _dir) = make_store().await;
+    assert_eq!(store.hive_enabled_override().await.unwrap(), None);
+    store.set_hive_enabled_override(true).await.unwrap();
+    assert_eq!(store.hive_enabled_override().await.unwrap(), Some(true));
+    store.set_hive_enabled_override(false).await.unwrap();
+    assert_eq!(store.hive_enabled_override().await.unwrap(), Some(false));
+}
+
+#[tokio::test]
 async fn hive_trusted_networks_round_trip() {
     let (store, _dir) = make_store().await;
     assert!(store.hive_trusted_networks().await.unwrap().is_empty());

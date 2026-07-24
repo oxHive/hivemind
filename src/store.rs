@@ -1649,6 +1649,18 @@ impl SqliteStore {
         self.set_meta("hive_settings_override", &raw).await
     }
 
+    pub async fn hive_enabled_override(&self) -> Result<Option<bool>> {
+        let Some(raw) = self.get_meta("hive_enabled_override").await? else {
+            return Ok(None);
+        };
+        Ok(Some(raw == "true"))
+    }
+
+    pub async fn set_hive_enabled_override(&self, enabled: bool) -> Result<()> {
+        self.set_meta("hive_enabled_override", if enabled { "true" } else { "false" })
+            .await
+    }
+
     pub async fn hive_trusted_networks(&self) -> Result<Vec<crate::hive::network::TrustedNetwork>> {
         let Some(raw) = self.get_meta("hive_trusted_networks").await? else {
             return Ok(Vec::new());
