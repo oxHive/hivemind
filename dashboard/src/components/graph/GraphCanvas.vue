@@ -143,6 +143,11 @@ function forceClusterAnchor(strength) {
   function force(alpha) {
     let cx = 0, cy = 0, count = 0
     for (const n of nodesRef) {
+      // A pinned node (dragged, or manually placed) shouldn't pull the
+      // centroid to itself -- otherwise dragging one node drags this
+      // force's target along with it, and every other unpinned node
+      // visibly drifts toward wherever the dragged node currently is.
+      if (n.fx != null && n.fy != null) continue
       if (n.__degree > 0) { cx += n.x; cy += n.y; count++ }
     }
     if (count === 0) return
@@ -218,10 +223,17 @@ function forceProjectCluster(strength) {
     const groups = groupByProject(nodesRef)
     for (const members of groups.values()) {
       if (members.length < 2) continue
-      let cx = 0, cy = 0
-      for (const n of members) { cx += n.x; cy += n.y }
-      cx /= members.length
-      cy /= members.length
+      // Same reasoning as forceClusterAnchor: exclude pinned members from
+      // the centroid itself, not just from receiving the force, or dragging
+      // one member drags the whole project cluster's anchor point with it.
+      let cx = 0, cy = 0, count = 0
+      for (const n of members) {
+        if (n.fx != null && n.fy != null) continue
+        cx += n.x; cy += n.y; count++
+      }
+      if (count === 0) continue
+      cx /= count
+      cy /= count
       for (const n of members) {
         if (n.fx != null && n.fy != null) continue
         n.vx += (cx - n.x) * strength * alpha
