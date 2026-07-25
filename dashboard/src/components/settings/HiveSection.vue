@@ -107,6 +107,15 @@ function relativeTime(unixSeconds) {
   return `${Math.floor(diffSec / 86400)}d ago`
 }
 
+// For a future timestamp (pairing code expiry), not past ones like
+// last-synced-at — relativeTime() above counts the other direction.
+function expiresIn(unixSeconds) {
+  const diffSec = unixSeconds - Math.floor(Date.now() / 1000)
+  if (diffSec <= 0) return 'expired'
+  if (diffSec < 60) return `in ${diffSec}s`
+  return `in ${Math.floor(diffSec / 60)}m`
+}
+
 function askRevoke(peer) {
   revokeTarget.value = { device_id: peer.device_id, name: peer.name }
 }
@@ -184,7 +193,7 @@ async function removeTrusted(id) {
             <p class="hm-label" style="margin-bottom:4px">CODE</p>
             <p class="font-mono mb-2" style="font-size:16px; color:var(--hm-text-primary)">{{ pairing.code }}</p>
             <p style="font-size:11px; color:var(--hm-text-tertiary)">
-              Expires {{ relativeTime(pairing.expires_at) === 'never' ? 'soon' : relativeTime(pairing.expires_at) }}
+              Expires {{ expiresIn(pairing.expires_at) }}
             </p>
           </div>
         </div>

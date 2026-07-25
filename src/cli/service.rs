@@ -210,7 +210,7 @@ fn service_install_linux(dashboard: bool, matrix: bool, hive: bool) -> Result<()
     if dashboard {
         let port = crate::config::load_server_settings(&crate::config::global_config_path())
             .map(|s| s.dashboard_port)
-            .unwrap_or(3457);
+            .unwrap_or(3459);
         println!("Dashboard: http://127.0.0.1:{port}");
     }
     println!("Check status: hivemind service status");
@@ -460,7 +460,7 @@ fn service_install_macos(dashboard: bool, matrix: bool, hive: bool) -> Result<()
     if dashboard {
         let port = crate::config::load_server_settings(&crate::config::global_config_path())
             .map(|s| s.dashboard_port)
-            .unwrap_or(3457);
+            .unwrap_or(3459);
         println!("Dashboard: http://127.0.0.1:{port}");
     }
     println!("Logs: ~/Library/Logs/hivemind.log");

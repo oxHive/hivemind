@@ -99,7 +99,7 @@ struct RawDashboard {
     api_url: Option<String>,
     /// The origin the browser sends when loading the dashboard.
     /// Set this when the dashboard is accessed via a hostname other than
-    /// 127.0.0.1 / localhost (e.g. `http://pi.local:3457`).
+    /// 127.0.0.1 / localhost (e.g. `http://pi.local:3459`).
     cors_origin: Option<String>,
 }
 
@@ -445,7 +445,7 @@ pub struct ServerSettings {
     /// when the dashboard page makes requests to the API. Defaults to
     /// `http://127.0.0.1:<dashboard_port>` so both `127.0.0.1` and `localhost`
     /// variants work out of the box. Override when the dashboard is accessed
-    /// via a custom hostname (e.g. `http://pi.local:3457`).
+    /// via a custom hostname (e.g. `http://pi.local:3459`).
     pub cors_origin: String,
     pub sync: SyncSettings,
     pub update: UpdateSettings,
@@ -467,7 +467,10 @@ pub fn load_server_settings(global_path: &std::path::Path) -> anyhow::Result<Ser
     };
     let host = raw.server.host.unwrap_or_else(|| "127.0.0.1".to_string());
     let port = raw.server.port.unwrap_or(3456);
-    let dashboard_port = raw.dashboard.port.unwrap_or(3457);
+    // Not 3457/3458: those are `port + 1` (hive mTLS sync) and `port + 2`
+    // (hive pairing listener) at the default `port` of 3456 -- both bind
+    // whenever hive is enabled, and this default must not collide with them.
+    let dashboard_port = raw.dashboard.port.unwrap_or(3459);
     let api_url = raw
         .dashboard
         .api_url
@@ -701,9 +704,9 @@ mod tests {
         let s = load_server_settings(&tmp.path().join("no-global.toml")).unwrap();
         assert_eq!(s.host, "127.0.0.1");
         assert_eq!(s.port, 3456);
-        assert_eq!(s.dashboard_port, 3457);
+        assert_eq!(s.dashboard_port, 3459);
         assert_eq!(s.api_url, "http://127.0.0.1:3456");
-        assert_eq!(s.cors_origin, "http://127.0.0.1:3457");
+        assert_eq!(s.cors_origin, "http://127.0.0.1:3459");
     }
 
     #[test]

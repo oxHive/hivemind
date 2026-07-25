@@ -479,9 +479,9 @@ async fn build_status_data_matches_render_status_text() {
     let settings = crate::config::ServerSettings {
         host: "127.0.0.1".into(),
         port: 3456,
-        dashboard_port: 3457,
+        dashboard_port: 3459,
         api_url: "http://127.0.0.1:3456".into(),
-        cors_origin: "http://127.0.0.1:3457".into(),
+        cors_origin: "http://127.0.0.1:3459".into(),
         sync: SyncSettings::default(),
         update: crate::config::UpdateSettings::default(),
         agent: crate::config::AgentSettings::default(),
