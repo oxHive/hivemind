@@ -20,9 +20,13 @@ async function handleRevoke() {
     ui.showToast(`Revoked ${props.deviceName}`)
     emit('close')
   } catch (e) {
-    error.value = e.status === 409
-      ? 'Revocation was rejected — this device may not be a fully active hive member yet.'
-      : 'Revoke failed — server error.'
+    if (e.status === 409) {
+      error.value = 'Revocation was rejected — this device may not be a fully active hive member yet.'
+    } else if (e.status === 404) {
+      error.value = 'This device is already revoked or no longer in the roster.'
+    } else {
+      error.value = 'Revoke failed — server error.'
+    }
   } finally {
     working.value = false
   }

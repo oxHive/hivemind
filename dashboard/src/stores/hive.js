@@ -12,6 +12,7 @@ export const useHiveStore = defineStore('hive', () => {
   const trustedNetworks = ref([])
   const currentNetwork = ref(null)
   const loaded = ref(false)
+  const loadError = ref(null)
 
   // Tracks each peer's online flag from the last fetch so a
   // `hive_peer_status_changed` SSE event can toast only on an actual flip,
@@ -27,10 +28,12 @@ export const useHiveStore = defineStore('hive', () => {
       pendingConflictCount.value = data.pending_conflict_count ?? 0
       roster.value = data.roster ?? []
       loaded.value = true
-    } catch {
+      loadError.value = null
+    } catch (e) {
       // dashboard may be talking to a server that's mid-restart (the
       // enable-toggle flow) or has hive unavailable — leave state as-is,
       // caller decides whether to retry
+      loadError.value = e.status === 403 ? 'forbidden' : null
     }
   }
 
@@ -66,7 +69,7 @@ export const useHiveStore = defineStore('hive', () => {
 
   return {
     enabled, identity, syncPort, pendingConflictCount, roster,
-    trustedNetworks, currentNetwork, loaded,
+    trustedNetworks, currentNetwork, loaded, loadError,
     fetchStatus, fetchTrustedNetworks, primeOnlineSnapshot, handlePeerStatusChanged,
   }
 })

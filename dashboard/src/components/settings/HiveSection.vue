@@ -46,9 +46,18 @@ async function onToggleEnabled(e) {
       restarting.value = true
       startRestartPoll()
     }
-  } catch {
-    toggleError.value = 'Could not change the hive toggle — server error.'
-    e.target.checked = !next
+  } catch (err) {
+    if (err.status === undefined) {
+      // Network-level failure, not an HTTP error response -- the server may
+      // have aborted its listeners (mid-restart) before the response could
+      // flush. The DB override write happens before the restart signal, so
+      // treat this as "probably restarting" rather than a real failure.
+      restarting.value = true
+      startRestartPoll()
+    } else {
+      toggleError.value = 'Could not change the hive toggle — server error.'
+      e.target.checked = !next
+    }
   }
 }
 
@@ -87,11 +96,9 @@ async function showPairingCode() {
 
 function drawQr() {
   if (!qrCanvas.value || !pairing.value) return
-  const address = hive.syncPort ? `${window.location.hostname}:${hive.syncPort}` : window.location.hostname
   const payload = JSON.stringify({
     code: pairing.value.code,
     public_key: pairing.value.public_key,
-    address,
   })
   QRCode.toCanvas(qrCanvas.value, payload, { width: 200 }, (err) => {
     if (err) ui.showToast('Could not render invite QR code.')
@@ -160,6 +167,10 @@ async function removeTrusted(id) {
     <p v-if="loading" style="font-size:13px; color:var(--hm-text-tertiary)">Loading…</p>
 
     <template v-else>
+      <p v-if="hive.loadError === 'forbidden'" style="font-size:12px; color:var(--hm-text-tertiary)">
+        Hive controls are only available from the machine running HiveMind.
+      </p>
+      <template v-else>
       <label class="flex items-center gap-3 mb-2 cursor-pointer">
         <input type="checkbox" class="w-4 h-4" :checked="hive.enabled" :disabled="restarting" @change="onToggleEnabled" />
         <span style="font-size:13px; color:var(--hm-text-primary)">Enable hive sync</span>
@@ -244,6 +255,7 @@ async function removeTrusted(id) {
           <button class="hm-btn hm-btn-default hm-btn-sm" @click="addTrusted">+ Add</button>
         </div>
         <p v-if="trustedError" style="font-size:11px; color:var(--hm-danger)" class="mt-2">{{ trustedError }}</p>
+      </template>
       </template>
     </template>
 
