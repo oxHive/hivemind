@@ -326,7 +326,7 @@ pub async fn push_revocation_to_online_peers(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::{compute_hive_content_hash, NewMemoryRow};
+    use crate::store::NewMemoryRow;
 
     async fn test_store() -> crate::store::SqliteStore {
         let sync = crate::config::SyncSettings::default();
@@ -412,6 +412,26 @@ mod tests {
                 title: "remote", content: "remote content", tags: &[], token_count: None,
                 layer: "workspace", memory_type: "project",
             })
+            .await
+            .unwrap();
+        // `store()` always stamps `updated_at` with real wall-clock seconds
+        // (no way to inject a fixed time via NewMemoryRow) -- a conflict only
+        // arises when both sides' timestamps tie exactly, which two
+        // back-to-back `store()` calls only guarantee if no second boundary
+        // ticks between them. Force the tie directly instead of relying on
+        // that timing luck, so this test can't flake.
+        let local_updated_at = local_store
+            .recall_by_id("mem_diffconflict00000000000000001")
+            .await
+            .unwrap()
+            .unwrap()
+            .updated_at;
+        remote_store
+            .conn
+            .execute(
+                "UPDATE memories SET updated_at = ?1 WHERE id = 'mem_diffconflict00000000000000001'",
+                libsql::params![local_updated_at],
+            )
             .await
             .unwrap();
         let remote_manifest = remote_store.hive_manifest().await.unwrap();
