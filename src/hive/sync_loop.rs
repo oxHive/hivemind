@@ -1,4 +1,6 @@
-use crate::store::{HiveManifest, SqliteStore};
+#[cfg(test)]
+use crate::store::HiveManifest;
+use crate::store::SqliteStore;
 use anyhow::Result;
 
 pub struct PullSummary {
@@ -11,7 +13,10 @@ pub struct PullSummary {
 /// remote store (a `HiveClient` GET in production, an in-process second
 /// `SqliteStore` in this task's tests), figures out what differs and
 /// applies it to `local`. Kept free of any HTTP/TLS specifics so it's
-/// testable without a live network.
+/// testable without a live network. Test-only: production sync goes
+/// through `pull_from_peer` below, which needs the HTTP-specific handling
+/// (partial-failure skips, JSON field mapping) this pure version doesn't do.
+#[cfg(test)]
 async fn diff_and_apply(
     local: &SqliteStore,
     remote: &SqliteStore,
