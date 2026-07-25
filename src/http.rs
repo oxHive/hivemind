@@ -446,7 +446,15 @@ pub async fn run_up(
             true,
         )
         .await?;
-        crate::tui::up_view::run(data, dashboard_url, mcp_url, events_tx, store.clone()).await?;
+        crate::tui::up_view::run(
+            data,
+            dashboard_url,
+            mcp_url,
+            events_tx,
+            store.clone(),
+            restart_notify.clone(),
+        )
+        .await?;
         // `d` returns here: terminal is already restored by up_view's TerminalGuard.
         // Actually detach: stop this process's listeners so a re-exec'd child
         // can rebind the same port, hand off the pidfile, and exit — the

@@ -27,17 +27,22 @@ const MIN_BOX_WIDTH: u16 = 40;
 const FOOTER_TEXT: &str = "  d detach   ctrl+c stop server";
 
 /// Runs the interactive `hivemind up` view: header + a live activity feed fed
-/// by the existing SSE broadcast channel. Returns on `d` — the caller
-/// (`http::run_up`) then actually detaches: aborts its listeners, re-execs a
-/// background copy of the server, and exits so the shell prompt comes back.
-/// `Ctrl+C` exits the process directly (stopping the server for good), since
-/// raw mode swallows the OS SIGINT that would normally do that.
+/// by the existing SSE broadcast channel. Returns on `d`, or when
+/// `restart_notify` fires (the dashboard's Hive enable/disable toggle
+/// requesting a restart, since this TUI loop -- not `http::run_up`'s own
+/// `select!` -- owns the process while it's running interactively) — either
+/// way the caller (`http::run_up`) then actually detaches: aborts its
+/// listeners, re-execs a background copy of the server, and exits so the
+/// shell prompt comes back. `Ctrl+C` exits the process directly (stopping
+/// the server for good), since raw mode swallows the OS SIGINT that would
+/// normally do that.
 pub async fn run(
     mut data: StatusData,
     dashboard_url: Option<String>,
     mcp_url: String,
     events: broadcast::Sender<serde_json::Value>,
     store: std::sync::Arc<SqliteStore>,
+    restart_notify: std::sync::Arc<tokio::sync::Notify>,
 ) -> Result<()> {
     let guard = TerminalGuard::enter(VIEWPORT_HEIGHT)?;
     let mut terminal = guard.terminal()?;
@@ -85,6 +90,7 @@ pub async fn run(
                     }
                 }
             }
+            _ = restart_notify.notified() => break,
         }
     }
 
