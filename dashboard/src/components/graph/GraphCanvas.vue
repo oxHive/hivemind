@@ -15,6 +15,16 @@ let rafId = null
 let nodes = []
 let links = []
 let panning = false
+// While a node is actively being dragged, its directly linked neighbors
+// intentionally ease toward it (via the `link` force) -- but that motion
+// shifts the connected-node centroid forceClusterAnchor/forceProjectCluster
+// anchor everything to, and those forces apply to EVERY node (including
+// edgeless, unrelated ones), not just the ones near the drag. Left alone,
+// a drag's ripple through the shared centroid visibly tugs the whole
+// canvas. Freezing both forces for the drag's duration keeps the tug
+// local to the physics that's supposed to react to it (link/charge/
+// collision) instead of broadcasting it through the anchor forces too.
+let isDraggingNode = false
 
 const CAMERA_KEY = 'hivemind.graph.camera'
 
@@ -141,6 +151,7 @@ const DEFAULT_EDGE_COLOR = '#9a9488'
 function forceClusterAnchor(strength) {
   let nodesRef = []
   function force(alpha) {
+    if (isDraggingNode) return
     let cx = 0, cy = 0, count = 0
     for (const n of nodesRef) {
       // A pinned node (dragged, or manually placed) shouldn't pull the
@@ -220,6 +231,7 @@ function groupByProject(list) {
 function forceProjectCluster(strength) {
   let nodesRef = []
   function force(alpha) {
+    if (isDraggingNode) return
     const groups = groupByProject(nodesRef)
     for (const members of groups.values()) {
       if (members.length < 2) continue
@@ -708,6 +720,7 @@ onMounted(() => {
     })
     .on('start', event => {
       if (!event.subject) return
+      isDraggingNode = true
       event.subject.__wasPinned = event.subject.fx != null
       event.subject.fx = event.subject.x
       event.subject.fy = event.subject.y
@@ -727,6 +740,7 @@ onMounted(() => {
     })
     .on('end', event => {
       if (!event.subject) return
+      isDraggingNode = false
       sim?.alphaTarget(0)
       const [sx, sy] = event.subject.__dragStartScreen || [event.x, event.y]
       const moved = Math.hypot(event.x - sx, event.y - sy) > 3
