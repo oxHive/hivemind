@@ -725,6 +725,24 @@ onMounted(() => {
       event.subject.fx = event.subject.x
       event.subject.fy = event.subject.y
       event.subject.__dragStartScreen = [event.x, event.y]
+      // `forceLink` has no distance cap (unlike charge's `distanceMax`), so
+      // in a connected graph, dragging one node far enough visibly drags the
+      // ENTIRE connected component along with it, edge by edge, well beyond
+      // just the directly-linked neighbors -- confirmed by direct testing:
+      // moving one degree-6 node 400px moved 36 of 39 other nodes, some by
+      // 400+px, within a couple of ticks. Freezing clusterAnchor/
+      // projectCluster during a drag (see isDraggingNode elsewhere) doesn't
+      // touch this, since it's forceLink itself doing it. Temporarily pin
+      // every other unpinned node in place for the drag's duration so only
+      // the dragged node visibly moves; they're released on drag end and
+      // ease into their new equilibrium then, once, instead of continuously
+      // jostling throughout the drag.
+      for (const n of nodes) {
+        if (n === event.subject || n.fx != null) continue
+        n.__tempPinned = true
+        n.fx = n.x
+        n.fy = n.y
+      }
       // Lower alphaTarget than d3's usual 0.3 default — 0.3 keeps the whole
       // simulation "hot" enough that neighboring nodes visibly jostle around
       // the dragged node every tick, which reads as clunky. 0.08 still lets
@@ -742,6 +760,12 @@ onMounted(() => {
       if (!event.subject) return
       isDraggingNode = false
       sim?.alphaTarget(0)
+      for (const n of nodes) {
+        if (!n.__tempPinned) continue
+        delete n.__tempPinned
+        n.fx = null
+        n.fy = null
+      }
       const [sx, sy] = event.subject.__dragStartScreen || [event.x, event.y]
       const moved = Math.hypot(event.x - sx, event.y - sy) > 3
       const wasPinned = event.subject.__wasPinned
