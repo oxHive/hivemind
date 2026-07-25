@@ -15,9 +15,9 @@ use axum::{
     },
     routing::{get, post},
 };
-use std::net::SocketAddr;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tokio_stream::{Stream, StreamExt, wrappers::BroadcastStream};
@@ -214,10 +214,7 @@ pub fn router(
         // on the plaintext app router (never a hive TLS port) because only the
         // local user issues codes, never a remote peer. Issuing a code opens
         // the time-limited pairing-window listener (see PairingWindow).
-        .route(
-            "/api/v1/hive/pairing-code",
-            post(hive_issue_pairing_code),
-        )
+        .route("/api/v1/hive/pairing-code", post(hive_issue_pairing_code))
         .with_state(store.clone())
         .layer(Extension(sync))
         .layer(Extension(pairing_codes))
@@ -302,12 +299,11 @@ pub fn router(
         .layer(Extension(hive_push_config))
         .layer(Extension(hive_sync_port))
         .with_state(store);
-    let trusted_networks_router =
-        if let Some(identity) = identity_extension_for_trusted_networks {
-            trusted_networks_router.layer(Extension(identity))
-        } else {
-            trusted_networks_router
-        };
+    let trusted_networks_router = if let Some(identity) = identity_extension_for_trusted_networks {
+        trusted_networks_router.layer(Extension(identity))
+    } else {
+        trusted_networks_router
+    };
 
     router.merge(trusted_networks_router)
 }

@@ -454,8 +454,11 @@ mod tests {
         assert_eq!(n, 1, "hive_tombstones table must exist");
 
         // Check that hive_tombstones has the expected columns
-        conn.query("SELECT memory_id, deleted_at FROM hive_tombstones LIMIT 0", ())
-            .await
-            .expect("hive_tombstones must have memory_id and deleted_at columns");
+        conn.query(
+            "SELECT memory_id, deleted_at FROM hive_tombstones LIMIT 0",
+            (),
+        )
+        .await
+        .expect("hive_tombstones must have memory_id and deleted_at columns");
     }
 }

@@ -13,7 +13,9 @@ pub struct HiveDiscovery {
 
 impl HiveDiscovery {
     pub fn new() -> anyhow::Result<Self> {
-        Ok(Self { daemon: ServiceDaemon::new()? })
+        Ok(Self {
+            daemon: ServiceDaemon::new()?,
+        })
     }
 
     pub fn advertise(&self, device_id: &str, name: &str, port: u16) -> anyhow::Result<()> {

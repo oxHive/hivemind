@@ -12,9 +12,18 @@ pub struct JoinRecord {
 
 pub fn create_join_record(identity: &DeviceIdentity, name: &str, joined_at: i64) -> JoinRecord {
     let public_key = identity::public_key_hex(identity);
-    let message = format!("join:{}:{}:{}:{}", identity.device_id, public_key, name, joined_at);
+    let message = format!(
+        "join:{}:{}:{}:{}",
+        identity.device_id, public_key, name, joined_at
+    );
     let signature = identity::sign(identity, message.as_bytes());
-    JoinRecord { device_id: identity.device_id.clone(), public_key, name: name.to_string(), joined_at, signature }
+    JoinRecord {
+        device_id: identity.device_id.clone(),
+        public_key,
+        name: name.to_string(),
+        joined_at,
+        signature,
+    }
 }
 
 pub fn verify_join_record(record: &JoinRecord) -> bool {
@@ -25,7 +34,8 @@ pub fn verify_join_record(record: &JoinRecord) -> bool {
     if !identity::verify(&record.public_key, message.as_bytes(), &record.signature) {
         return false;
     }
-    let Some(expected_device_id) = identity::device_id_from_public_key_hex(&record.public_key) else {
+    let Some(expected_device_id) = identity::device_id_from_public_key_hex(&record.public_key)
+    else {
         return false;
     };
     record.device_id == expected_device_id
@@ -39,8 +49,15 @@ pub struct RevocationRecord {
     pub signature: String,
 }
 
-pub fn create_revocation_record(revoker: &DeviceIdentity, target_device_id: &str, revoked_at: i64) -> RevocationRecord {
-    let message = format!("revoke:{}:{}:{}", target_device_id, revoker.device_id, revoked_at);
+pub fn create_revocation_record(
+    revoker: &DeviceIdentity,
+    target_device_id: &str,
+    revoked_at: i64,
+) -> RevocationRecord {
+    let message = format!(
+        "revoke:{}:{}:{}",
+        target_device_id, revoker.device_id, revoked_at
+    );
     let signature = identity::sign(revoker, message.as_bytes());
     RevocationRecord {
         device_id: target_device_id.to_string(),
@@ -51,7 +68,10 @@ pub fn create_revocation_record(revoker: &DeviceIdentity, target_device_id: &str
 }
 
 pub fn verify_revocation_record(record: &RevocationRecord, revoker_public_key: &str) -> bool {
-    let message = format!("revoke:{}:{}:{}", record.device_id, record.revoked_by, record.revoked_at);
+    let message = format!(
+        "revoke:{}:{}:{}",
+        record.device_id, record.revoked_by, record.revoked_at
+    );
     identity::verify(revoker_public_key, message.as_bytes(), &record.signature)
 }
 
@@ -106,7 +126,10 @@ mod tests {
         // real derivation -- the signature itself is genuinely valid over these
         // exact (wrong) fields, isolating the device_id/public_key cross-check
         // from the signature check.
-        let message = format!("join:{}:{}:{}:{}", fake_device_id, public_key, name, joined_at);
+        let message = format!(
+            "join:{}:{}:{}:{}",
+            fake_device_id, public_key, name, joined_at
+        );
         let signature = identity::sign(&identity, message.as_bytes());
         let record = JoinRecord {
             device_id: fake_device_id.to_string(),

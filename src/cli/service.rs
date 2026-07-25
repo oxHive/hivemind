@@ -48,7 +48,12 @@ fn systemd_unit_path(unit_name: &str) -> PathBuf {
 }
 
 #[cfg(target_os = "linux")]
-fn systemd_unit_content(description: &str, exe: &Path, exec_args: &[&str], path_env: &str) -> String {
+fn systemd_unit_content(
+    description: &str,
+    exe: &Path,
+    exec_args: &[&str],
+    path_env: &str,
+) -> String {
     let mut exec = exe.display().to_string();
     for arg in exec_args {
         exec.push(' ');
@@ -84,7 +89,8 @@ fn service_install_unit_linux(
     // user has their real shell environment) means every subprocess this
     // service spawns (the suggest-session agent, opencode, ...) resolves the
     // same bare command names that work in the user's terminal.
-    let path_env = std::env::var("PATH").unwrap_or_else(|_| "/usr/local/bin:/usr/bin:/bin".to_string());
+    let path_env =
+        std::env::var("PATH").unwrap_or_else(|_| "/usr/local/bin:/usr/bin:/bin".to_string());
     let unit = systemd_unit_content(description, &exe, exec_args, &path_env);
 
     let unit_path = systemd_unit_path(unit_name);
@@ -303,7 +309,12 @@ fn launch_agent_path(label: &str) -> PathBuf {
 }
 
 #[cfg(target_os = "macos")]
-fn launch_agent_plist_content(label: &str, exe: &Path, exec_args: &[&str], path_env: &str) -> String {
+fn launch_agent_plist_content(
+    label: &str,
+    exe: &Path,
+    exec_args: &[&str],
+    path_env: &str,
+) -> String {
     let mut program_arguments = format!("<string>{}</string>\n", exe.display());
     for arg in exec_args {
         program_arguments.push_str("             <string>");
@@ -349,7 +360,8 @@ fn service_install_unit_macos(label: &str, exec_args: &[&str], description: &str
     // See the systemd path_env comment in service_install_unit_linux: launchd
     // agents get the same minimal-PATH problem, so bake in the PATH from this
     // (interactive) invocation.
-    let path_env = std::env::var("PATH").unwrap_or_else(|_| "/usr/local/bin:/usr/bin:/bin".to_string());
+    let path_env =
+        std::env::var("PATH").unwrap_or_else(|_| "/usr/local/bin:/usr/bin:/bin".to_string());
     let plist = launch_agent_plist_content(label, &exe, exec_args, &path_env);
 
     std::fs::create_dir_all(plist_path.parent().unwrap())?;

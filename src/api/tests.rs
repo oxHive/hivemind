@@ -1227,13 +1227,23 @@ async fn hive_pairing_code_endpoint_issues_a_redeemable_code() {
         })),
     )
     .await;
-    assert_eq!(status2, StatusCode::OK, "a code issued by the new endpoint must be redeemable via /pair");
+    assert_eq!(
+        status2,
+        StatusCode::OK,
+        "a code issued by the new endpoint must be redeemable via /pair"
+    );
 }
 
 #[tokio::test]
 async fn hive_get_memory_returns_404_for_unknown_id() {
     let (app, _codes, _dir) = test_hive_router().await;
-    let (status, _) = req(app, "GET", "/api/v1/hive/memories/mem_doesnotexist00000000000001", None).await;
+    let (status, _) = req(
+        app,
+        "GET",
+        "/api/v1/hive/memories/mem_doesnotexist00000000000001",
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
@@ -1256,7 +1266,13 @@ async fn hive_push_memory_applies_a_brand_new_memory() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["outcome"], "Applied");
 
-    let (status2, body2) = req(app, "GET", "/api/v1/hive/memories/mem_pushtest00000000000000000001", None).await;
+    let (status2, body2) = req(
+        app,
+        "GET",
+        "/api/v1/hive/memories/mem_pushtest00000000000000000001",
+        None,
+    )
+    .await;
     assert_eq!(status2, StatusCode::OK);
     assert_eq!(body2["title"], "from peer");
 }
@@ -1318,10 +1334,8 @@ async fn trusted_networks_endpoint_rejects_non_loopback_peer() {
     // ConnectInfo, this builds the request with a real LAN-looking peer
     // address to prove `require_loopback` actually rejects it.
     let (app, _store, _dir) = test_router_with_store().await;
-    let non_loopback = axum::extract::ConnectInfo(std::net::SocketAddr::from((
-        [192, 168, 1, 50],
-        54321,
-    )));
+    let non_loopback =
+        axum::extract::ConnectInfo(std::net::SocketAddr::from(([192, 168, 1, 50], 54321)));
     let request = Request::builder()
         .method("GET")
         .uri("/api/v1/hive/trusted-networks")
@@ -1391,7 +1405,10 @@ async fn revoke_device_flips_roster_entry_to_revoked() {
     assert_eq!(body["revoked"], true);
 
     let roster = store.hive_list_roster().await.unwrap();
-    let entry = roster.iter().find(|e| e.device_id == other.device_id).unwrap();
+    let entry = roster
+        .iter()
+        .find(|e| e.device_id == other.device_id)
+        .unwrap();
     assert_eq!(entry.status, crate::hive::roster::RosterStatus::Revoked);
 }
 
@@ -1445,7 +1462,10 @@ async fn revoke_device_errors_when_local_device_not_yet_active_member() {
     assert_ne!(body["revoked"], true);
 
     let roster = store.hive_list_roster().await.unwrap();
-    let entry = roster.iter().find(|e| e.device_id == other.device_id).unwrap();
+    let entry = roster
+        .iter()
+        .find(|e| e.device_id == other.device_id)
+        .unwrap();
     assert_eq!(entry.status, crate::hive::roster::RosterStatus::Active);
 }
 
@@ -1475,7 +1495,8 @@ async fn revoke_device_404s_for_already_revoked_device() {
     // Seed the second device already in Revoked state, set directly on the
     // roster entry -- no need to go through a real revoke first.
     let join = crate::hive::roster::create_join_record(&other, "bob-phone", 1000);
-    let revocation = crate::hive::roster::create_revocation_record(&identity, &other.device_id, 1100);
+    let revocation =
+        crate::hive::roster::create_revocation_record(&identity, &other.device_id, 1100);
     store
         .hive_upsert_roster_entry(&crate::hive::roster::RosterEntry {
             device_id: other.device_id.clone(),

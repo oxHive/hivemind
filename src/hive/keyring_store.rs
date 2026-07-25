@@ -37,7 +37,10 @@ impl FakeHiveKeyStore {
 #[cfg(test)]
 impl HiveKeyStore for FakeHiveKeyStore {
     fn save(&self, device_id: &str, signing_key_hex: &str) -> Result<()> {
-        self.0.lock().unwrap().insert(device_id.to_string(), signing_key_hex.to_string());
+        self.0
+            .lock()
+            .unwrap()
+            .insert(device_id.to_string(), signing_key_hex.to_string());
         Ok(())
     }
 
@@ -54,7 +57,10 @@ mod tests {
     fn fake_store_round_trips() {
         let store = FakeHiveKeyStore::new();
         store.save("hive_abc", "deadbeef").unwrap();
-        assert_eq!(store.load("hive_abc").unwrap(), Some("deadbeef".to_string()));
+        assert_eq!(
+            store.load("hive_abc").unwrap(),
+            Some("deadbeef".to_string())
+        );
     }
 
     #[test]

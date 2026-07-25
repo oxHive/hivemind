@@ -20,9 +20,11 @@ fn main() -> Result<()> {
             McpAction::Install { client } => cli::cmd_mcp_install(&client),
         },
         Some(Command::Service { action }) => match action {
-            ServiceAction::Install { dashboard, matrix, hive } => {
-                cli::cmd_service_install(dashboard, matrix, hive)
-            }
+            ServiceAction::Install {
+                dashboard,
+                matrix,
+                hive,
+            } => cli::cmd_service_install(dashboard, matrix, hive),
             ServiceAction::Uninstall => cli::cmd_service_uninstall(),
             ServiceAction::Status => cli::cmd_service_status(),
         },

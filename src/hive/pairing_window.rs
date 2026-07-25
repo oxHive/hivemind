@@ -74,7 +74,10 @@ impl PairingWindow {
                 tracing::error!("pairing TLS listener failed to bind/serve: {e:#}");
             }
         });
-        tracing::info!("Hive pairing window open for {duration:?} on port {}", self.port);
+        tracing::info!(
+            "Hive pairing window open for {duration:?} on port {}",
+            self.port
+        );
         *guard = Some(handle.clone());
         drop(guard);
 

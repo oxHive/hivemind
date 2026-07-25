@@ -41,13 +41,23 @@ mod tests {
     use super::*;
 
     fn trusted(id: &str) -> TrustedNetwork {
-        TrustedNetwork { id: id.to_string(), label: None, added_at: 0 }
+        TrustedNetwork {
+            id: id.to_string(),
+            label: None,
+            added_at: 0,
+        }
     }
 
     #[test]
     fn empty_allowlist_never_acts() {
-        assert_eq!(decide_action(true, &[], Some("ssid:cafe")), GuardAction::None);
-        assert_eq!(decide_action(false, &[], Some("ssid:home")), GuardAction::None);
+        assert_eq!(
+            decide_action(true, &[], Some("ssid:cafe")),
+            GuardAction::None
+        );
+        assert_eq!(
+            decide_action(false, &[], Some("ssid:home")),
+            GuardAction::None
+        );
         assert_eq!(decide_action(false, &[], None), GuardAction::None);
     }
 
@@ -78,7 +88,10 @@ mod tests {
     #[test]
     fn paused_on_untrusted_network_stays_paused() {
         let list = [trusted("ssid:home")];
-        assert_eq!(decide_action(false, &list, Some("ssid:cafe")), GuardAction::None);
+        assert_eq!(
+            decide_action(false, &list, Some("ssid:cafe")),
+            GuardAction::None
+        );
     }
 
     #[test]
@@ -177,9 +190,8 @@ pub async fn spawn_hive_stack(
     };
     let initial_roster = store.hive_list_roster().await?;
     let sync_server_config = build_sync_server_config(initial_roster)?;
-    let sync_tls_config = axum_server::tls_rustls::RustlsConfig::from_config(
-        std::sync::Arc::new(sync_server_config),
-    );
+    let sync_tls_config =
+        axum_server::tls_rustls::RustlsConfig::from_config(std::sync::Arc::new(sync_server_config));
     let sync_tls_config_for_reload = sync_tls_config.clone();
     let sync_only_app = crate::api::hive_sync_router(store.clone());
     let sync_addr: std::net::SocketAddr = format!("{host}:{}", port + 1).parse()?;
@@ -208,7 +220,9 @@ pub async fn spawn_hive_stack(
                             let addresses = info.get_addresses();
                             if let Some(addr) = addresses.iter().next() {
                                 let hive_addr = format!("{addr}:{}", info.get_port());
-                                crate::hive::peer_status::record_discovered_address(device_id, hive_addr);
+                                crate::hive::peer_status::record_discovered_address(
+                                    device_id, hive_addr,
+                                );
                             }
                         }
                     }

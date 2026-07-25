@@ -1,5 +1,5 @@
 use crate::hive::roster::{RosterEntry, RosterStatus};
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
@@ -16,7 +16,10 @@ pub fn extract_ed25519_public_key(cert_der: &[u8]) -> Result<[u8; 32]> {
         x509_parser::parse_x509_certificate(cert_der).context("parsing peer certificate")?;
     let raw = parsed.public_key().subject_public_key.data.as_ref();
     if raw.len() != 32 {
-        bail!("expected a 32-byte Ed25519 public key, got {} bytes", raw.len());
+        bail!(
+            "expected a 32-byte Ed25519 public key, got {} bytes",
+            raw.len()
+        );
     }
     let mut out = [0u8; 32];
     out.copy_from_slice(raw);
@@ -37,7 +40,11 @@ impl fmt::Debug for RosterClientCertVerifier {
         f.debug_struct("RosterClientCertVerifier")
             .field(
                 "active_members",
-                &self.roster.iter().filter(|e| e.status == RosterStatus::Active).count(),
+                &self
+                    .roster
+                    .iter()
+                    .filter(|e| e.status == RosterStatus::Active)
+                    .count(),
             )
             .finish()
     }
@@ -127,7 +134,9 @@ pub struct PinnedServerCertVerifier {
 
 impl PinnedServerCertVerifier {
     pub fn new(expected_public_key: [u8; 32]) -> Self {
-        Self { expected_public_key }
+        Self {
+            expected_public_key,
+        }
     }
 }
 
@@ -226,11 +235,15 @@ mod tests {
         let cert_der = rustls::pki_types::CertificateDer::from(der_a.to_vec());
         let server_name = rustls::pki_types::ServerName::try_from(a.device_id.clone()).unwrap();
 
-        assert!(verifier_expects_a
-            .verify_server_cert(&cert_der, &[], &server_name, &[], now)
-            .is_ok());
-        assert!(verifier_expects_b
-            .verify_server_cert(&cert_der, &[], &server_name, &[], now)
-            .is_err());
+        assert!(
+            verifier_expects_a
+                .verify_server_cert(&cert_der, &[], &server_name, &[], now)
+                .is_ok()
+        );
+        assert!(
+            verifier_expects_b
+                .verify_server_cert(&cert_der, &[], &server_name, &[], now)
+                .is_err()
+        );
     }
 }

@@ -11,18 +11,26 @@ use std::time::Duration;
 /// way to share this between the mDNS browse task (which only writes to it)
 /// and the ping/sync loops (which only read from it) without threading a
 /// new parameter through every function that might need an address.
-static DISCOVERED_ADDRESSES: std::sync::OnceLock<Mutex<HashMap<String, String>>> = std::sync::OnceLock::new();
+static DISCOVERED_ADDRESSES: std::sync::OnceLock<Mutex<HashMap<String, String>>> =
+    std::sync::OnceLock::new();
 
 fn discovered_addresses() -> &'static Mutex<HashMap<String, String>> {
     DISCOVERED_ADDRESSES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 pub fn record_discovered_address(device_id: &str, address: String) {
-    discovered_addresses().lock().unwrap().insert(device_id.to_string(), address);
+    discovered_addresses()
+        .lock()
+        .unwrap()
+        .insert(device_id.to_string(), address);
 }
 
 pub fn resolve_address(device_id: &str) -> Option<String> {
-    discovered_addresses().lock().unwrap().get(device_id).cloned()
+    discovered_addresses()
+        .lock()
+        .unwrap()
+        .get(device_id)
+        .cloned()
 }
 
 pub struct PeerStatus {
@@ -40,7 +48,10 @@ pub struct PeerStatus {
 pub async fn online_peers(store: &SqliteStore) -> anyhow::Result<Vec<PeerStatus>> {
     let roster = store.hive_list_roster().await?;
     let mut out = Vec::new();
-    for entry in roster.into_iter().filter(|e| e.status == RosterStatus::Active) {
+    for entry in roster
+        .into_iter()
+        .filter(|e| e.status == RosterStatus::Active)
+    {
         if let Some(status) = store.hive_get_peer_status(&entry.device_id).await?
             && status.online
         {
@@ -61,10 +72,12 @@ pub async fn run_ping_loop(
     identity: DeviceIdentity,
     interval_seconds_default: u64,
     sync_tls_config: axum_server::tls_rustls::RustlsConfig,
-    rebuild_sync_server_config: impl Fn(Vec<crate::hive::roster::RosterEntry>) -> anyhow::Result<rustls::ServerConfig>
-        + Send
-        + Sync
-        + 'static,
+    rebuild_sync_server_config: impl Fn(
+        Vec<crate::hive::roster::RosterEntry>,
+    ) -> anyhow::Result<rustls::ServerConfig>
+    + Send
+    + Sync
+    + 'static,
     events: tokio::sync::broadcast::Sender<serde_json::Value>,
 ) {
     loop {
@@ -100,8 +113,13 @@ async fn ping_once(
     identity: &DeviceIdentity,
     events: &tokio::sync::broadcast::Sender<serde_json::Value>,
 ) {
-    let Ok(roster) = store.hive_list_roster().await else { return };
-    for peer in roster.iter().filter(|e| e.status == RosterStatus::Active && e.device_id != identity.device_id) {
+    let Ok(roster) = store.hive_list_roster().await else {
+        return;
+    };
+    for peer in roster
+        .iter()
+        .filter(|e| e.status == RosterStatus::Active && e.device_id != identity.device_id)
+    {
         let previously_online = store
             .hive_get_peer_status(&peer.device_id)
             .await
@@ -111,26 +129,38 @@ async fn ping_once(
 
         let now_online = match resolve_address(&peer.device_id) {
             None => {
-                let _ = store.hive_upsert_peer_status(&peer.device_id, false, None).await;
+                let _ = store
+                    .hive_upsert_peer_status(&peer.device_id, false, None)
+                    .await;
                 false
             }
             Some(address) => {
-                let Ok(client) = crate::hive::client::HiveClient::new(identity, &peer.public_key) else { continue };
+                let Ok(client) = crate::hive::client::HiveClient::new(identity, &peer.public_key)
+                else {
+                    continue;
+                };
                 let now = crate::store::chrono_now();
-                match client.get(&format!("https://{address}/api/v1/hive/roster")).await {
+                match client
+                    .get(&format!("https://{address}/api/v1/hive/roster"))
+                    .await
+                {
                     Ok(resp) if resp.status().is_success() => {
-                        let _ = store.hive_upsert_peer_status(&peer.device_id, true, Some(now)).await;
+                        let _ = store
+                            .hive_upsert_peer_status(&peer.device_id, true, Some(now))
+                            .await;
                         // Re-merge this peer's roster view, continuing Plan 1's
                         // gossip propagation (including revocations) on the same
                         // round-trip as the liveness check.
                         if let Ok(body) = resp.json::<serde_json::Value>().await
                             && let Some(remote_roster_json) = body["roster"].as_array()
-                            && let Ok(remote_roster) = serde_json::from_value::<Vec<crate::hive::roster::RosterEntry>>(
-                                serde_json::Value::Array(remote_roster_json.clone()),
-                            )
+                            && let Ok(remote_roster) =
+                                serde_json::from_value::<Vec<crate::hive::roster::RosterEntry>>(
+                                    serde_json::Value::Array(remote_roster_json.clone()),
+                                )
                         {
                             let local_roster = store.hive_list_roster().await.unwrap_or_default();
-                            let merged = crate::hive::gossip::merge_roster(local_roster, remote_roster);
+                            let merged =
+                                crate::hive::gossip::merge_roster(local_roster, remote_roster);
                             for entry in &merged {
                                 let _ = store.hive_upsert_roster_entry(entry).await;
                             }
@@ -138,7 +168,9 @@ async fn ping_once(
                         true
                     }
                     _ => {
-                        let _ = store.hive_upsert_peer_status(&peer.device_id, false, None).await;
+                        let _ = store
+                            .hive_upsert_peer_status(&peer.device_id, false, None)
+                            .await;
                         false
                     }
                 }
@@ -194,15 +226,23 @@ mod tests {
         // flip from a known online state and must not emit.
         let (events, mut rx) = tokio::sync::broadcast::channel(16);
         ping_once(&store, &identity, &events).await;
-        assert!(rx.try_recv().is_err(), "first-ever offline status must not emit (no prior known state)");
+        assert!(
+            rx.try_recv().is_err(),
+            "first-ever offline status must not emit (no prior known state)"
+        );
 
         // Force it online directly (bypassing a real network contact, which
         // this unit test has no interest in exercising), then run ping_once
         // again -- still offline (no address), so this is a real online ->
         // offline flip and must emit.
-        store.hive_upsert_peer_status(&peer.device_id, true, Some(1234)).await.unwrap();
+        store
+            .hive_upsert_peer_status(&peer.device_id, true, Some(1234))
+            .await
+            .unwrap();
         ping_once(&store, &identity, &events).await;
-        let evt = rx.try_recv().expect("online->offline flip must emit hive_peer_status_changed");
+        let evt = rx
+            .try_recv()
+            .expect("online->offline flip must emit hive_peer_status_changed");
         assert_eq!(evt["type"], "hive_peer_status_changed");
 
         // Immediately calling it again with no change must not emit again.

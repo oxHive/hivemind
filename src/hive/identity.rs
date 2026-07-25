@@ -9,7 +9,10 @@ pub struct DeviceIdentity {
 pub fn generate() -> DeviceIdentity {
     let signing_key = SigningKey::generate(&mut rand::rngs::OsRng);
     let device_id = device_id_from_public_key(&signing_key.verifying_key());
-    DeviceIdentity { device_id, signing_key }
+    DeviceIdentity {
+        device_id,
+        signing_key,
+    }
 }
 
 fn device_id_from_public_key(vk: &VerifyingKey) -> String {
@@ -40,7 +43,10 @@ pub fn from_signing_key_hex(signing_key_hex: &str) -> Option<DeviceIdentity> {
     let bytes: [u8; 32] = bytes.try_into().ok()?;
     let signing_key = SigningKey::from_bytes(&bytes);
     let device_id = device_id_from_public_key(&signing_key.verifying_key());
-    Some(DeviceIdentity { device_id, signing_key })
+    Some(DeviceIdentity {
+        device_id,
+        signing_key,
+    })
 }
 
 pub fn sign(identity: &DeviceIdentity, message: &[u8]) -> String {
@@ -48,11 +54,21 @@ pub fn sign(identity: &DeviceIdentity, message: &[u8]) -> String {
 }
 
 pub fn verify(public_key_hex: &str, message: &[u8], signature_hex: &str) -> bool {
-    let Ok(pk_bytes) = hex::decode(public_key_hex) else { return false };
-    let Ok(pk_bytes): Result<[u8; 32], _> = pk_bytes.try_into() else { return false };
-    let Ok(verifying_key) = VerifyingKey::from_bytes(&pk_bytes) else { return false };
-    let Ok(sig_bytes) = hex::decode(signature_hex) else { return false };
-    let Ok(sig_bytes): Result<[u8; 64], _> = sig_bytes.try_into() else { return false };
+    let Ok(pk_bytes) = hex::decode(public_key_hex) else {
+        return false;
+    };
+    let Ok(pk_bytes): Result<[u8; 32], _> = pk_bytes.try_into() else {
+        return false;
+    };
+    let Ok(verifying_key) = VerifyingKey::from_bytes(&pk_bytes) else {
+        return false;
+    };
+    let Ok(sig_bytes) = hex::decode(signature_hex) else {
+        return false;
+    };
+    let Ok(sig_bytes): Result<[u8; 64], _> = sig_bytes.try_into() else {
+        return false;
+    };
     let signature = ed25519_dalek::Signature::from_bytes(&sig_bytes);
     verifying_key.verify(message, &signature).is_ok()
 }
@@ -113,10 +129,7 @@ mod tests {
         let hex_key = hex::encode(identity.signing_key.to_bytes());
         let reconstructed = from_signing_key_hex(&hex_key).unwrap();
         assert_eq!(reconstructed.device_id, identity.device_id);
-        assert_eq!(
-            public_key_hex(&reconstructed),
-            public_key_hex(&identity)
-        );
+        assert_eq!(public_key_hex(&reconstructed), public_key_hex(&identity));
     }
 
     #[test]

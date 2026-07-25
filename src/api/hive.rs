@@ -67,7 +67,11 @@ pub(super) async fn hive_join(
     Extension(identity): Extension<Arc<crate::hive::identity::DeviceIdentity>>,
     Json(body): Json<JoinHiveBody>,
 ) -> Result<Json<Value>, ApiError> {
-    let join_record = crate::hive::roster::create_join_record(&identity, &identity.device_id, chrono::Utc::now().timestamp());
+    let join_record = crate::hive::roster::create_join_record(
+        &identity,
+        &identity.device_id,
+        chrono::Utc::now().timestamp(),
+    );
     let pair_body = json!({
         "code": body.pairing_code,
         "join_record": {
@@ -95,7 +99,12 @@ pub(super) async fn hive_join(
         rustls::crypto::ring::default_provider(),
     ))
     .with_protocol_versions(rustls::DEFAULT_VERSIONS)
-    .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, format!("failed to select TLS protocol versions: {e}")))?
+    .map_err(|e| {
+        ApiError(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to select TLS protocol versions: {e}"),
+        )
+    })?
     .dangerous()
     .with_custom_certificate_verifier(verifier)
     .with_no_client_auth();
@@ -108,14 +117,29 @@ pub(super) async fn hive_join(
         .json(&pair_body)
         .send()
         .await
-        .map_err(|e| ApiError(StatusCode::BAD_GATEWAY, format!("could not reach peer: {e}")))?;
+        .map_err(|e| {
+            ApiError(
+                StatusCode::BAD_GATEWAY,
+                format!("could not reach peer: {e}"),
+            )
+        })?;
     if !resp.status().is_success() {
-        return Err(ApiError(StatusCode::BAD_GATEWAY, "peer rejected the pairing code".to_string()));
+        return Err(ApiError(
+            StatusCode::BAD_GATEWAY,
+            "peer rejected the pairing code".to_string(),
+        ));
     }
-    let pair_response: Value = resp.json().await.map_err(|e| ApiError(StatusCode::BAD_GATEWAY, e.to_string()))?;
+    let pair_response: Value = resp
+        .json()
+        .await
+        .map_err(|e| ApiError(StatusCode::BAD_GATEWAY, e.to_string()))?;
     let remote_roster: Vec<crate::hive::roster::RosterEntry> =
-        serde_json::from_value(pair_response["roster"].clone())
-            .map_err(|e| ApiError(StatusCode::BAD_GATEWAY, format!("malformed roster in pairing response: {e}")))?;
+        serde_json::from_value(pair_response["roster"].clone()).map_err(|e| {
+            ApiError(
+                StatusCode::BAD_GATEWAY,
+                format!("malformed roster in pairing response: {e}"),
+            )
+        })?;
 
     let local_roster = store.hive_list_roster().await?;
     let merged = crate::hive::gossip::merge_roster(local_roster, remote_roster);
@@ -129,11 +153,21 @@ pub(super) async fn hive_join(
     let store_for_sync = store.clone();
     let identity_for_sync = (*identity).clone();
     tokio::spawn(async move {
-        for peer in merged.iter().filter(|e| e.status == crate::hive::roster::RosterStatus::Active && e.device_id != identity_for_sync.device_id) {
+        for peer in merged.iter().filter(|e| {
+            e.status == crate::hive::roster::RosterStatus::Active
+                && e.device_id != identity_for_sync.device_id
+        }) {
             if let Some(address) = crate::hive::peer_status::resolve_address(&peer.device_id)
-                && let Ok(client) = crate::hive::client::HiveClient::new(&identity_for_sync, &peer.public_key)
+                && let Ok(client) =
+                    crate::hive::client::HiveClient::new(&identity_for_sync, &peer.public_key)
             {
-                let _ = crate::hive::sync_loop::pull_from_peer(&client, &format!("https://{address}"), &store_for_sync, &peer.device_id).await;
+                let _ = crate::hive::sync_loop::pull_from_peer(
+                    &client,
+                    &format!("https://{address}"),
+                    &store_for_sync,
+                    &peer.device_id,
+                )
+                .await;
             }
         }
     });
@@ -187,7 +221,11 @@ pub(super) async fn hive_get_memory(
         None => Err(ApiError(StatusCode::NOT_FOUND, format!("no memory {id}"))),
         Some(e) => {
             let hash = crate::store::compute_hive_content_hash(
-                &e.title, &e.content, &e.tags, &e.layer, &e.memory_type,
+                &e.title,
+                &e.content,
+                &e.tags,
+                &e.layer,
+                &e.memory_type,
             );
             Ok(Json(json!({
                 "id": e.id, "title": e.title, "content": e.content, "tags": e.tags,
@@ -209,7 +247,9 @@ pub(super) async fn hive_get_trusted_networks(
 ) -> Result<Json<Value>, ApiError> {
     let trusted = store.hive_trusted_networks().await?;
     let current_network = crate::hive::network::current_network_key_async().await;
-    Ok(Json(json!({ "current_network": current_network, "trusted": trusted })))
+    Ok(Json(
+        json!({ "current_network": current_network, "trusted": trusted }),
+    ))
 }
 
 pub(super) async fn hive_add_trusted_network(
@@ -217,7 +257,9 @@ pub(super) async fn hive_add_trusted_network(
     Json(body): Json<AddTrustedNetworkBody>,
 ) -> Result<Json<Value>, ApiError> {
     store.add_hive_trusted_network(&body.id, body.label).await?;
-    Ok(Json(json!({ "trusted": store.hive_trusted_networks().await? })))
+    Ok(Json(
+        json!({ "trusted": store.hive_trusted_networks().await? }),
+    ))
 }
 
 pub(super) async fn hive_remove_trusted_network(
@@ -225,7 +267,9 @@ pub(super) async fn hive_remove_trusted_network(
     Path(id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     store.remove_hive_trusted_network(&id).await?;
-    Ok(Json(json!({ "trusted": store.hive_trusted_networks().await? })))
+    Ok(Json(
+        json!({ "trusted": store.hive_trusted_networks().await? }),
+    ))
 }
 
 pub(super) async fn hive_status(
@@ -273,14 +317,22 @@ pub(super) async fn hive_revoke_device(
 ) -> Result<Json<Value>, ApiError> {
     let local_roster = store.hive_list_roster().await?;
     let Some(target) = local_roster.iter().find(|e| e.device_id == device_id) else {
-        return Err(ApiError(StatusCode::NOT_FOUND, format!("no roster entry for {device_id}")));
+        return Err(ApiError(
+            StatusCode::NOT_FOUND,
+            format!("no roster entry for {device_id}"),
+        ));
     };
     if target.status == crate::hive::roster::RosterStatus::Revoked {
-        return Err(ApiError(StatusCode::NOT_FOUND, format!("{device_id} is already revoked")));
+        return Err(ApiError(
+            StatusCode::NOT_FOUND,
+            format!("{device_id} is already revoked"),
+        ));
     }
 
     let revocation = crate::hive::roster::create_revocation_record(
-        &identity, &device_id, chrono::Utc::now().timestamp(),
+        &identity,
+        &device_id,
+        chrono::Utc::now().timestamp(),
     );
     let mut revoked_entry = target.clone();
     revoked_entry.revocation_record = Some(revocation);
@@ -310,7 +362,8 @@ pub(super) async fn hive_revoke_device(
     let store_for_push = store.clone();
     let identity_for_push = (*identity).clone();
     tokio::spawn(crate::hive::sync_loop::push_revocation_to_online_peers(
-        store_for_push, identity_for_push,
+        store_for_push,
+        identity_for_push,
     ));
 
     Ok(Json(json!({ "revoked": true })))
@@ -336,33 +389,58 @@ pub(super) async fn hive_set_enabled(
 }
 
 pub(super) async fn hive_get_settings(State(store): State<Store>) -> Result<Json<Value>, ApiError> {
-    let (sync_s, ping_s, updated_at) = store.hive_settings_override().await?.unwrap_or((300, 60, 0));
+    let (sync_s, ping_s, updated_at) = store
+        .hive_settings_override()
+        .await?
+        .unwrap_or((300, 60, 0));
     Ok(Json(json!({
         "sync_interval_seconds": sync_s, "ping_interval_seconds": ping_s, "updated_at": updated_at,
     })))
 }
 
-pub(super) async fn hive_get_tag_namespaces(State(store): State<Store>) -> Result<Json<Value>, ApiError> {
+pub(super) async fn hive_get_tag_namespaces(
+    State(store): State<Store>,
+) -> Result<Json<Value>, ApiError> {
     let namespaces = store.tag_namespace_registry().await;
     let updated_at: i64 = store
         .get_meta("tag_namespaces_updated_at")
         .await?
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
-    Ok(Json(json!({ "namespaces": namespaces, "updated_at": updated_at })))
+    Ok(Json(
+        json!({ "namespaces": namespaces, "updated_at": updated_at }),
+    ))
 }
 
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(super) enum HivePushBody {
     Memory {
-        id: String, title: String, content: String, tags: Vec<String>,
-        layer: String, memory_type: String, updated_at: i64, hive_content_hash: String,
+        id: String,
+        title: String,
+        content: String,
+        tags: Vec<String>,
+        layer: String,
+        memory_type: String,
+        updated_at: i64,
+        hive_content_hash: String,
     },
-    Tombstone { memory_id: String, deleted_at: i64 },
-    Settings { sync_interval_seconds: u64, ping_interval_seconds: u64, updated_at: i64 },
-    TagNamespaces { namespaces: Value, updated_at: i64 },
-    Roster { roster: Vec<crate::hive::roster::RosterEntry> },
+    Tombstone {
+        memory_id: String,
+        deleted_at: i64,
+    },
+    Settings {
+        sync_interval_seconds: u64,
+        ping_interval_seconds: u64,
+        updated_at: i64,
+    },
+    TagNamespaces {
+        namespaces: Value,
+        updated_at: i64,
+    },
+    Roster {
+        roster: Vec<crate::hive::roster::RosterEntry>,
+    },
 }
 
 pub(super) async fn hive_push(
@@ -370,15 +448,36 @@ pub(super) async fn hive_push(
     Json(body): Json<HivePushBody>,
 ) -> Result<Json<Value>, ApiError> {
     match body {
-        HivePushBody::Memory { id, title, content, tags, layer, memory_type, updated_at, hive_content_hash } => {
+        HivePushBody::Memory {
+            id,
+            title,
+            content,
+            tags,
+            layer,
+            memory_type,
+            updated_at,
+            hive_content_hash,
+        } => {
             let incoming = crate::store::MemoryEntry {
-                id, title, content, tags, created_at: updated_at, updated_at,
-                token_count: None, layer, memory_type,
+                id,
+                title,
+                content,
+                tags,
+                created_at: updated_at,
+                updated_at,
+                token_count: None,
+                layer,
+                memory_type,
             };
-            let outcome = store.apply_incoming_memory(&incoming, &hive_content_hash, None).await?;
+            let outcome = store
+                .apply_incoming_memory(&incoming, &hive_content_hash, None)
+                .await?;
             Ok(Json(json!({ "outcome": format!("{outcome:?}") })))
         }
-        HivePushBody::Tombstone { memory_id, deleted_at } => {
+        HivePushBody::Tombstone {
+            memory_id,
+            deleted_at,
+        } => {
             if let Some(local) = store.recall_by_id(&memory_id).await?
                 && local.updated_at < deleted_at
             {
@@ -386,25 +485,48 @@ pub(super) async fn hive_push(
             }
             Ok(Json(json!({ "outcome": "tombstone_processed" })))
         }
-        HivePushBody::Settings { sync_interval_seconds, ping_interval_seconds, updated_at } => {
+        HivePushBody::Settings {
+            sync_interval_seconds,
+            ping_interval_seconds,
+            updated_at,
+        } => {
             let current = store.hive_settings_override().await?;
-            let should_apply = current.map(|(_, _, cur_updated_at)| updated_at > cur_updated_at).unwrap_or(true);
+            let should_apply = current
+                .map(|(_, _, cur_updated_at)| updated_at > cur_updated_at)
+                .unwrap_or(true);
             if should_apply {
-                store.set_hive_settings_override(sync_interval_seconds, ping_interval_seconds, updated_at).await?;
+                store
+                    .set_hive_settings_override(
+                        sync_interval_seconds,
+                        ping_interval_seconds,
+                        updated_at,
+                    )
+                    .await?;
             }
-            Ok(Json(json!({ "outcome": if should_apply { "applied" } else { "kept_local" } })))
+            Ok(Json(
+                json!({ "outcome": if should_apply { "applied" } else { "kept_local" } }),
+            ))
         }
-        HivePushBody::TagNamespaces { namespaces, updated_at } => {
+        HivePushBody::TagNamespaces {
+            namespaces,
+            updated_at,
+        } => {
             let current_updated_at: i64 = store
                 .get_meta("tag_namespaces_updated_at")
                 .await?
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0);
             if updated_at > current_updated_at {
-                store.set_meta("tag_namespaces", &namespaces.to_string()).await?;
-                store.set_meta("tag_namespaces_updated_at", &updated_at.to_string()).await?;
+                store
+                    .set_meta("tag_namespaces", &namespaces.to_string())
+                    .await?;
+                store
+                    .set_meta("tag_namespaces_updated_at", &updated_at.to_string())
+                    .await?;
             }
-            Ok(Json(json!({ "outcome": if updated_at > current_updated_at { "applied" } else { "kept_local" } })))
+            Ok(Json(
+                json!({ "outcome": if updated_at > current_updated_at { "applied" } else { "kept_local" } }),
+            ))
         }
         HivePushBody::Roster { roster } => {
             let local_roster = store.hive_list_roster().await?;

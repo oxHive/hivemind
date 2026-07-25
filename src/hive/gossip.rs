@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use crate::hive::roster::{verify_join_record, verify_revocation_record, RosterEntry, RosterStatus};
+use crate::hive::roster::{
+    RosterEntry, RosterStatus, verify_join_record, verify_revocation_record,
+};
 
 /// Merges an incoming roster (received from a peer over gossip) into the
 /// local roster, applying the trust rules that make revocation
@@ -45,7 +47,10 @@ pub fn merge_roster(local: Vec<RosterEntry>, incoming: Vec<RosterEntry>) -> Vec<
             continue;
         }
 
-        match merged.iter().position(|e| e.device_id == candidate.device_id) {
+        match merged
+            .iter()
+            .position(|e| e.device_id == candidate.device_id)
+        {
             None => {
                 // Rule 2: first-seen entries are always added Active,
                 // regardless of whatever status/revocation fields the
@@ -144,7 +149,10 @@ mod tests {
     fn applies_revocation_from_active_local_revoker() {
         let a = identity::generate();
         let b = identity::generate();
-        let local = vec![entry_for(&a, "alice-laptop", 1000), entry_for(&b, "bob-phone", 1100)];
+        let local = vec![
+            entry_for(&a, "alice-laptop", 1000),
+            entry_for(&b, "bob-phone", 1100),
+        ];
 
         let revocation = create_revocation_record(&a, &b.device_id, 2000);
         let mut incoming_b = entry_for(&b, "bob-phone", 1100);
@@ -169,7 +177,11 @@ mod tests {
 
         let merged = merge_roster(local, vec![incoming_b]);
         let b_entry = merged.iter().find(|e| e.device_id == b.device_id).unwrap();
-        assert_eq!(b_entry.status, RosterStatus::Active, "revocation from an untrusted revoker must not apply");
+        assert_eq!(
+            b_entry.status,
+            RosterStatus::Active,
+            "revocation from an untrusted revoker must not apply"
+        );
     }
 
     #[test]
@@ -307,7 +319,10 @@ mod tests {
     fn revocation_merge_is_idempotent() {
         let a = identity::generate();
         let b = identity::generate();
-        let local = vec![entry_for(&a, "alice-laptop", 1000), entry_for(&b, "bob-phone", 1100)];
+        let local = vec![
+            entry_for(&a, "alice-laptop", 1000),
+            entry_for(&b, "bob-phone", 1100),
+        ];
 
         let revocation = create_revocation_record(&a, &b.device_id, 2000);
         let mut incoming_b = entry_for(&b, "bob-phone", 1100);

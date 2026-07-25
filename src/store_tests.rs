@@ -1338,7 +1338,11 @@ async fn hive_upsert_updates_existing_entry_status() {
     s.hive_upsert_roster_entry(&entry).await.unwrap();
 
     let roster = s.hive_list_roster().await.unwrap();
-    assert_eq!(roster.len(), 1, "upsert must replace, not duplicate, the existing row");
+    assert_eq!(
+        roster.len(),
+        1,
+        "upsert must replace, not duplicate, the existing row"
+    );
     assert_eq!(roster[0].status, crate::hive::roster::RosterStatus::Revoked);
     assert_eq!(roster[0].revoked_at, Some(2000));
 }
@@ -1346,31 +1350,50 @@ async fn hive_upsert_updates_existing_entry_status() {
 #[test]
 fn hive_content_hash_is_stable_for_identical_input() {
     let tags = vec!["topic:sync".to_string()];
-    let a = crate::store::compute_hive_content_hash("Title", "Content", &tags, "workspace", "project");
-    let b = crate::store::compute_hive_content_hash("Title", "Content", &tags, "workspace", "project");
+    let a =
+        crate::store::compute_hive_content_hash("Title", "Content", &tags, "workspace", "project");
+    let b =
+        crate::store::compute_hive_content_hash("Title", "Content", &tags, "workspace", "project");
     assert_eq!(a, b);
 }
 
 #[test]
 fn hive_content_hash_changes_when_tags_change_but_content_does_not() {
     let with_tag = crate::store::compute_hive_content_hash(
-        "Title", "Content", &["topic:sync".to_string()], "workspace", "project",
+        "Title",
+        "Content",
+        &["topic:sync".to_string()],
+        "workspace",
+        "project",
     );
-    let without_tag = crate::store::compute_hive_content_hash(
-        "Title", "Content", &[], "workspace", "project",
+    let without_tag =
+        crate::store::compute_hive_content_hash("Title", "Content", &[], "workspace", "project");
+    assert_ne!(
+        with_tag, without_tag,
+        "a tag-only change must produce a different hash"
     );
-    assert_ne!(with_tag, without_tag, "a tag-only change must produce a different hash");
 }
 
 #[test]
 fn hive_content_hash_is_order_independent_for_tags() {
     let a = crate::store::compute_hive_content_hash(
-        "Title", "Content", &["a".to_string(), "b".to_string()], "workspace", "project",
+        "Title",
+        "Content",
+        &["a".to_string(), "b".to_string()],
+        "workspace",
+        "project",
     );
     let b = crate::store::compute_hive_content_hash(
-        "Title", "Content", &["b".to_string(), "a".to_string()], "workspace", "project",
+        "Title",
+        "Content",
+        &["b".to_string(), "a".to_string()],
+        "workspace",
+        "project",
     );
-    assert_eq!(a, b, "tag order must not affect the hash, since memory_tags has no defined order");
+    assert_eq!(
+        a, b,
+        "tag order must not affect the hash, since memory_tags has no defined order"
+    );
 }
 
 #[tokio::test]
@@ -1388,7 +1411,10 @@ async fn delete_writes_a_tombstone() {
         })
         .await
         .unwrap();
-    store.delete("mem_deltest0000000000000000000001").await.unwrap();
+    store
+        .delete("mem_deltest0000000000000000000001")
+        .await
+        .unwrap();
     let mut rows = store
         .conn
         .query(
@@ -1416,7 +1442,11 @@ async fn delete_all_writes_a_tombstone_per_memory() {
         .await
         .unwrap();
     store.delete_all().await.unwrap();
-    let mut rows = store.conn.query("SELECT COUNT(*) FROM hive_tombstones", ()).await.unwrap();
+    let mut rows = store
+        .conn
+        .query("SELECT COUNT(*) FROM hive_tombstones", ())
+        .await
+        .unwrap();
     let count: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
     assert_eq!(count, 1);
 }
@@ -1427,13 +1457,20 @@ async fn hive_manifest_lists_stored_memories_with_hash_and_updated_at() {
     store
         .store(&NewMemoryRow {
             id: "mem_manifesttest0000000000000001",
-            title: "t", content: "c", tags: &[], token_count: None,
-            layer: "workspace", memory_type: "project",
+            title: "t",
+            content: "c",
+            tags: &[],
+            token_count: None,
+            layer: "workspace",
+            memory_type: "project",
         })
         .await
         .unwrap();
     let manifest = store.hive_manifest().await.unwrap();
-    let (hash, _updated_at) = manifest.memories.get("mem_manifesttest0000000000000001").unwrap();
+    let (hash, _updated_at) = manifest
+        .memories
+        .get("mem_manifesttest0000000000000001")
+        .unwrap();
     assert!(!hash.is_empty());
 }
 
@@ -1473,7 +1510,11 @@ async fn hive_manifest_backfills_hash_for_pre_existing_memories() {
     assert!(!hash.is_empty());
 
     let expected = crate::store::compute_hive_content_hash(
-        "legacy title", "legacy content", &[], "workspace", "project",
+        "legacy title",
+        "legacy content",
+        &[],
+        "workspace",
+        "project",
     );
     assert_eq!(hash, &expected);
 }
@@ -1484,21 +1525,35 @@ async fn hive_manifest_lists_tombstones() {
     store
         .store(&NewMemoryRow {
             id: "mem_tombmanifest00000000000000001",
-            title: "t", content: "c", tags: &[], token_count: None,
-            layer: "workspace", memory_type: "project",
+            title: "t",
+            content: "c",
+            tags: &[],
+            token_count: None,
+            layer: "workspace",
+            memory_type: "project",
         })
         .await
         .unwrap();
-    store.delete("mem_tombmanifest00000000000000001").await.unwrap();
+    store
+        .delete("mem_tombmanifest00000000000000001")
+        .await
+        .unwrap();
     let manifest = store.hive_manifest().await.unwrap();
-    assert!(manifest.tombstones.contains_key("mem_tombmanifest00000000000000001"));
+    assert!(
+        manifest
+            .tombstones
+            .contains_key("mem_tombmanifest00000000000000001")
+    );
 }
 
 #[tokio::test]
 async fn hive_settings_override_round_trips() {
     let (store, _dir) = make_store().await;
     assert!(store.hive_settings_override().await.unwrap().is_none());
-    store.set_hive_settings_override(120, 30, 1000).await.unwrap();
+    store
+        .set_hive_settings_override(120, 30, 1000)
+        .await
+        .unwrap();
     let (sync_s, ping_s, updated_at) = store.hive_settings_override().await.unwrap().unwrap();
     assert_eq!((sync_s, ping_s, updated_at), (120, 30, 1000));
 }
@@ -1559,26 +1614,40 @@ async fn write_conflict_with_source_device_increments_peer_pending_count() {
 
     let conflict = s
         .write_conflict(
-            "mem_srcconf", "remote", "local",
-            entry.updated_at + 1, entry.updated_at,
+            "mem_srcconf",
+            "remote",
+            "local",
+            entry.updated_at + 1,
+            entry.updated_at,
             Some("hive_devicea"),
         )
         .await
         .unwrap();
     assert_eq!(conflict.source_device_id.as_deref(), Some("hive_devicea"));
 
-    let status = s.hive_get_peer_status("hive_devicea").await.unwrap().unwrap();
+    let status = s
+        .hive_get_peer_status("hive_devicea")
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(status.pending_conflict_count, 1);
 
     // A second conflict from the same device increments again.
     s.write_conflict(
-        "mem_srcconf", "remote2", "local",
-        entry.updated_at + 2, entry.updated_at,
+        "mem_srcconf",
+        "remote2",
+        "local",
+        entry.updated_at + 2,
+        entry.updated_at,
         Some("hive_devicea"),
     )
     .await
     .unwrap();
-    let status = s.hive_get_peer_status("hive_devicea").await.unwrap().unwrap();
+    let status = s
+        .hive_get_peer_status("hive_devicea")
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(status.pending_conflict_count, 2);
 }
 
@@ -1591,20 +1660,35 @@ async fn resolving_a_sourced_conflict_decrements_peer_pending_count() {
     let entry = s.recall_by_id("mem_resconf").await.unwrap().unwrap();
     let conflict = s
         .write_conflict(
-            "mem_resconf", "remote", "local",
-            entry.updated_at + 1, entry.updated_at,
+            "mem_resconf",
+            "remote",
+            "local",
+            entry.updated_at + 1,
+            entry.updated_at,
             Some("hive_deviceb"),
         )
         .await
         .unwrap();
     assert_eq!(
-        s.hive_get_peer_status("hive_deviceb").await.unwrap().unwrap().pending_conflict_count,
+        s.hive_get_peer_status("hive_deviceb")
+            .await
+            .unwrap()
+            .unwrap()
+            .pending_conflict_count,
         1
     );
 
-    assert!(s.resolve_conflict(&conflict.id, "keep_local").await.unwrap());
+    assert!(
+        s.resolve_conflict(&conflict.id, "keep_local")
+            .await
+            .unwrap()
+    );
     assert_eq!(
-        s.hive_get_peer_status("hive_deviceb").await.unwrap().unwrap().pending_conflict_count,
+        s.hive_get_peer_status("hive_deviceb")
+            .await
+            .unwrap()
+            .unwrap()
+            .pending_conflict_count,
         0
     );
 }
@@ -1620,14 +1704,21 @@ async fn resolving_an_unsourced_conflict_touches_no_peer_status() {
     let entry = s.recall_by_id("mem_nosrc").await.unwrap().unwrap();
     let conflict = s
         .write_conflict(
-            "mem_nosrc", "remote", "local",
-            entry.updated_at + 1, entry.updated_at,
+            "mem_nosrc",
+            "remote",
+            "local",
+            entry.updated_at + 1,
+            entry.updated_at,
             None,
         )
         .await
         .unwrap();
     assert!(conflict.source_device_id.is_none());
-    assert!(s.resolve_conflict(&conflict.id, "keep_local").await.unwrap());
+    assert!(
+        s.resolve_conflict(&conflict.id, "keep_local")
+            .await
+            .unwrap()
+    );
     // No panic, and no phantom peer-status row for an empty device id.
     assert!(s.hive_get_peer_status("").await.unwrap().is_none());
 }
@@ -1638,21 +1729,40 @@ async fn apply_incoming_memory_applies_when_remote_is_newer() {
     store
         .store(&crate::store::NewMemoryRow {
             id: "mem_applytest0000000000000000001",
-            title: "old", content: "old content", tags: &[], token_count: None,
-            layer: "workspace", memory_type: "project",
+            title: "old",
+            content: "old content",
+            tags: &[],
+            token_count: None,
+            layer: "workspace",
+            memory_type: "project",
         })
         .await
         .unwrap();
-    let mut incoming = store.recall_by_id("mem_applytest0000000000000000001").await.unwrap().unwrap();
+    let mut incoming = store
+        .recall_by_id("mem_applytest0000000000000000001")
+        .await
+        .unwrap()
+        .unwrap();
     incoming.title = "new".to_string();
     incoming.content = "new content".to_string();
     incoming.updated_at += 100;
     let hash = crate::store::compute_hive_content_hash(
-        &incoming.title, &incoming.content, &incoming.tags, &incoming.layer, &incoming.memory_type,
+        &incoming.title,
+        &incoming.content,
+        &incoming.tags,
+        &incoming.layer,
+        &incoming.memory_type,
     );
-    let outcome = store.apply_incoming_memory(&incoming, &hash, None).await.unwrap();
+    let outcome = store
+        .apply_incoming_memory(&incoming, &hash, None)
+        .await
+        .unwrap();
     assert!(matches!(outcome, crate::store::ApplyOutcome::Applied));
-    let after = store.recall_by_id("mem_applytest0000000000000000001").await.unwrap().unwrap();
+    let after = store
+        .recall_by_id("mem_applytest0000000000000000001")
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(after.title, "new");
 }
 
@@ -1662,21 +1772,40 @@ async fn apply_incoming_memory_keeps_local_when_local_is_newer() {
     store
         .store(&crate::store::NewMemoryRow {
             id: "mem_applytest0000000000000000002",
-            title: "local", content: "local content", tags: &[], token_count: None,
-            layer: "workspace", memory_type: "project",
+            title: "local",
+            content: "local content",
+            tags: &[],
+            token_count: None,
+            layer: "workspace",
+            memory_type: "project",
         })
         .await
         .unwrap();
-    let local = store.recall_by_id("mem_applytest0000000000000000002").await.unwrap().unwrap();
+    let local = store
+        .recall_by_id("mem_applytest0000000000000000002")
+        .await
+        .unwrap()
+        .unwrap();
     let mut incoming = local.clone();
     incoming.title = "stale remote".to_string();
     incoming.updated_at -= 100;
     let hash = crate::store::compute_hive_content_hash(
-        &incoming.title, &incoming.content, &incoming.tags, &incoming.layer, &incoming.memory_type,
+        &incoming.title,
+        &incoming.content,
+        &incoming.tags,
+        &incoming.layer,
+        &incoming.memory_type,
     );
-    let outcome = store.apply_incoming_memory(&incoming, &hash, None).await.unwrap();
+    let outcome = store
+        .apply_incoming_memory(&incoming, &hash, None)
+        .await
+        .unwrap();
     assert!(matches!(outcome, crate::store::ApplyOutcome::KeptLocal));
-    let after = store.recall_by_id("mem_applytest0000000000000000002").await.unwrap().unwrap();
+    let after = store
+        .recall_by_id("mem_applytest0000000000000000002")
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(after.title, "local");
 }
 
@@ -1686,19 +1815,34 @@ async fn apply_incoming_memory_conflicts_on_equal_timestamps() {
     store
         .store(&crate::store::NewMemoryRow {
             id: "mem_applytest0000000000000000003",
-            title: "local", content: "local content", tags: &[], token_count: None,
-            layer: "workspace", memory_type: "project",
+            title: "local",
+            content: "local content",
+            tags: &[],
+            token_count: None,
+            layer: "workspace",
+            memory_type: "project",
         })
         .await
         .unwrap();
-    let local = store.recall_by_id("mem_applytest0000000000000000003").await.unwrap().unwrap();
+    let local = store
+        .recall_by_id("mem_applytest0000000000000000003")
+        .await
+        .unwrap()
+        .unwrap();
     let mut incoming = local.clone();
     incoming.title = "conflicting remote".to_string();
     // same updated_at as local -- ambiguous, must conflict rather than pick a winner
     let hash = crate::store::compute_hive_content_hash(
-        &incoming.title, &incoming.content, &incoming.tags, &incoming.layer, &incoming.memory_type,
+        &incoming.title,
+        &incoming.content,
+        &incoming.tags,
+        &incoming.layer,
+        &incoming.memory_type,
     );
-    let outcome = store.apply_incoming_memory(&incoming, &hash, None).await.unwrap();
+    let outcome = store
+        .apply_incoming_memory(&incoming, &hash, None)
+        .await
+        .unwrap();
     assert!(matches!(outcome, crate::store::ApplyOutcome::Conflicted));
     assert_eq!(store.pending_conflict_count().await.unwrap(), 1);
 }
@@ -1709,19 +1853,34 @@ async fn apply_incoming_memory_conflicts_on_implausible_future_skew() {
     store
         .store(&crate::store::NewMemoryRow {
             id: "mem_applytest0000000000000000004",
-            title: "local", content: "local content", tags: &[], token_count: None,
-            layer: "workspace", memory_type: "project",
+            title: "local",
+            content: "local content",
+            tags: &[],
+            token_count: None,
+            layer: "workspace",
+            memory_type: "project",
         })
         .await
         .unwrap();
-    let local = store.recall_by_id("mem_applytest0000000000000000004").await.unwrap().unwrap();
+    let local = store
+        .recall_by_id("mem_applytest0000000000000000004")
+        .await
+        .unwrap()
+        .unwrap();
     let mut incoming = local.clone();
     incoming.title = "clock-skewed remote".to_string();
     incoming.updated_at = crate::store::chrono_now() + 301; // just past the 300s skew threshold
     let hash = crate::store::compute_hive_content_hash(
-        &incoming.title, &incoming.content, &incoming.tags, &incoming.layer, &incoming.memory_type,
+        &incoming.title,
+        &incoming.content,
+        &incoming.tags,
+        &incoming.layer,
+        &incoming.memory_type,
     );
-    let outcome = store.apply_incoming_memory(&incoming, &hash, None).await.unwrap();
+    let outcome = store
+        .apply_incoming_memory(&incoming, &hash, None)
+        .await
+        .unwrap();
     assert!(matches!(outcome, crate::store::ApplyOutcome::Conflicted));
 }
 
@@ -1786,7 +1945,13 @@ async fn hive_upsert_peer_status_none_preserves_existing_last_synced_at() {
 #[tokio::test]
 async fn hive_push_payload_for_returns_none_for_missing_memory() {
     let (store, _dir) = make_store().await;
-    assert!(store.hive_push_payload_for("mem_doesnotexist00000000000001").await.unwrap().is_none());
+    assert!(
+        store
+            .hive_push_payload_for("mem_doesnotexist00000000000001")
+            .await
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[tokio::test]
@@ -1795,12 +1960,20 @@ async fn hive_push_payload_for_includes_current_hash() {
     store
         .store(&NewMemoryRow {
             id: "mem_pushpayload0000000000000001",
-            title: "t", content: "c", tags: &[], token_count: None,
-            layer: "workspace", memory_type: "project",
+            title: "t",
+            content: "c",
+            tags: &[],
+            token_count: None,
+            layer: "workspace",
+            memory_type: "project",
         })
         .await
         .unwrap();
-    let payload = store.hive_push_payload_for("mem_pushpayload0000000000000001").await.unwrap().unwrap();
+    let payload = store
+        .hive_push_payload_for("mem_pushpayload0000000000000001")
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(payload["kind"], "memory");
     assert!(payload["hive_content_hash"].as_str().unwrap().len() > 0);
 }

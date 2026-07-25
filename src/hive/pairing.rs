@@ -16,7 +16,10 @@ pub fn generate_pairing_code(now: i64) -> PairingCode {
     let code: String = (0..CODE_LEN)
         .map(|_| CODE_CHARS[rng.gen_range(0..CODE_CHARS.len())] as char)
         .collect();
-    PairingCode { code, expires_at: now + CODE_TTL_SECONDS }
+    PairingCode {
+        code,
+        expires_at: now + CODE_TTL_SECONDS,
+    }
 }
 
 pub struct PairingCodeStore {
@@ -25,13 +28,21 @@ pub struct PairingCodeStore {
 
 impl PairingCodeStore {
     pub fn new() -> Self {
-        Self { outstanding: Mutex::new(HashMap::new()) }
+        Self {
+            outstanding: Mutex::new(HashMap::new()),
+        }
     }
 
     pub fn issue(&self, now: i64) -> PairingCode {
         let pairing = generate_pairing_code(now);
-        self.outstanding.lock().unwrap().insert(pairing.code.clone(), pairing.expires_at);
-        PairingCode { code: pairing.code, expires_at: pairing.expires_at }
+        self.outstanding
+            .lock()
+            .unwrap()
+            .insert(pairing.code.clone(), pairing.expires_at);
+        PairingCode {
+            code: pairing.code,
+            expires_at: pairing.expires_at,
+        }
     }
 
     pub fn validate_and_consume(&self, code: &str, now: i64) -> bool {
@@ -57,7 +68,12 @@ mod tests {
     fn generated_code_has_expected_length_and_charset() {
         let pairing = generate_pairing_code(1000);
         assert_eq!(pairing.code.len(), CODE_LEN);
-        assert!(pairing.code.chars().all(|c| CODE_CHARS.contains(&(c as u8))));
+        assert!(
+            pairing
+                .code
+                .chars()
+                .all(|c| CODE_CHARS.contains(&(c as u8)))
+        );
         assert_eq!(pairing.expires_at, 1000 + CODE_TTL_SECONDS);
     }
 
@@ -66,7 +82,10 @@ mod tests {
         let store = PairingCodeStore::new();
         let pairing = store.issue(1000);
         assert!(store.validate_and_consume(&pairing.code, 1100));
-        assert!(!store.validate_and_consume(&pairing.code, 1100), "code must be single-use");
+        assert!(
+            !store.validate_and_consume(&pairing.code, 1100),
+            "code must be single-use"
+        );
     }
 
     #[test]

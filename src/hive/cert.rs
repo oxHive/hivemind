@@ -28,7 +28,10 @@ pub fn self_signed_cert(identity: &DeviceIdentity) -> Result<rcgen::CertifiedKey
     let cert = params
         .self_signed(&keypair)
         .context("self-signing certificate")?;
-    Ok(rcgen::CertifiedKey { cert, signing_key: keypair })
+    Ok(rcgen::CertifiedKey {
+        cert,
+        signing_key: keypair,
+    })
 }
 
 /// Process-wide cache of `(certificate DER, PKCS#8 private-key DER)` keyed by
@@ -55,10 +58,10 @@ pub fn self_signed_cert_der(identity: &DeviceIdentity) -> Result<(Vec<u8>, Vec<u
     let certified = self_signed_cert(identity)?;
     let cert_der = certified.cert.der().to_vec();
     let key_der = certified.signing_key.serialize_der();
-    cache
-        .lock()
-        .unwrap()
-        .insert(identity.device_id.clone(), (cert_der.clone(), key_der.clone()));
+    cache.lock().unwrap().insert(
+        identity.device_id.clone(),
+        (cert_der.clone(), key_der.clone()),
+    );
     Ok((cert_der, key_der))
 }
 

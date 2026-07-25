@@ -23,8 +23,7 @@ impl HiveClient {
         // fixed device identity, and this constructor runs per online peer on
         // every memory write (push-on-change), so recomputing it each time
         // would be pure waste. See `cert::self_signed_cert_der`.
-        let (client_cert_der, client_key_der) =
-            crate::hive::cert::self_signed_cert_der(identity)?;
+        let (client_cert_der, client_key_der) = crate::hive::cert::self_signed_cert_der(identity)?;
         let client_cert_der = rustls::pki_types::CertificateDer::from(client_cert_der);
 
         let verifier = std::sync::Arc::new(crate::hive::tls_verify::PinnedServerCertVerifier::new(
@@ -63,7 +62,11 @@ impl HiveClient {
         Ok(self.inner.get(url).send().await?)
     }
 
-    pub async fn post_json(&self, url: &str, body: &impl serde::Serialize) -> Result<reqwest::Response> {
+    pub async fn post_json(
+        &self,
+        url: &str,
+        body: &impl serde::Serialize,
+    ) -> Result<reqwest::Response> {
         Ok(self.inner.post(url).json(body).send().await?)
     }
 }

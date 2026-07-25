@@ -413,7 +413,8 @@ impl SqliteStore {
             .token_count
             .unwrap_or_else(|| crate::budget::count_entry_tokens(m.title, m.content) as i64);
 
-        let hive_hash = compute_hive_content_hash(m.title, m.content, m.tags, m.layer, m.memory_type);
+        let hive_hash =
+            compute_hive_content_hash(m.title, m.content, m.tags, m.layer, m.memory_type);
         let tx = self.conn.transaction().await?;
         tx.execute(
             "INSERT INTO memories (id, title, content, created_at, updated_at, token_count, layer, memory_type, hive_content_hash)
@@ -534,7 +535,8 @@ impl SqliteStore {
         };
         let now = chrono_now();
         let token_count = crate::budget::count_entry_tokens(title, content) as i64;
-        let hive_hash = compute_hive_content_hash(title, content, tags, &current.layer, &current.memory_type);
+        let hive_hash =
+            compute_hive_content_hash(title, content, tags, &current.layer, &current.memory_type);
         let tx = self.conn.transaction().await?;
         let changed = tx
             .execute(
@@ -592,7 +594,11 @@ impl SqliteStore {
 
         let now = chrono_now();
         let hive_hash = compute_hive_content_hash(
-            &current.title, &current.content, &merged, &current.layer, &current.memory_type,
+            &current.title,
+            &current.content,
+            &merged,
+            &current.layer,
+            &current.memory_type,
         );
         let tx = self.conn.transaction().await?;
         for t in tags {
@@ -634,7 +640,11 @@ impl SqliteStore {
             .collect();
         let now = chrono_now();
         let hive_hash = compute_hive_content_hash(
-            &current.title, &current.content, &remaining, &current.layer, &current.memory_type,
+            &current.title,
+            &current.content,
+            &remaining,
+            &current.layer,
+            &current.memory_type,
         );
         let tx = self.conn.transaction().await?;
         for t in tags {
@@ -1460,7 +1470,11 @@ impl SqliteStore {
                 device_id: row.get(0)?,
                 public_key: row.get(1)?,
                 name: row.get(2)?,
-                status: if status_str == "revoked" { RosterStatus::Revoked } else { RosterStatus::Active },
+                status: if status_str == "revoked" {
+                    RosterStatus::Revoked
+                } else {
+                    RosterStatus::Active
+                },
                 joined_at: row.get(4)?,
                 revoked_at: row.get(5)?,
                 revoked_by: row.get(6)?,
@@ -1545,7 +1559,13 @@ impl SqliteStore {
         let mut hashes = Vec::with_capacity(to_backfill.len());
         for (id, title, content, layer, memory_type) in &to_backfill {
             let tags = self.fetch_tags(id).await?;
-            hashes.push(compute_hive_content_hash(title, content, &tags, layer, memory_type));
+            hashes.push(compute_hive_content_hash(
+                title,
+                content,
+                &tags,
+                layer,
+                memory_type,
+            ));
         }
         let tx = self.conn.transaction().await?;
         for ((id, ..), hash) in to_backfill.iter().zip(hashes.iter()) {
@@ -1622,8 +1642,16 @@ impl SqliteStore {
     /// online peers -- call this right after a successful store()/update()/
     /// add_tags()/remove_tags(), not from inside them.
     pub async fn hive_push_payload_for(&self, id: &str) -> Result<Option<serde_json::Value>> {
-        let Some(entry) = self.recall_by_id(id).await? else { return Ok(None) };
-        let hash = compute_hive_content_hash(&entry.title, &entry.content, &entry.tags, &entry.layer, &entry.memory_type);
+        let Some(entry) = self.recall_by_id(id).await? else {
+            return Ok(None);
+        };
+        let hash = compute_hive_content_hash(
+            &entry.title,
+            &entry.content,
+            &entry.tags,
+            &entry.layer,
+            &entry.memory_type,
+        );
         Ok(Some(serde_json::json!({
             "kind": "memory", "id": entry.id, "title": entry.title, "content": entry.content,
             "tags": entry.tags, "layer": entry.layer, "memory_type": entry.memory_type,
@@ -1645,7 +1673,8 @@ impl SqliteStore {
         ping_interval_seconds: u64,
         updated_at: i64,
     ) -> Result<()> {
-        let raw = serde_json::to_string(&(sync_interval_seconds, ping_interval_seconds, updated_at))?;
+        let raw =
+            serde_json::to_string(&(sync_interval_seconds, ping_interval_seconds, updated_at))?;
         self.set_meta("hive_settings_override", &raw).await
     }
 
@@ -1657,8 +1686,11 @@ impl SqliteStore {
     }
 
     pub async fn set_hive_enabled_override(&self, enabled: bool) -> Result<()> {
-        self.set_meta("hive_enabled_override", if enabled { "true" } else { "false" })
-            .await
+        self.set_meta(
+            "hive_enabled_override",
+            if enabled { "true" } else { "false" },
+        )
+        .await
     }
 
     pub async fn hive_trusted_networks(&self) -> Result<Vec<crate::hive::network::TrustedNetwork>> {
@@ -1781,7 +1813,11 @@ impl SqliteStore {
         };
 
         let local_hash = compute_hive_content_hash(
-            &local.title, &local.content, &local.tags, &local.layer, &local.memory_type,
+            &local.title,
+            &local.content,
+            &local.tags,
+            &local.layer,
+            &local.memory_type,
         );
         if local_hash == incoming_hash {
             return Ok(ApplyOutcome::KeptLocal); // identical, nothing to do
@@ -1790,7 +1826,11 @@ impl SqliteStore {
         let now = chrono_now();
         if incoming.updated_at > now + HIVE_CLOCK_SKEW_TOLERANCE_SECONDS {
             self.write_conflict(
-                &incoming.id, &incoming.content, &local.content, incoming.updated_at, local.updated_at,
+                &incoming.id,
+                &incoming.content,
+                &local.content,
+                incoming.updated_at,
+                local.updated_at,
                 source_device_id,
             )
             .await?;
@@ -1813,7 +1853,11 @@ impl SqliteStore {
             Ok(ApplyOutcome::KeptLocal)
         } else {
             self.write_conflict(
-                &incoming.id, &incoming.content, &local.content, incoming.updated_at, local.updated_at,
+                &incoming.id,
+                &incoming.content,
+                &local.content,
+                incoming.updated_at,
+                local.updated_at,
                 source_device_id,
             )
             .await?;
