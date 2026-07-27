@@ -209,7 +209,6 @@ pub fn router(
             "/api/v1/suggest-sessions/current/revise",
             post(revise_suggest_session),
         )
-        .route("/api/v1/hive/join", post(hive_join))
         // Local, dashboard-triggered "invite a device now" action — it lives
         // on the plaintext app router (never a hive TLS port) because only the
         // local user issues codes, never a remote peer. Issuing a code opens
@@ -267,6 +266,13 @@ pub fn router(
     // same clone.
     let identity_extension_for_trusted_networks = identity_extension;
     let trusted_networks_router = Router::new()
+        // Loopback-gated: `hive_join` dials an attacker-choosable
+        // `peer_address`/`peer_public_key` and merges whatever roster the
+        // response claims -- reachable only from the local user's own
+        // dashboard, never a remote peer (mirrors the other hive-sensitive
+        // routes on this sub-router; see issue #27 and the security review
+        // that flagged this route being left off this gate).
+        .route("/api/v1/hive/join", post(hive_join))
         .route(
             "/api/v1/hive/trusted-networks",
             get(hive_get_trusted_networks).post(hive_add_trusted_network),

@@ -1383,6 +1383,34 @@ async fn trusted_networks_endpoint_rejects_non_loopback_peer() {
 }
 
 #[tokio::test]
+async fn hive_join_rejects_non_loopback_peer() {
+    // A remote caller must not be able to make this device dial an
+    // attacker-chosen peer_address/peer_public_key and merge in whatever
+    // roster it returns -- see the security review that flagged `hive_join`
+    // being reachable without `require_loopback`, unlike its sibling
+    // hive-sensitive routes.
+    let identity = crate::hive::identity::generate();
+    let (app, _store, _dir) = test_router_with_hive_identity(identity).await;
+    let non_loopback =
+        axum::extract::ConnectInfo(std::net::SocketAddr::from(([192, 168, 1, 50], 54321)));
+    let request = Request::builder()
+        .method("POST")
+        .uri("/api/v1/hive/join")
+        .header("content-type", "application/json")
+        .extension(non_loopback)
+        .body(Body::from(
+            json!({
+                "peer_address": "127.0.0.1:1", "pairing_code": "ABCDEF",
+                "peer_public_key": "00".repeat(32),
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let resp = app.oneshot(request).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn revoke_device_flips_roster_entry_to_revoked() {
     let (app, store, _dir) = test_router_with_store().await;
     let identity = crate::hive::identity::generate();
