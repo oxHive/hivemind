@@ -1975,5 +1975,5 @@ async fn hive_push_payload_for_includes_current_hash() {
         .unwrap()
         .unwrap();
     assert_eq!(payload["kind"], "memory");
-    assert!(payload["hive_content_hash"].as_str().unwrap().len() > 0);
+    assert!(!payload["hive_content_hash"].as_str().unwrap().is_empty());
 }

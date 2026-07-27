@@ -364,14 +364,17 @@ pub async fn run_up(
 
         let stack: Arc<tokio::sync::Mutex<Option<crate::hive::network_guard::HiveStackHandle>>> =
             Arc::new(tokio::sync::Mutex::new(None));
+        let guard_params = crate::hive::network_guard::HiveStackParams {
+            host: settings.host.clone(),
+            port: settings.port,
+            sync_interval_seconds: settings.hive.sync_interval_seconds,
+            ping_interval_seconds: settings.hive.ping_interval_seconds,
+        };
         if start_now {
             let handle = crate::hive::network_guard::spawn_hive_stack(
                 store.clone(),
                 identity.clone(),
-                settings.host.clone(),
-                settings.port,
-                settings.hive.sync_interval_seconds,
-                settings.hive.ping_interval_seconds,
+                guard_params.clone(),
                 events_tx.clone(),
             )
             .await?;
@@ -385,10 +388,7 @@ pub async fn run_up(
         tokio::spawn(crate::hive::network_guard::run_guard_loop(
             store.clone(),
             identity,
-            settings.host.clone(),
-            settings.port,
-            settings.hive.sync_interval_seconds,
-            settings.hive.ping_interval_seconds,
+            guard_params,
             events_tx.clone(),
             stack,
         ));
@@ -599,8 +599,7 @@ mod tests {
         // test binary runs many tests in parallel threads; swapping the hook
         // could race with a genuine panic in another concurrently-running
         // test and swallow its real backtrace.
-        let bare_builder_panics =
-            std::panic::catch_unwind(|| rustls::ServerConfig::builder()).is_err();
+        let bare_builder_panics = std::panic::catch_unwind(rustls::ServerConfig::builder).is_err();
         assert!(
             bare_builder_panics,
             "expected the bare ServerConfig::builder() to panic on an ambiguous \

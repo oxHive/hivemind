@@ -28,6 +28,13 @@ impl HiveKeyStore for KeyringHiveKeyStore {
 pub struct FakeHiveKeyStore(std::sync::Mutex<std::collections::HashMap<String, String>>);
 
 #[cfg(test)]
+impl Default for FakeHiveKeyStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
 impl FakeHiveKeyStore {
     pub fn new() -> Self {
         Self(std::sync::Mutex::new(std::collections::HashMap::new()))

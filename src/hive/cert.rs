@@ -44,7 +44,8 @@ pub fn self_signed_cert(identity: &DeviceIdentity) -> Result<rcgen::CertifiedKey
 /// bytes once per identity; keying by `device_id` keeps multiple identities
 /// (tests, and in principle any future multi-identity use) correct rather than
 /// assuming a single process-global identity.
-static CERT_DER_CACHE: OnceLock<Mutex<HashMap<String, (Vec<u8>, Vec<u8>)>>> = OnceLock::new();
+type CertDer = (Vec<u8>, Vec<u8>);
+static CERT_DER_CACHE: OnceLock<Mutex<HashMap<String, CertDer>>> = OnceLock::new();
 
 /// Returns the cached `(cert DER, PKCS#8 key DER)` for this identity,
 /// computing and caching it on first use. This is what both the outbound

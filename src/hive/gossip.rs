@@ -15,7 +15,7 @@ use crate::hive::roster::{
 ///    itself claims -- a first-seen device_id can never be pre-poisoned as
 ///    `Revoked` without a verified revocation record, since this path never
 ///    checks one.
-/// 3./4. An incoming revocation for a locally-`Active` entry is applied only
+///    3./4. An incoming revocation for a locally-`Active` entry is applied only
 ///    if: the revocation record's own claimed target (`device_id`) matches
 ///    the candidate entry it's attached to (preventing cross-target
 ///    replay), AND it verifies against the revoker's public key AND the

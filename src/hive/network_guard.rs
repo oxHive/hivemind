@@ -130,6 +130,18 @@ impl HiveStackHandle {
     }
 }
 
+/// Bind address/port and sync/ping cadence for a hive stack -- grouped into
+/// one struct (rather than four separate parameters) purely to keep
+/// `spawn_hive_stack` and `run_guard_loop` under clippy's argument-count
+/// lint; there's no independent meaning to the grouping beyond that.
+#[derive(Clone)]
+pub struct HiveStackParams {
+    pub host: String,
+    pub port: u16,
+    pub sync_interval_seconds: u64,
+    pub ping_interval_seconds: u64,
+}
+
 /// Starts the mandatory-mTLS sync listener, mDNS advertise/browse, and the
 /// sync/ping loops -- the same startup sequence `http::run_up` used to run
 /// inline, extracted here so both the initial boot and every guard-loop
@@ -139,12 +151,15 @@ impl HiveStackHandle {
 pub async fn spawn_hive_stack(
     store: Arc<SqliteStore>,
     identity: DeviceIdentity,
-    host: String,
-    port: u16,
-    sync_interval_seconds: u64,
-    ping_interval_seconds: u64,
+    params: HiveStackParams,
     events: tokio::sync::broadcast::Sender<serde_json::Value>,
 ) -> anyhow::Result<HiveStackHandle> {
+    let HiveStackParams {
+        host,
+        port,
+        sync_interval_seconds,
+        ping_interval_seconds,
+    } = params;
     let self_join = crate::hive::roster::create_join_record(
         &identity,
         &identity.device_id,
@@ -263,10 +278,7 @@ pub async fn spawn_hive_stack(
 pub async fn run_guard_loop(
     store: Arc<SqliteStore>,
     identity: DeviceIdentity,
-    host: String,
-    port: u16,
-    sync_interval_seconds: u64,
-    ping_interval_seconds: u64,
+    params: HiveStackParams,
     events: tokio::sync::broadcast::Sender<serde_json::Value>,
     stack: Arc<tokio::sync::Mutex<Option<HiveStackHandle>>>,
 ) {
@@ -294,10 +306,7 @@ pub async fn run_guard_loop(
                 match spawn_hive_stack(
                     store.clone(),
                     identity.clone(),
-                    host.clone(),
-                    port,
-                    sync_interval_seconds,
-                    ping_interval_seconds,
+                    params.clone(),
                     events.clone(),
                 )
                 .await
