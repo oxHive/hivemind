@@ -201,6 +201,67 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn online_peers_lists_only_active_and_online_entries() {
+        let store = test_store().await;
+        let online = crate::hive::identity::generate();
+        let offline = crate::hive::identity::generate();
+        let revoked = crate::hive::identity::generate();
+        for (identity, name) in [
+            (&online, "online-peer"),
+            (&offline, "offline-peer"),
+            (&revoked, "revoked-peer"),
+        ] {
+            let join = crate::hive::roster::create_join_record(identity, name, 1000);
+            store
+                .hive_upsert_roster_entry(&crate::hive::roster::RosterEntry {
+                    device_id: identity.device_id.clone(),
+                    public_key: crate::hive::identity::public_key_hex(identity),
+                    name: name.to_string(),
+                    status: if identity.device_id == revoked.device_id {
+                        RosterStatus::Revoked
+                    } else {
+                        RosterStatus::Active
+                    },
+                    joined_at: 1000,
+                    revoked_at: None,
+                    revoked_by: None,
+                    join_record: join,
+                    revocation_record: None,
+                })
+                .await
+                .unwrap();
+        }
+        store
+            .hive_upsert_peer_status(&online.device_id, true, Some(5000))
+            .await
+            .unwrap();
+        store
+            .hive_upsert_peer_status(&offline.device_id, false, None)
+            .await
+            .unwrap();
+        store
+            .hive_upsert_peer_status(&revoked.device_id, true, Some(6000))
+            .await
+            .unwrap();
+
+        let peers = online_peers(&store).await.unwrap();
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].device_id, online.device_id);
+        assert!(peers[0].online);
+        assert_eq!(peers[0].last_synced_at, Some(5000));
+    }
+
+    #[test]
+    fn record_and_resolve_discovered_address_round_trips() {
+        record_discovered_address("hive_addrtest", "10.0.0.5:9999".to_string());
+        assert_eq!(
+            resolve_address("hive_addrtest"),
+            Some("10.0.0.5:9999".to_string())
+        );
+        assert_eq!(resolve_address("hive_never_recorded"), None);
+    }
+
+    #[tokio::test]
     async fn ping_once_emits_event_only_on_an_actual_online_flip() {
         let store = std::sync::Arc::new(test_store().await);
         let identity = crate::hive::identity::generate();

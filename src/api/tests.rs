@@ -133,6 +133,34 @@ async fn test_router_with_store() -> (Router, Arc<SqliteStore>, TempDir) {
     (r, store, dir)
 }
 
+/// Like `test_router_with_store`, but with hive enabled and `identity` wired
+/// through as the `Extension<Arc<DeviceIdentity>>`/`HivePushConfig` -- needed
+/// by handlers (`hive_status`) that read `hive.identity` rather than degrading
+/// to the "disabled, no identity" branch `test_router_with_store` exercises.
+async fn test_router_with_hive_identity(
+    identity: crate::hive::identity::DeviceIdentity,
+) -> (Router, Arc<SqliteStore>, TempDir) {
+    let (store, dir) = test_store().await;
+    let (events, _) = broadcast::channel(16);
+    let suggest = test_suggest_manager(Arc::clone(&store), dir.path(), events.clone());
+    let r = router(
+        Arc::clone(&store),
+        SyncSettings::default(),
+        "http://127.0.0.1:3457",
+        events,
+        suggest,
+        test_update_state(),
+        test_agent_settings(),
+        true,
+        true,
+        Some(identity),
+        Arc::new(crate::hive::pairing::PairingCodeStore::new()),
+        None,
+        crate::api::HiveSyncPort(4570),
+    );
+    (r, store, dir)
+}
+
 async fn test_router_with_pairing_code(dir: &std::path::Path) -> (Router, String) {
     let (store, _dir) = test_store().await;
     let _ = dir; // kept for call-site compatibility; test_store() makes its own tempdir
@@ -154,6 +182,14 @@ async fn test_hive_router() -> (Router, Arc<crate::hive::pairing::PairingCodeSto
     let pairing_codes = Arc::new(crate::hive::pairing::PairingCodeStore::new());
     let r = hive_sync_router(store);
     (r, pairing_codes, dir)
+}
+
+/// Like `test_hive_router`, but also hands back the underlying store so
+/// tests can seed state or assert on it directly.
+async fn test_hive_router_with_store() -> (Router, Arc<SqliteStore>, TempDir) {
+    let (store, dir) = test_store().await;
+    let r = hive_sync_router(Arc::clone(&store));
+    (r, store, dir)
 }
 
 /// A pairing router (server-TLS-only `/pair`) sharing a fresh code store, for
@@ -1547,4 +1583,311 @@ async fn set_hive_enabled_persists_override_and_signals_restart() {
     tokio::time::timeout(std::time::Duration::from_secs(1), notified)
         .await
         .expect("hive_set_enabled must signal the restart Notify");
+}
+
+#[tokio::test]
+async fn hive_pair_rejects_invalid_join_record_signature() {
+    let (app, code) = test_router_with_pairing_code(std::path::Path::new(".")).await;
+    let (status, _) = req(
+        app,
+        "POST",
+        "/api/v1/hive/pair",
+        Some(json!({
+            "code": code,
+            // A well-formed but forged record: real device_id/public_key
+            // shape, but a signature that cannot verify against it.
+            "join_record": {
+                "device_id": "hive_forged", "public_key": "00".repeat(32),
+                "name": "forged", "joined_at": 1000, "signature": "00".repeat(64),
+            }
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn hive_get_settings_returns_defaults_then_reflects_override() {
+    let (app, store, _dir) = test_hive_router_with_store().await;
+    let (status, body) = req(app.clone(), "GET", "/api/v1/hive/settings", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["sync_interval_seconds"], 300);
+    assert_eq!(body["ping_interval_seconds"], 60);
+    assert_eq!(body["updated_at"], 0);
+
+    store
+        .set_hive_settings_override(120, 30, 5000)
+        .await
+        .unwrap();
+    let (status, body) = req(app, "GET", "/api/v1/hive/settings", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["sync_interval_seconds"], 120);
+    assert_eq!(body["ping_interval_seconds"], 30);
+    assert_eq!(body["updated_at"], 5000);
+}
+
+#[tokio::test]
+async fn hive_get_tag_namespaces_returns_registry_and_updated_at() {
+    let (app, store, _dir) = test_hive_router_with_store().await;
+    store
+        .set_meta("tag_namespaces_updated_at", "1234")
+        .await
+        .unwrap();
+    let (status, body) = req(app, "GET", "/api/v1/hive/tag-namespaces", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["updated_at"], 1234);
+    assert!(body["namespaces"].is_object());
+}
+
+#[tokio::test]
+async fn hive_push_tombstone_deletes_a_staler_local_copy() {
+    let (app, store, _dir) = test_hive_router_with_store().await;
+    store
+        .store(&crate::store::NewMemoryRow {
+            id: "mem_tombtest0000000000000000001",
+            title: "will be tombstoned",
+            content: "c",
+            tags: &[],
+            token_count: None,
+            layer: "workspace",
+            memory_type: "project",
+        })
+        .await
+        .unwrap();
+    let far_future = chrono::Utc::now().timestamp() + 10_000;
+
+    let (status, body) = req(
+        app,
+        "POST",
+        "/api/v1/hive/push",
+        Some(json!({
+            "kind": "tombstone",
+            "memory_id": "mem_tombtest0000000000000000001",
+            "deleted_at": far_future,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["outcome"], "tombstone_processed");
+    assert!(
+        store
+            .recall_by_id("mem_tombtest0000000000000000001")
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn hive_push_tombstone_for_unknown_id_is_a_noop() {
+    let (app, _codes, _dir) = test_hive_router().await;
+    let (status, body) = req(
+        app,
+        "POST",
+        "/api/v1/hive/push",
+        Some(json!({
+            "kind": "tombstone",
+            "memory_id": "mem_doesnotexist00000000000002",
+            "deleted_at": 9999,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["outcome"], "tombstone_processed");
+}
+
+#[tokio::test]
+async fn hive_push_settings_applies_when_newer_keeps_local_when_older() {
+    let (app, store, _dir) = test_hive_router_with_store().await;
+
+    let (status, body) = req(
+        app.clone(),
+        "POST",
+        "/api/v1/hive/push",
+        Some(json!({
+            "kind": "settings", "sync_interval_seconds": 90, "ping_interval_seconds": 15,
+            "updated_at": 5000,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["outcome"], "applied");
+    assert_eq!(
+        store.hive_settings_override().await.unwrap(),
+        Some((90, 15, 5000))
+    );
+
+    // An older update must not overwrite the newer local one.
+    let (status, body) = req(
+        app,
+        "POST",
+        "/api/v1/hive/push",
+        Some(json!({
+            "kind": "settings", "sync_interval_seconds": 999, "ping_interval_seconds": 999,
+            "updated_at": 1,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["outcome"], "kept_local");
+    assert_eq!(
+        store.hive_settings_override().await.unwrap(),
+        Some((90, 15, 5000))
+    );
+}
+
+#[tokio::test]
+async fn hive_push_tag_namespaces_applies_when_newer_keeps_local_when_older() {
+    let (app, store, _dir) = test_hive_router_with_store().await;
+
+    let (status, body) = req(
+        app.clone(),
+        "POST",
+        "/api/v1/hive/push",
+        Some(json!({
+            "kind": "tag_namespaces",
+            "namespaces": { "project": { "color": "#000", "values": ["x"] } },
+            "updated_at": 5000,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["outcome"], "applied");
+    assert_eq!(
+        store
+            .get_meta("tag_namespaces_updated_at")
+            .await
+            .unwrap()
+            .unwrap(),
+        "5000"
+    );
+
+    let (status, body) = req(
+        app,
+        "POST",
+        "/api/v1/hive/push",
+        Some(json!({
+            "kind": "tag_namespaces", "namespaces": {}, "updated_at": 1,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["outcome"], "kept_local");
+    assert_eq!(
+        store
+            .get_meta("tag_namespaces_updated_at")
+            .await
+            .unwrap()
+            .unwrap(),
+        "5000"
+    );
+}
+
+#[tokio::test]
+async fn hive_push_roster_merges_incoming_entries() {
+    let (app, store, _dir) = test_hive_router_with_store().await;
+    let peer = crate::hive::identity::generate();
+    let join = crate::hive::roster::create_join_record(&peer, "peer-device", 1000);
+    let entry = crate::hive::roster::RosterEntry {
+        device_id: peer.device_id.clone(),
+        public_key: crate::hive::identity::public_key_hex(&peer),
+        name: "peer-device".to_string(),
+        status: crate::hive::roster::RosterStatus::Active,
+        joined_at: 1000,
+        revoked_at: None,
+        revoked_by: None,
+        join_record: join,
+        revocation_record: None,
+    };
+
+    let (status, body) = req(
+        app,
+        "POST",
+        "/api/v1/hive/push",
+        Some(json!({ "kind": "roster", "roster": [entry] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["outcome"], "merged");
+    let roster = store.hive_list_roster().await.unwrap();
+    assert!(roster.iter().any(|e| e.device_id == peer.device_id));
+}
+
+#[tokio::test]
+async fn hive_status_reports_identity_and_roster_member_fields() {
+    let identity = crate::hive::identity::generate();
+    let other = crate::hive::identity::generate();
+    let (app, store, _dir) = test_router_with_hive_identity(identity.clone()).await;
+
+    let join = crate::hive::roster::create_join_record(&other, "bob-phone", 1000);
+    store
+        .hive_upsert_roster_entry(&crate::hive::roster::RosterEntry {
+            device_id: other.device_id.clone(),
+            public_key: crate::hive::identity::public_key_hex(&other),
+            name: "bob-phone".to_string(),
+            status: crate::hive::roster::RosterStatus::Active,
+            joined_at: 1000,
+            revoked_at: None,
+            revoked_by: None,
+            join_record: join,
+            revocation_record: None,
+        })
+        .await
+        .unwrap();
+    store
+        .hive_upsert_peer_status(&other.device_id, true, Some(2000))
+        .await
+        .unwrap();
+
+    let (status, body) = req(app, "GET", "/api/v1/hive/status", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["enabled"], true);
+    assert_eq!(body["identity"]["device_id"], identity.device_id);
+    assert_eq!(body["sync_port"], 4570);
+    let roster = body["roster"].as_array().unwrap();
+    let entry = roster
+        .iter()
+        .find(|e| e["device_id"] == other.device_id)
+        .expect("pushed roster entry must be present");
+    assert_eq!(entry["status"], "active");
+    assert_eq!(entry["online"], true);
+    assert_eq!(entry["last_synced_at"], 2000);
+}
+
+#[tokio::test]
+async fn hive_join_rejects_malformed_peer_public_key() {
+    let identity = crate::hive::identity::generate();
+    let (app, _store, _dir) = test_router_with_hive_identity(identity).await;
+    let (status, _) = req(
+        app,
+        "POST",
+        "/api/v1/hive/join",
+        Some(json!({
+            "peer_address": "127.0.0.1:1", "pairing_code": "ABCDEF",
+            "peer_public_key": "not-hex",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn hive_join_reports_bad_gateway_when_peer_unreachable() {
+    let identity = crate::hive::identity::generate();
+    let target = crate::hive::identity::generate();
+    let (app, _store, _dir) = test_router_with_hive_identity(identity).await;
+    let (status, _) = req(
+        app,
+        "POST",
+        "/api/v1/hive/join",
+        Some(json!({
+            // Port 1 on loopback: nothing listens there, so this exercises
+            // the "could not reach peer" BAD_GATEWAY branch without needing
+            // a real peer TLS listener.
+            "peer_address": "127.0.0.1:1", "pairing_code": "ABCDEF",
+            "peer_public_key": crate::hive::identity::public_key_hex(&target),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
 }

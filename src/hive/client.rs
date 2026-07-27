@@ -84,4 +84,17 @@ mod tests {
         let client = HiveClient::new(&identity, &target_pk);
         assert!(client.is_ok());
     }
+
+    #[test]
+    fn new_client_rejects_non_hex_target_key() {
+        let identity = identity::generate();
+        assert!(HiveClient::new(&identity, "not-hex-at-all").is_err());
+    }
+
+    #[test]
+    fn new_client_rejects_wrong_length_target_key() {
+        let identity = identity::generate();
+        // Valid hex, but only 16 bytes -- not the required 32.
+        assert!(HiveClient::new(&identity, &"ab".repeat(16)).is_err());
+    }
 }

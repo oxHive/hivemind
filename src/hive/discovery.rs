@@ -57,4 +57,28 @@ mod tests {
         let name = service_name("hive_abc123");
         assert_eq!(name, "hive_abc123._hivemind._tcp.local.");
     }
+
+    #[test]
+    fn new_creates_and_shuts_down_a_daemon() {
+        let discovery = HiveDiscovery::new().expect("daemon creation should succeed sandboxed");
+        assert!(discovery.shutdown().is_ok());
+    }
+
+    #[test]
+    fn browse_returns_a_receiver_before_shutdown() {
+        let discovery = HiveDiscovery::new().unwrap();
+        assert!(discovery.browse().is_ok());
+        let _ = discovery.shutdown();
+    }
+
+    #[test]
+    fn advertise_registers_without_error() {
+        let discovery = HiveDiscovery::new().unwrap();
+        assert!(
+            discovery
+                .advertise("hive_advtest", "advtest", 34567)
+                .is_ok()
+        );
+        let _ = discovery.shutdown();
+    }
 }

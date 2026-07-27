@@ -246,4 +246,86 @@ mod tests {
                 .is_err()
         );
     }
+
+    #[test]
+    fn roster_verifier_accepts_active_member_rejects_others() {
+        let active = identity::generate();
+        let revoked = identity::generate();
+        let stranger = identity::generate();
+        let active_cert = cert::self_signed_cert(&active).unwrap();
+        let active_der = rustls::pki_types::CertificateDer::from(active_cert.cert.der().to_vec());
+        let revoked_cert = cert::self_signed_cert(&revoked).unwrap();
+        let revoked_der = rustls::pki_types::CertificateDer::from(revoked_cert.cert.der().to_vec());
+        let stranger_cert = cert::self_signed_cert(&stranger).unwrap();
+        let stranger_der =
+            rustls::pki_types::CertificateDer::from(stranger_cert.cert.der().to_vec());
+
+        let roster = vec![
+            RosterEntry {
+                device_id: active.device_id.clone(),
+                public_key: identity::public_key_hex(&active),
+                name: "active".to_string(),
+                status: RosterStatus::Active,
+                joined_at: 0,
+                revoked_at: None,
+                revoked_by: None,
+                join_record: crate::hive::roster::create_join_record(&active, "active", 0),
+                revocation_record: None,
+            },
+            RosterEntry {
+                device_id: revoked.device_id.clone(),
+                public_key: identity::public_key_hex(&revoked),
+                name: "revoked".to_string(),
+                status: RosterStatus::Revoked,
+                joined_at: 0,
+                revoked_at: Some(1),
+                revoked_by: None,
+                join_record: crate::hive::roster::create_join_record(&revoked, "revoked", 0),
+                revocation_record: None,
+            },
+        ];
+        let verifier = RosterClientCertVerifier::new(roster);
+        let now = UnixTime::now();
+
+        assert!(verifier.verify_client_cert(&active_der, &[], now).is_ok());
+        assert!(
+            verifier.verify_client_cert(&revoked_der, &[], now).is_err(),
+            "a Revoked roster member's cert must be rejected"
+        );
+        assert!(
+            verifier
+                .verify_client_cert(&stranger_der, &[], now)
+                .is_err(),
+            "a cert not present in the roster at all must be rejected"
+        );
+    }
+
+    #[test]
+    fn roster_verifier_rejects_garbage_certificate() {
+        let verifier = RosterClientCertVerifier::new(vec![]);
+        let garbage = rustls::pki_types::CertificateDer::from(b"not a certificate".to_vec());
+        assert!(
+            verifier
+                .verify_client_cert(&garbage, &[], UnixTime::now())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn roster_verifier_debug_reports_active_member_count() {
+        let active = identity::generate();
+        let roster = vec![RosterEntry {
+            device_id: active.device_id.clone(),
+            public_key: identity::public_key_hex(&active),
+            name: "active".to_string(),
+            status: RosterStatus::Active,
+            joined_at: 0,
+            revoked_at: None,
+            revoked_by: None,
+            join_record: crate::hive::roster::create_join_record(&active, "active", 0),
+            revocation_record: None,
+        }];
+        let verifier = RosterClientCertVerifier::new(roster);
+        assert!(format!("{verifier:?}").contains("active_members: 1"));
+    }
 }
