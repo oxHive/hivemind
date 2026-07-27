@@ -4,11 +4,11 @@ use std::path::{Path, PathBuf};
 
 // ── service management ────────────────────────────────────────────────────────
 
-pub fn cmd_service_install(dashboard: bool, matrix: bool) -> Result<()> {
+pub fn cmd_service_install(dashboard: bool, matrix: bool, hive: bool) -> Result<()> {
     #[cfg(target_os = "macos")]
-    return service_install_macos(dashboard, matrix);
+    return service_install_macos(dashboard, matrix, hive);
     #[cfg(target_os = "linux")]
-    return service_install_linux(dashboard, matrix);
+    return service_install_linux(dashboard, matrix, hive);
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     anyhow::bail!("hivemind service install is only supported on Linux and macOS");
 }
@@ -48,7 +48,12 @@ fn systemd_unit_path(unit_name: &str) -> PathBuf {
 }
 
 #[cfg(target_os = "linux")]
-fn systemd_unit_content(description: &str, exe: &Path, exec_args: &[&str]) -> String {
+fn systemd_unit_content(
+    description: &str,
+    exe: &Path,
+    exec_args: &[&str],
+    path_env: &str,
+) -> String {
     let mut exec = exe.display().to_string();
     for arg in exec_args {
         exec.push(' ');
@@ -61,6 +66,7 @@ fn systemd_unit_content(description: &str, exe: &Path, exec_args: &[&str]) -> St
          \n\
          [Service]\n\
          Type=simple\n\
+         Environment=PATH={path_env}\n\
          ExecStart={exec}\n\
          Restart=on-failure\n\
          RestartSec=5\n\
@@ -77,7 +83,15 @@ fn service_install_unit_linux(
     exec_args: &[&str],
 ) -> Result<()> {
     let exe = std::env::current_exe()?;
-    let unit = systemd_unit_content(description, &exe, exec_args);
+    // systemd user services start with their own minimal PATH (no
+    // ~/.local/bin, ~/.cargo/bin, etc.), unlike an interactive shell --
+    // baking in the PATH from *this* invocation (run interactively, when the
+    // user has their real shell environment) means every subprocess this
+    // service spawns (the suggest-session agent, opencode, ...) resolves the
+    // same bare command names that work in the user's terminal.
+    let path_env =
+        std::env::var("PATH").unwrap_or_else(|_| "/usr/local/bin:/usr/bin:/bin".to_string());
+    let unit = systemd_unit_content(description, &exe, exec_args, &path_env);
 
     let unit_path = systemd_unit_path(unit_name);
     std::fs::create_dir_all(unit_path.parent().unwrap())?;
@@ -154,7 +168,7 @@ fn service_status_unit_linux(unit_name: &str) -> Result<()> {
 }
 
 #[cfg(target_os = "linux")]
-fn service_install_linux(dashboard: bool, matrix: bool) -> Result<()> {
+fn service_install_linux(dashboard: bool, matrix: bool, hive: bool) -> Result<()> {
     let (args, desc): (&[&str], &str) = if dashboard {
         (&["up"], "HiveMind server (API + dashboard)")
     } else {
@@ -180,12 +194,29 @@ fn service_install_linux(dashboard: bool, matrix: bool) -> Result<()> {
         )?;
     }
 
+    if hive {
+        let configured = crate::config::load_server_settings(&crate::config::global_config_path())
+            .map(|s| s.hive.enabled)
+            .unwrap_or(false);
+        if !configured {
+            anyhow::bail!(
+                "--hive was passed but Hive Mode is not enabled.\n\
+                 Set [hive] enabled = true in ~/.config/hivemind/config.toml first, \
+                 then re-run `hivemind service install --hive`."
+            );
+        }
+        // Hive sync runs inside the main `hivemind up` process (unlike the Matrix
+        // bot, which is a wholly separate daemon) -- no separate systemd unit to
+        // install here. This block exists purely as the same fail-fast precondition
+        // check the --matrix flag already does, for consistency.
+    }
+
     println!();
     println!("HiveMind will now start automatically on login.");
     if dashboard {
         let port = crate::config::load_server_settings(&crate::config::global_config_path())
             .map(|s| s.dashboard_port)
-            .unwrap_or(3457);
+            .unwrap_or(3459);
         println!("Dashboard: http://127.0.0.1:{port}");
     }
     println!("Check status: hivemind service status");
@@ -222,6 +253,7 @@ mod matrix_service_tests {
             "HiveMind Matrix chat bot",
             &std::path::PathBuf::from("/usr/local/bin/hivemind"),
             &["matrix", "run"],
+            "/usr/bin:/bin",
         );
         assert!(content.contains("Description=HiveMind Matrix chat bot"));
         assert!(content.contains("ExecStart=/usr/local/bin/hivemind matrix run"));
@@ -238,8 +270,25 @@ mod matrix_service_tests {
             "HiveMind MCP memory server",
             &std::path::PathBuf::from("/usr/local/bin/hivemind"),
             &[],
+            "/usr/bin:/bin",
         );
         assert!(content.contains("ExecStart=/usr/local/bin/hivemind\n"));
+    }
+
+    #[test]
+    fn systemd_unit_content_bakes_in_the_given_path() {
+        // A bare `[agent] command = "claude"` (the default) only resolves if
+        // the service's PATH includes wherever `claude` actually lives --
+        // systemd user services don't inherit the interactive shell's PATH,
+        // so without this the agent spawn fails with ENOENT even though
+        // `claude` works fine in a terminal.
+        let content = systemd_unit_content(
+            "HiveMind MCP memory server",
+            &std::path::PathBuf::from("/usr/local/bin/hivemind"),
+            &[],
+            "/home/user/.local/bin:/usr/bin:/bin",
+        );
+        assert!(content.contains("Environment=PATH=/home/user/.local/bin:/usr/bin:/bin\n"));
     }
 }
 
@@ -260,7 +309,12 @@ fn launch_agent_path(label: &str) -> PathBuf {
 }
 
 #[cfg(target_os = "macos")]
-fn launch_agent_plist_content(label: &str, exe: &Path, exec_args: &[&str]) -> String {
+fn launch_agent_plist_content(
+    label: &str,
+    exe: &Path,
+    exec_args: &[&str],
+    path_env: &str,
+) -> String {
     let mut program_arguments = format!("<string>{}</string>\n", exe.display());
     for arg in exec_args {
         program_arguments.push_str("             <string>");
@@ -280,6 +334,11 @@ fn launch_agent_plist_content(label: &str, exe: &Path, exec_args: &[&str]) -> St
            <array>\n\
              {program_arguments}\
            </array>\n\
+           <key>EnvironmentVariables</key>\n\
+           <dict>\n\
+             <key>PATH</key>\n\
+             <string>{path_env}</string>\n\
+           </dict>\n\
            <key>RunAtLoad</key>\n\
            <true/>\n\
            <key>KeepAlive</key>\n\
@@ -298,7 +357,12 @@ fn launch_agent_plist_content(label: &str, exe: &Path, exec_args: &[&str]) -> St
 fn service_install_unit_macos(label: &str, exec_args: &[&str], description: &str) -> Result<()> {
     let exe = std::env::current_exe()?;
     let plist_path = launch_agent_path(label);
-    let plist = launch_agent_plist_content(label, &exe, exec_args);
+    // See the systemd path_env comment in service_install_unit_linux: launchd
+    // agents get the same minimal-PATH problem, so bake in the PATH from this
+    // (interactive) invocation.
+    let path_env =
+        std::env::var("PATH").unwrap_or_else(|_| "/usr/local/bin:/usr/bin:/bin".to_string());
+    let plist = launch_agent_plist_content(label, &exe, exec_args, &path_env);
 
     std::fs::create_dir_all(plist_path.parent().unwrap())?;
     std::fs::write(&plist_path, &plist)?;
@@ -360,7 +424,7 @@ fn service_status_unit_macos(label: &str) -> Result<()> {
 }
 
 #[cfg(target_os = "macos")]
-fn service_install_macos(dashboard: bool, matrix: bool) -> Result<()> {
+fn service_install_macos(dashboard: bool, matrix: bool, hive: bool) -> Result<()> {
     let (args, desc): (&[&str], &str) = if dashboard {
         (&["up"], "HiveMind server (API + dashboard)")
     } else {
@@ -386,12 +450,29 @@ fn service_install_macos(dashboard: bool, matrix: bool) -> Result<()> {
         )?;
     }
 
+    if hive {
+        let configured = crate::config::load_server_settings(&crate::config::global_config_path())
+            .map(|s| s.hive.enabled)
+            .unwrap_or(false);
+        if !configured {
+            anyhow::bail!(
+                "--hive was passed but Hive Mode is not enabled.\n\
+                 Set [hive] enabled = true in ~/.config/hivemind/config.toml first, \
+                 then re-run `hivemind service install --hive`."
+            );
+        }
+        // Hive sync runs inside the main `hivemind up` process (unlike the Matrix
+        // bot, which is a wholly separate daemon) -- no separate systemd unit to
+        // install here. This block exists purely as the same fail-fast precondition
+        // check the --matrix flag already does, for consistency.
+    }
+
     println!();
     println!("HiveMind will now start automatically on login.");
     if dashboard {
         let port = crate::config::load_server_settings(&crate::config::global_config_path())
             .map(|s| s.dashboard_port)
-            .unwrap_or(3457);
+            .unwrap_or(3459);
         println!("Dashboard: http://127.0.0.1:{port}");
     }
     println!("Logs: ~/Library/Logs/hivemind.log");

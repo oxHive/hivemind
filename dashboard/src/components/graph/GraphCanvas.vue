@@ -3,6 +3,7 @@ import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
 import * as d3 from 'd3'
 import { useMemoriesStore } from '../../stores/memories.js'
 import { useGraphStore } from '../../stores/graph.js'
+import { clusterOutline } from '../../graph/blob.js'
 
 const emit = defineEmits(['node-click', 'node-hover', 'edge-hover'])
 const memories = useMemoriesStore()
@@ -15,6 +16,16 @@ let rafId = null
 let nodes = []
 let links = []
 let panning = false
+// While a node is actively being dragged, its directly linked neighbors
+// intentionally ease toward it (via the `link` force) -- but that motion
+// shifts the connected-node centroid forceClusterAnchor/forceProjectCluster
+// anchor everything to, and those forces apply to EVERY node (including
+// edgeless, unrelated ones), not just the ones near the drag. Left alone,
+// a drag's ripple through the shared centroid visibly tugs the whole
+// canvas. Freezing both forces for the drag's duration keeps the tug
+// local to the physics that's supposed to react to it (link/charge/
+// collision) instead of broadcasting it through the anchor forces too.
+let isDraggingNode = false
 
 const CAMERA_KEY = 'hivemind.graph.camera'
 
@@ -141,8 +152,14 @@ const DEFAULT_EDGE_COLOR = '#9a9488'
 function forceClusterAnchor(strength) {
   let nodesRef = []
   function force(alpha) {
+    if (isDraggingNode) return
     let cx = 0, cy = 0, count = 0
     for (const n of nodesRef) {
+      // A pinned node (dragged, or manually placed) shouldn't pull the
+      // centroid to itself -- otherwise dragging one node drags this
+      // force's target along with it, and every other unpinned node
+      // visibly drifts toward wherever the dragged node currently is.
+      if (n.fx != null && n.fy != null) continue
       if (n.__degree > 0) { cx += n.x; cy += n.y; count++ }
     }
     if (count === 0) return
@@ -215,13 +232,21 @@ function groupByProject(list) {
 function forceProjectCluster(strength) {
   let nodesRef = []
   function force(alpha) {
+    if (isDraggingNode) return
     const groups = groupByProject(nodesRef)
     for (const members of groups.values()) {
       if (members.length < 2) continue
-      let cx = 0, cy = 0
-      for (const n of members) { cx += n.x; cy += n.y }
-      cx /= members.length
-      cy /= members.length
+      // Same reasoning as forceClusterAnchor: exclude pinned members from
+      // the centroid itself, not just from receiving the force, or dragging
+      // one member drags the whole project cluster's anchor point with it.
+      let cx = 0, cy = 0, count = 0
+      for (const n of members) {
+        if (n.fx != null && n.fy != null) continue
+        cx += n.x; cy += n.y; count++
+      }
+      if (count === 0) continue
+      cx /= count
+      cy /= count
       for (const n of members) {
         if (n.fx != null && n.fy != null) continue
         n.vx += (cx - n.x) * strength * alpha
@@ -233,51 +258,34 @@ function forceProjectCluster(strength) {
   return force
 }
 
-// Expands a convex hull outward by `pad` along each vertex's normal
-// (relative to the hull centroid) so the outline clears the node hexes
-// instead of clipping through their centers.
-function padHull(hull, pad) {
-  let cx = 0, cy = 0
-  for (const [x, y] of hull) { cx += x; cy += y }
-  cx /= hull.length
-  cy /= hull.length
-  return hull.map(([x, y]) => {
-    const dx = x - cx, dy = y - cy
-    const d = Math.hypot(dx, dy) || 1
-    return [x + (dx / d) * pad, y + (dy / d) * pad]
-  })
-}
-
 // Draws a soft, rounded blob behind a project's nodes — a closed Catmull-Rom-
 // style spline through the padded hull so corners look organic rather than
-// polygonal.
+// polygonal. Geometry itself (which outline to draw) comes from
+// `clusterOutline` (src/graph/blob.js) so it's unit-testable without canvas.
 function drawClusterBlob(ctx, members, hue) {
   const pts = members.map(n => [n.x, n.y])
-  let hull = pts.length >= 3 ? d3.polygonHull(pts) : pts
-  if (!hull || hull.length === 0) return
-  if (hull.length < 3) {
-    // 1-2 nodes: no real hull: draw a soft circle/capsule around them instead.
-    const pad = 34
-    ctx.beginPath()
-    if (hull.length === 1) {
-      ctx.arc(hull[0][0], hull[0][1], nodeRadius(members[0]) + pad, 0, Math.PI * 2)
-    } else {
-      const [[ax, ay], [bx, by]] = hull
-      const r = Math.max(nodeRadius(members[0]), nodeRadius(members[1])) + pad
-      const dx = bx - ax, dy = by - ay
-      const len = Math.hypot(dx, dy) || 1
-      const nx = -dy / len, ny = dx / len
-      ctx.moveTo(ax + nx * r, ay + ny * r)
-      ctx.lineTo(bx + nx * r, by + ny * r)
-      ctx.arc(bx, by, r, Math.atan2(ny, nx), Math.atan2(-ny, -nx), true)
-      ctx.lineTo(ax - nx * r, ay - ny * r)
-      ctx.arc(ax, ay, r, Math.atan2(-ny, -nx), Math.atan2(ny, nx), true)
-    }
-    ctx.closePath()
+  const outline = clusterOutline(pts, i => nodeRadius(members[i]))
+  if (!outline) return
+
+  ctx.beginPath()
+  if (outline.kind === 'circle') {
+    const [cx, cy] = outline.center
+    ctx.arc(cx, cy, outline.radius, 0, Math.PI * 2)
+  } else if (outline.kind === 'capsule') {
+    const [ax, ay] = outline.a
+    const [bx, by] = outline.b
+    const r = outline.radius
+    const dx = bx - ax, dy = by - ay
+    const len = Math.hypot(dx, dy) || 1
+    const nx = -dy / len, ny = dx / len
+    ctx.moveTo(ax + nx * r, ay + ny * r)
+    ctx.lineTo(bx + nx * r, by + ny * r)
+    ctx.arc(bx, by, r, Math.atan2(ny, nx), Math.atan2(-ny, -nx), true)
+    ctx.lineTo(ax - nx * r, ay - ny * r)
+    ctx.arc(ax, ay, r, Math.atan2(-ny, -nx), Math.atan2(ny, nx), true)
   } else {
-    const padded = padHull(hull, 30)
+    const padded = outline.points
     const n = padded.length
-    ctx.beginPath()
     for (let i = 0; i < n; i++) {
       const p0 = padded[(i - 1 + n) % n]
       const p1 = padded[i]
@@ -290,8 +298,8 @@ function drawClusterBlob(ctx, members, hue) {
       if (i === 0) ctx.moveTo(p1[0], p1[1])
       ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2[0], p2[1])
     }
-    ctx.closePath()
   }
+  ctx.closePath()
   ctx.fillStyle = `hsla(${hue}, 65%, 55%, 0.12)`
   ctx.strokeStyle = `hsla(${hue}, 65%, 55%, 0.4)`
   ctx.lineWidth = 1.5
@@ -687,15 +695,38 @@ onMounted(() => {
   const dragBehavior = d3.drag()
     .filter(() => !panMode.value)
     .subject(event => {
-      const [mx, my] = toWorld(event.x, event.y)
+      // `event.x`/`event.y` here are relative to d3.drag's container (the
+      // canvas's parentNode by default), not the canvas itself -- every
+      // other hit-test in this file uses the raw event's canvas-relative
+      // `offsetX`/`offsetY` instead, so use the same via `sourceEvent`.
+      const [mx, my] = toWorld(event.sourceEvent.offsetX, event.sourceEvent.offsetY)
       return hitTestNode(mx, my)
     })
     .on('start', event => {
       if (!event.subject) return
+      isDraggingNode = true
       event.subject.__wasPinned = event.subject.fx != null
       event.subject.fx = event.subject.x
       event.subject.fy = event.subject.y
       event.subject.__dragStartScreen = [event.x, event.y]
+      // `forceLink` has no distance cap (unlike charge's `distanceMax`), so
+      // in a connected graph, dragging one node far enough visibly drags the
+      // ENTIRE connected component along with it, edge by edge, well beyond
+      // just the directly-linked neighbors -- confirmed by direct testing:
+      // moving one degree-6 node 400px moved 36 of 39 other nodes, some by
+      // 400+px, within a couple of ticks. Freezing clusterAnchor/
+      // projectCluster during a drag (see isDraggingNode elsewhere) doesn't
+      // touch this, since it's forceLink itself doing it. Temporarily pin
+      // every other unpinned node in place for the drag's duration so only
+      // the dragged node visibly moves; they're released on drag end and
+      // ease into their new equilibrium then, once, instead of continuously
+      // jostling throughout the drag.
+      for (const n of nodes) {
+        if (n === event.subject || n.fx != null) continue
+        n.__tempPinned = true
+        n.fx = n.x
+        n.fy = n.y
+      }
       // Lower alphaTarget than d3's usual 0.3 default — 0.3 keeps the whole
       // simulation "hot" enough that neighboring nodes visibly jostle around
       // the dragged node every tick, which reads as clunky. 0.08 still lets
@@ -711,7 +742,14 @@ onMounted(() => {
     })
     .on('end', event => {
       if (!event.subject) return
+      isDraggingNode = false
       sim?.alphaTarget(0)
+      for (const n of nodes) {
+        if (!n.__tempPinned) continue
+        delete n.__tempPinned
+        n.fx = null
+        n.fy = null
+      }
       const [sx, sy] = event.subject.__dragStartScreen || [event.x, event.y]
       const moved = Math.hypot(event.x - sx, event.y - sy) > 3
       const wasPinned = event.subject.__wasPinned
