@@ -3,6 +3,7 @@ import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
 import * as d3 from 'd3'
 import { useMemoriesStore } from '../../stores/memories.js'
 import { useGraphStore } from '../../stores/graph.js'
+import { clusterOutline } from '../../graph/blob.js'
 
 const emit = defineEmits(['node-click', 'node-hover', 'edge-hover'])
 const memories = useMemoriesStore()
@@ -257,51 +258,34 @@ function forceProjectCluster(strength) {
   return force
 }
 
-// Expands a convex hull outward by `pad` along each vertex's normal
-// (relative to the hull centroid) so the outline clears the node hexes
-// instead of clipping through their centers.
-function padHull(hull, pad) {
-  let cx = 0, cy = 0
-  for (const [x, y] of hull) { cx += x; cy += y }
-  cx /= hull.length
-  cy /= hull.length
-  return hull.map(([x, y]) => {
-    const dx = x - cx, dy = y - cy
-    const d = Math.hypot(dx, dy) || 1
-    return [x + (dx / d) * pad, y + (dy / d) * pad]
-  })
-}
-
 // Draws a soft, rounded blob behind a project's nodes — a closed Catmull-Rom-
 // style spline through the padded hull so corners look organic rather than
-// polygonal.
+// polygonal. Geometry itself (which outline to draw) comes from
+// `clusterOutline` (src/graph/blob.js) so it's unit-testable without canvas.
 function drawClusterBlob(ctx, members, hue) {
   const pts = members.map(n => [n.x, n.y])
-  let hull = pts.length >= 3 ? d3.polygonHull(pts) : pts
-  if (!hull || hull.length === 0) return
-  if (hull.length < 3) {
-    // 1-2 nodes: no real hull: draw a soft circle/capsule around them instead.
-    const pad = 34
-    ctx.beginPath()
-    if (hull.length === 1) {
-      ctx.arc(hull[0][0], hull[0][1], nodeRadius(members[0]) + pad, 0, Math.PI * 2)
-    } else {
-      const [[ax, ay], [bx, by]] = hull
-      const r = Math.max(nodeRadius(members[0]), nodeRadius(members[1])) + pad
-      const dx = bx - ax, dy = by - ay
-      const len = Math.hypot(dx, dy) || 1
-      const nx = -dy / len, ny = dx / len
-      ctx.moveTo(ax + nx * r, ay + ny * r)
-      ctx.lineTo(bx + nx * r, by + ny * r)
-      ctx.arc(bx, by, r, Math.atan2(ny, nx), Math.atan2(-ny, -nx), true)
-      ctx.lineTo(ax - nx * r, ay - ny * r)
-      ctx.arc(ax, ay, r, Math.atan2(-ny, -nx), Math.atan2(ny, nx), true)
-    }
-    ctx.closePath()
+  const outline = clusterOutline(pts, i => nodeRadius(members[i]))
+  if (!outline) return
+
+  ctx.beginPath()
+  if (outline.kind === 'circle') {
+    const [cx, cy] = outline.center
+    ctx.arc(cx, cy, outline.radius, 0, Math.PI * 2)
+  } else if (outline.kind === 'capsule') {
+    const [ax, ay] = outline.a
+    const [bx, by] = outline.b
+    const r = outline.radius
+    const dx = bx - ax, dy = by - ay
+    const len = Math.hypot(dx, dy) || 1
+    const nx = -dy / len, ny = dx / len
+    ctx.moveTo(ax + nx * r, ay + ny * r)
+    ctx.lineTo(bx + nx * r, by + ny * r)
+    ctx.arc(bx, by, r, Math.atan2(ny, nx), Math.atan2(-ny, -nx), true)
+    ctx.lineTo(ax - nx * r, ay - ny * r)
+    ctx.arc(ax, ay, r, Math.atan2(-ny, -nx), Math.atan2(ny, nx), true)
   } else {
-    const padded = padHull(hull, 30)
+    const padded = outline.points
     const n = padded.length
-    ctx.beginPath()
     for (let i = 0; i < n; i++) {
       const p0 = padded[(i - 1 + n) % n]
       const p1 = padded[i]
@@ -314,8 +298,8 @@ function drawClusterBlob(ctx, members, hue) {
       if (i === 0) ctx.moveTo(p1[0], p1[1])
       ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2[0], p2[1])
     }
-    ctx.closePath()
   }
+  ctx.closePath()
   ctx.fillStyle = `hsla(${hue}, 65%, 55%, 0.12)`
   ctx.strokeStyle = `hsla(${hue}, 65%, 55%, 0.4)`
   ctx.lineWidth = 1.5
