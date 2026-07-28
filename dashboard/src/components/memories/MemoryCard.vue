@@ -58,7 +58,7 @@ const displayTags = computed(() => {
     </div>
     <!-- Row 2: snippet -->
     <p class="mb-2"
-      style="font-size:12px; color:var(--hm-text-secondary); overflow:hidden; display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical">
+      style="font-size:12px; line-height:1.5; color:var(--hm-text-secondary); overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical">
       {{ mem.content }}
     </p>
     <!-- Row 3: tags + date -->
@@ -76,16 +76,18 @@ const displayTags = computed(() => {
 
 <style scoped>
 .memory-card {
-  padding: 14px 16px;
+  padding: 12px 13px;
   cursor: pointer;
-  border-bottom: 0.5px solid var(--hm-border-subtle);
-  background: transparent;
-  transition: background 0.1s;
+  border: 0.5px solid var(--hm-border-subtle);
+  border-radius: 6px;
+  background: var(--hm-bg-surface);
+  transition: background 0.1s, border-color 0.1s, box-shadow 0.1s;
 }
 
 .memory-card:hover,
 .memory-card:focus-visible {
   background: var(--hm-bg-elevated);
+  border-color: var(--hm-border-default);
   outline: none;
 }
 
@@ -96,22 +98,26 @@ const displayTags = computed(() => {
 
 .memory-card--selected-personal {
   background: var(--hm-personal-bg);
+  border-color: var(--hm-personal-dim);
   box-shadow: inset 2px 0 0 var(--hm-personal);
 }
 
 .memory-card--selected-workspace {
   background: var(--hm-workspace-bg);
+  border-color: var(--hm-workspace-dim);
   box-shadow: inset 2px 0 0 var(--hm-workspace);
 }
 
 .memory-card--selected-personal:hover,
 .memory-card--selected-personal:focus-visible {
   background: var(--hm-personal-bg);
+  border-color: var(--hm-personal-dim);
 }
 
 .memory-card--selected-workspace:hover,
 .memory-card--selected-workspace:focus-visible {
   background: var(--hm-workspace-bg);
+  border-color: var(--hm-workspace-dim);
 }
 
 .draft-label {

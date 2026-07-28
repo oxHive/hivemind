@@ -6,6 +6,7 @@ import { useGraphStore } from '../../stores/graph.js'
 import { useUpdateStore } from '../../stores/update.js'
 import StatusRow from './StatusRow.vue'
 import oxhiveMark from '../../assets/oxhive-mark.png'
+import { BASE } from '../../api/client.js'
 
 const ui = useUiStore()
 const feedback = useFeedbackStore()
@@ -39,14 +40,9 @@ const statusDot = computed(() => {
   return 'green'
 })
 
-const statusText = computed(() => {
-  if (ui.serverStatus === 'unreachable') return 'unreachable'
-  if (ui.serverStatus === 'syncing') return 'syncing…'
-  if (ui.serverStatus === 'sync_failed') return 'sync failed'
-  return 'running'
-})
-
 const memoryCount = computed(() => ui.serverInfo?.memory_count ?? ui.serverInfo?.memoryCount ?? '—')
+
+const serverAddress = computed(() => (BASE || 'http://localhost:3456').replace(/^https?:\/\//, ''))
 
 const syncInfo = computed(() => ui.syncInfo)
 
@@ -67,6 +63,9 @@ const syncDot = computed(() => {
   const diffSec = Math.floor(Date.now() / 1000) - last
   return diffSec > 600 ? 'amber' : 'green'
 })
+
+const conflictCount = computed(() => syncInfo.value?.conflict_count ?? 0)
+const conflictDot = computed(() => (conflictCount.value > 0 ? 'amber' : 'green'))
 </script>
 
 <template>
@@ -126,14 +125,9 @@ const syncDot = computed(() => {
       </div>
       <div class="px-5 pb-5 pt-4"
         style="border-top:0.5px solid var(--hm-border-subtle)">
-        <StatusRow v-if="syncStatusText" :dot="syncDot" :text="syncStatusText" />
-        <StatusRow
-          v-if="(syncInfo?.conflict_count ?? 0) > 0"
-          dot="amber"
-          :text="`${syncInfo.conflict_count} conflict${syncInfo.conflict_count > 1 ? 's' : ''} need review`"
-          :class="{ 'mt-1': syncStatusText }"
-        />
-        <StatusRow :dot="statusDot" :text="statusText" :class="{ 'mt-1': syncStatusText || (syncInfo?.conflict_count ?? 0) > 0 }" />
+        <StatusRow :dot="statusDot" k="server" :v="serverAddress" />
+        <StatusRow v-if="syncStatusText" :dot="syncDot" pulse k="sync" :v="syncStatusText" class="mt-1" />
+        <StatusRow :dot="conflictDot" k="conflicts" :v="String(conflictCount)" class="mt-1" />
         <StatusRow dot="gray" :text="`${memoryCount} memories`" class="mt-1" />
       </div>
     </div>
