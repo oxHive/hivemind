@@ -21,6 +21,9 @@ matrix-test-send:
 
 up:
   just run up
+  
+headless:
+  just run "up --headless"
 
 status:
   just run status
