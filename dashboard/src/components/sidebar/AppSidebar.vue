@@ -18,11 +18,11 @@ const feedbackCount = computed(() =>
 )
 
 const navItems = [
-  { id: 'analytics', label: 'Analytics' },
-  { id: 'memories', label: 'Memories' },
-  { id: 'graph', label: 'Graph' },
-  { id: 'feedback', label: 'Feedback' },
-  { id: 'settings', label: 'Settings' },
+  { id: 'analytics', label: 'Analytics', icon: 'analytics' },
+  { id: 'memories', label: 'Memories', icon: 'memories' },
+  { id: 'graph', label: 'Graph', icon: 'graph' },
+  { id: 'feedback', label: 'Feedback', icon: 'feedback' },
+  { id: 'settings', label: 'Settings', icon: 'settings' },
 ]
 
 // Pending connection suggestions: badged on the two pages that surface them
@@ -97,10 +97,36 @@ const conflictDot = computed(() => (conflictCount.value > 0 ? 'amber' : 'green')
           :class="{ 'nav-item--active': ui.activeView === item.id }"
           :aria-current="ui.activeView === item.id ? 'page' : undefined"
         >
-          <span>{{ item.label }}</span>
+          <span class="nav-item__left">
+            <svg class="nav-item__icon" width="16" height="16" :viewBox="item.icon === 'settings' ? '0 0 24 24' : '0 0 16 16'" fill="none" aria-hidden="true">
+              <template v-if="item.icon === 'analytics'">
+                <path d="M2.5 13.5V8.5M8 13.5V4.5M13.5 13.5V6.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+              </template>
+              <template v-else-if="item.icon === 'memories'">
+                <ellipse cx="8" cy="3.6" rx="5" ry="2.1" stroke="currentColor" stroke-width="1.3" />
+                <path d="M3 3.6V8c0 1.16 2.24 2.1 5 2.1s5-.94 5-2.1V3.6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+                <path d="M3 8v4.4c0 1.16 2.24 2.1 5 2.1s5-.94 5-2.1V8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+              </template>
+              <template v-else-if="item.icon === 'graph'">
+                <circle cx="11.5" cy="3.5" r="1.7" stroke="currentColor" stroke-width="1.3" />
+                <circle cx="11.5" cy="12.5" r="1.7" stroke="currentColor" stroke-width="1.3" />
+                <circle cx="4" cy="8" r="1.7" stroke="currentColor" stroke-width="1.3" />
+                <path d="M5.5 7.1l4.4-2.7M5.5 8.9l4.4 2.7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+              </template>
+              <template v-else-if="item.icon === 'feedback'">
+                <path d="M3.5 2v12" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+                <path d="M3.5 2.8h7.3c.8 0 1.2.9.7 1.5l-1.8 2.2 1.8 2.2c.5.6.1 1.5-.7 1.5H3.5" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" />
+              </template>
+              <template v-else-if="item.icon === 'settings'">
+                <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" stroke="currentColor" stroke-width="1.8" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+                  stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+              </template>
+            </svg>
+            <span>{{ item.label }}</span>
+          </span>
           <span v-if="navBadgeCount(item.id) > 0"
-            class="font-mono rounded-sm px-1.5 py-0.5"
-            style="font-size:10px; background:var(--hm-warning-bg); color:var(--hm-warning)">
+            class="nav-item__badge font-mono">
             {{ navBadgeCount(item.id) }}
           </span>
         </button>
@@ -142,18 +168,32 @@ const conflictDot = computed(() => (conflictCount.value > 0 ? 'amber' : 'green')
 
 <style scoped>
 .nav-item {
-  width: 100%;
+  width: calc(100% - 16px);
+  margin: 1px 8px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 20px;
+  padding: 9px 12px;
   font-size: 13px;
   text-align: left;
   color: var(--hm-text-secondary);
   background: transparent;
   border: none;
+  border-radius: 8px;
   cursor: pointer;
   transition: background 0.1s, color 0.1s;
+}
+
+.nav-item__left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.nav-item__icon {
+  flex-shrink: 0;
+  color: var(--hm-text-tertiary);
+  transition: color 0.1s;
 }
 
 .nav-item:hover,
@@ -161,6 +201,11 @@ const conflictDot = computed(() => (conflictCount.value > 0 ? 'amber' : 'green')
   background: var(--hm-bg-elevated);
   color: var(--hm-text-primary);
   outline: none;
+}
+
+.nav-item:hover .nav-item__icon,
+.nav-item:focus-visible .nav-item__icon {
+  color: var(--hm-text-primary);
 }
 
 .nav-item:focus-visible {
@@ -172,7 +217,24 @@ const conflictDot = computed(() => (conflictCount.value > 0 ? 'amber' : 'green')
   background: var(--hm-bg-elevated);
   color: var(--hm-text-primary);
   font-weight: 500;
-  box-shadow: inset 2px 0 0 var(--hm-accent);
+}
+
+.nav-item--active .nav-item__icon {
+  color: var(--hm-text-primary);
+}
+
+.nav-item__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1;
+  background: var(--hm-warning-bg);
+  color: var(--hm-warning);
 }
 
 .footer {
