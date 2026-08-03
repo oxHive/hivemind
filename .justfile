@@ -23,7 +23,7 @@ up:
   just run up
   
 headless:
-  just run "up --headless"
+  cargo run -- up --headless
 
 status:
   just run status
