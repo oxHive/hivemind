@@ -21,6 +21,9 @@ matrix-test-send:
 
 up:
   just run up
+  
+headless:
+  cargo run -- up --headless
 
 status:
   just run status

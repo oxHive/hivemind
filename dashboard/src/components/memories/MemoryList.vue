@@ -62,7 +62,7 @@ const filters = [
     </div>
 
     <!-- List -->
-    <div class="flex-1 overflow-y-auto">
+    <div class="flex-1 overflow-y-auto flex flex-col gap-2 p-2">
       <template v-if="memories.loading">
         <SkeletonCard v-for="i in 5" :key="i" />
       </template>
