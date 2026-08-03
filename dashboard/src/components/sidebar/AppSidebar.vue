@@ -139,12 +139,12 @@ const conflictDot = computed(() => (conflictCount.value > 0 ? 'amber' : 'green')
         <button
           @click="update.changelogOpen = true"
           class="nav-item"
-          style="border-radius:6px"
+          style="border-radius:6px; flex-wrap:nowrap"
         >
-          <span>Update available</span>
+          <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0">Update available</span>
           <span
             class="font-mono rounded-sm px-1.5 py-0.5"
-            style="font-size:10px; background:var(--hm-warning-bg); color:var(--hm-warning)">
+            style="font-size:10px; background:var(--hm-warning-bg); color:var(--hm-warning); white-space:nowrap; flex-shrink:0">
             v{{ update.latestVersion }}
           </span>
         </button>
