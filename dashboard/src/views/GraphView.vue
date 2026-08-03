@@ -50,33 +50,37 @@ const tooltipText = computed(() => {
 </script>
 
 <template>
-  <div class="flex flex-1 overflow-hidden">
-    <!-- Left: canvas area -->
-    <div class="flex flex-col flex-1 overflow-hidden">
-      <GraphToolbar />
-      <PendingBar />
-      <div ref="canvasWrap" class="flex-1 relative overflow-hidden" @mousemove="onCanvasMouseMove">
-        <EmptyState
-          v-if="!memories.all.length"
-          message="No connections to display."
-          hint="Store some memories first; edges appear as they share tags or get linked."
-        />
-        <GraphCanvas v-else @node-hover="hoveredNode = $event" @edge-hover="hoveredEdge = $event" />
+  <div class="flex flex-col flex-1 overflow-hidden">
+    <!-- Top bar spans the full graph view, above both the canvas and its detail sidebar -->
+    <GraphToolbar />
+    <PendingBar />
 
-        <MiniCard
-          v-if="hoveredNode && hoveredMemory"
-          :node="hoveredMemory"
-          :x="wrapX"
-          :y="wrapY"
-          :connection-count="hoveredConnectionCount"
-          :bounds="wrapBounds"
-        />
+    <div class="flex flex-1 overflow-hidden">
+      <!-- Left: canvas area -->
+      <div class="flex flex-col flex-1 overflow-hidden">
+        <div ref="canvasWrap" class="flex-1 relative overflow-hidden" @mousemove="onCanvasMouseMove">
+          <EmptyState
+            v-if="!memories.all.length"
+            message="No connections to display."
+            hint="Store some memories first; edges appear as they share tags or get linked."
+          />
+          <GraphCanvas v-else @node-hover="hoveredNode = $event" @edge-hover="hoveredEdge = $event" />
+
+          <MiniCard
+            v-if="hoveredNode && hoveredMemory"
+            :node="hoveredMemory"
+            :x="wrapX"
+            :y="wrapY"
+            :connection-count="hoveredConnectionCount"
+            :bounds="wrapBounds"
+          />
+        </div>
+        <Legend />
       </div>
-      <Legend />
-    </div>
 
-    <!-- Right: node detail, unless the global suggest panel (App.vue) is open -->
-    <DetailPanel v-if="!suggest.panelOpen" />
+      <!-- Right: node detail, unless the global suggest panel (App.vue) is open -->
+      <DetailPanel v-if="!suggest.panelOpen" />
+    </div>
 
     <Tooltip :visible="!hoveredNode && !!hoveredEdge" :text="tooltipText" :x="mouseX" :y="mouseY" />
   </div>
