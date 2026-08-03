@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
-import { PhDownloadSimple, PhFlag } from '@phosphor-icons/vue'
+import { PhDownloadSimple, PhFlag, PhShareNetwork } from '@phosphor-icons/vue'
 import { useMemoriesStore } from '../../stores/memories.js'
 import { useUiStore } from '../../stores/ui.js'
 import { useGraphStore } from '../../stores/graph.js'
@@ -212,6 +212,12 @@ async function handleDelete() {
   ui.showToast('Memory deleted')
 }
 
+function openInGraph() {
+  if (!memories.selected) return
+  graph.selectedNodeId = memories.selected.id
+  ui.requestActiveView('graph')
+}
+
 function handleReset() {
   showResetModal.value = false
   memories.resetDraft()
@@ -247,6 +253,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
           <CopyIdButton v-if="!memories.creatingNew" :id="memories.selected.id" />
         </span>
         <div v-if="memories.selected" class="flex gap-1">
+          <button v-if="!memories.creatingNew" class="hm-btn hm-btn-ghost hm-btn-sm" title="View in graph" @click="openInGraph">
+            <PhShareNetwork :size="14" /> Go to graph
+          </button>
           <button class="hm-btn hm-btn-ghost hm-btn-sm"
             :disabled="!canDownload"
             :title="memories.dirty ? 'Save changes before downloading' : 'Download as Markdown'"
