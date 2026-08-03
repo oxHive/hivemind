@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue'
-import { PhX, PhLinkSimple, PhFlag } from '@phosphor-icons/vue'
+import { PhX, PhArrowSquareOut, PhFlag } from '@phosphor-icons/vue'
 import { useGraphStore } from '../../stores/graph.js'
 import { useMemoriesStore } from '../../stores/memories.js'
 import { useUiStore } from '../../stores/ui.js'
@@ -93,22 +93,24 @@ async function flag(signal) {
         </template>
       </div>
 
-      <div v-if="node" class="flex items-center gap-2 px-5"
-        style="height:52px; border-top:0.5px solid var(--hm-border-subtle)">
-        <button class="hm-btn hm-btn-sm connect-btn" @click="openInMemories">
-          <PhLinkSimple :size="13" weight="bold" /> Connect
+      <div v-if="node" class="flex flex-col gap-2 px-5 py-3"
+        style="border-top:0.5px solid var(--hm-border-subtle)">
+        <button class="hm-btn hm-btn-sm connect-btn w-full justify-center" @click="openInMemories">
+          <PhArrowSquareOut :size="13" weight="bold" /> Go to memory detail
         </button>
-        <CopyButton :command="`/memory-edit ${node.id}`" label="/memory-edit" />
-        <div class="relative ml-auto">
-          <button class="hm-btn hm-btn-ghost hm-btn-sm" title="Flag for review"
-            @click="flagOpen = !flagOpen" @keydown.esc="flagOpen = false">
-            <PhFlag :size="14" />
-          </button>
-          <div v-if="flagOpen" class="fixed inset-0" style="z-index:9" @click="flagOpen = false"></div>
-          <div v-if="flagOpen" class="absolute right-0 bottom-full mb-1 rounded-md py-1"
-            style="background:var(--hm-bg-overlay); border:0.5px solid var(--hm-border-default); z-index:10; min-width:110px">
-            <button v-for="r in ['incorrect','outdated','duplicate','other']" :key="r"
-              class="flag-option block w-full text-left px-3 py-1.5" @click="flag(r)">{{ r }}</button>
+        <div class="flex items-center gap-2">
+          <CopyButton :command="`/memory-edit ${node.id}`" label="/memory-edit" />
+          <div class="relative ml-auto">
+            <button class="hm-btn hm-btn-ghost hm-btn-sm" title="Flag for review"
+              @click="flagOpen = !flagOpen" @keydown.esc="flagOpen = false">
+              <PhFlag :size="14" />
+            </button>
+            <div v-if="flagOpen" class="fixed inset-0" style="z-index:9" @click="flagOpen = false"></div>
+            <div v-if="flagOpen" class="absolute right-0 bottom-full mb-1 rounded-md py-1"
+              style="background:var(--hm-bg-overlay); border:0.5px solid var(--hm-border-default); z-index:10; min-width:110px">
+              <button v-for="r in ['incorrect','outdated','duplicate','other']" :key="r"
+                class="flag-option block w-full text-left px-3 py-1.5" @click="flag(r)">{{ r }}</button>
+            </div>
           </div>
         </div>
       </div>

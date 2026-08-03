@@ -224,6 +224,19 @@ function nodeLabel(node) {
   return { isDraft: memories.isDraft(node.id), text: node.title }
 }
 
+// Truncates at the last word boundary at or before `max` instead of
+// slicing mid-word — a hard character cut reads as a cut-off word
+// ("preferen…"), a word-boundary cut reads as an intentionally shortened
+// phrase. Falls back to a hard cut only if there's no space to break on
+// (e.g. one long unbroken token).
+function truncateLabel(text, max) {
+  if (text.length <= max) return text
+  const slice = text.slice(0, max)
+  const lastSpace = slice.lastIndexOf(' ')
+  const cut = lastSpace > max * 0.4 ? slice.slice(0, lastSpace) : slice
+  return cut + '…'
+}
+
 // Stable pastel color per project name — same string always hashes to the
 // same hue so a project's cluster color doesn't shuffle between renders.
 const projectColorCache = new Map()
@@ -453,7 +466,7 @@ function draw() {
     // the camera is zoomed out far enough that text would be illegible.
     if (showNodeLabels && ((graph.zoom >= 2 && isMatch && isNeighbor) || isSelected || node.id === activeId)) {
       const label = nodeLabel(node)
-      const text = label.text.slice(0, 20)
+      const text = truncateLabel(label.text, 20)
       const draftPrefix = label.isDraft ? '[DRAFT] ' : ''
       ctx.font = '10px "IBM Plex Mono", monospace'
       ctx.textAlign = 'left'
