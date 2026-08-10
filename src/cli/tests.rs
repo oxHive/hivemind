@@ -483,6 +483,7 @@ async fn build_status_data_matches_render_status_text() {
         api_url: "http://127.0.0.1:3456".into(),
         cors_origin: "http://127.0.0.1:3457".into(),
         sync: SyncSettings::default(),
+        org_sync: None,
         update: crate::config::UpdateSettings::default(),
         agent: crate::config::AgentSettings::default(),
         guard_predefined_namespaces: true,
