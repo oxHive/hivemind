@@ -54,6 +54,11 @@ fn systemd_unit_content(description: &str, exe: &Path, exec_args: &[&str]) -> St
         exec.push(' ');
         exec.push_str(arg);
     }
+    // Carry over the installing shell's PATH — systemd user services start
+    // with a bare PATH that omits ~/.cargo/bin, ~/.local/bin, etc., which
+    // breaks self-update (it shells out to `cargo binstall`) and any other
+    // subprocess the daemon spawns by name.
+    let path = std::env::var("PATH").unwrap_or_else(|_| "/usr/local/bin:/usr/bin:/bin".into());
     format!(
         "[Unit]\n\
          Description={description}\n\
@@ -61,6 +66,7 @@ fn systemd_unit_content(description: &str, exe: &Path, exec_args: &[&str]) -> St
          \n\
          [Service]\n\
          Type=simple\n\
+         Environment=PATH={path}\n\
          ExecStart={exec}\n\
          Restart=on-failure\n\
          RestartSec=5\n\
