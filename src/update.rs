@@ -210,9 +210,17 @@ pub async fn run_update(state: SharedUpdateState, events: Events) {
 }
 
 async fn do_update() -> Result<()> {
+    // Resolved before run_binstall(), not after: cargo-binstall replaces this
+    // binary's path via an atomic rename, which unlinks the running
+    // process's original inode. Post-replace, /proc/self/exe (what
+    // std::env::current_exe reads) resolves to "<path> (deleted)" — a path
+    // that doesn't exist, so exec() on it fails with ENOENT. Resolving here
+    // captures the plain path, which still resolves correctly to the new
+    // binary once the rename lands.
+    let exe = std::env::current_exe().context("resolving current executable path")?;
     ensure_binstall_available().await?;
     run_binstall().await?;
-    restart()
+    restart(&exe)
 }
 
 async fn ensure_binstall_available() -> Result<()> {
@@ -254,16 +262,15 @@ async fn run_binstall() -> Result<()> {
 /// running under systemd/launchd or a foreground terminal. Never returns on
 /// success — only returns (as an `Err`) if `exec()` itself fails.
 #[cfg(unix)]
-fn restart() -> Result<()> {
+fn restart(exe: &std::path::Path) -> Result<()> {
     use std::os::unix::process::CommandExt;
-    let exe = std::env::current_exe().context("resolving current executable path")?;
     let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
     let err = std::process::Command::new(exe).args(args).exec();
     Err(anyhow::anyhow!("exec() failed: {err}"))
 }
 
 #[cfg(not(unix))]
-fn restart() -> Result<()> {
+fn restart(_exe: &std::path::Path) -> Result<()> {
     anyhow::bail!(
         "binary updated, but automatic restart is only supported on Unix — \
          please restart hivemind manually to pick up the new version"
