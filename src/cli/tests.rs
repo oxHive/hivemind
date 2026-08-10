@@ -1073,3 +1073,16 @@ fn warn_if_not_initialized_config_but_no_clients_prints_hint() {
     unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
     unsafe { std::env::remove_var("HOME") };
 }
+
+#[test]
+fn global_config_template_parses_with_org_sync_disabled_by_default() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("config.toml");
+    std::fs::write(&path, crate::cli::init::GLOBAL_CONFIG).unwrap();
+    let settings = crate::config::load_server_settings(&path).unwrap();
+    assert_eq!(settings.org_sync, None, "template ships with org_sync disabled");
+    assert!(
+        crate::cli::init::GLOBAL_CONFIG.contains("[org_sync]"),
+        "template should document the org_sync block, even commented out"
+    );
+}
