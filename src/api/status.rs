@@ -32,12 +32,20 @@ pub(super) async fn server_status(
 
     let org = match &org_store {
         Some(org) => {
-            let org_last_synced_at = org
-                .get_meta("last_synced_at")
-                .await
-                .unwrap_or(None)
-                .and_then(|v| v.parse::<i64>().ok());
-            let org_conflict_count = org.pending_conflict_count().await.unwrap_or(0);
+            let org_last_synced_at = match org.get_meta("last_synced_at").await {
+                Ok(v) => v.and_then(|v| v.parse::<i64>().ok()),
+                Err(e) => {
+                    tracing::warn!("org store get_meta(last_synced_at) failed: {e:#}");
+                    None
+                }
+            };
+            let org_conflict_count = match org.pending_conflict_count().await {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!("org store pending_conflict_count failed: {e:#}");
+                    0
+                }
+            };
             json!({
                 "configured": true,
                 "enabled": org_sync.as_ref().is_some_and(|s| s.enabled),
