@@ -16,6 +16,8 @@ let rafId = null
 let nodes = []
 let links = []
 let panning = false
+let middlePanning = false
+let lastMid = [0, 0]
 
 const CAMERA_KEY = 'hivemind.graph.camera'
 
@@ -681,6 +683,47 @@ function handleMouseMove(e) {
   canvasEl.value.style.cursor = foundNode ? 'pointer' : 'default'
 }
 
+// Two-finger trackpad scroll fires as a plain (non-ctrl) wheel event —
+// d3.zoom would normally treat that as zoom, same as mouse-wheel. In pan
+// mode we want it to pan instead, so it's intercepted here and blocked from
+// reaching d3.zoom's own wheel handler via the filter below. A trackpad
+// pinch gesture still carries ctrlKey, so that's left alone to zoom.
+function handleWheel(e) {
+  if (!panMode.value || e.ctrlKey) return
+  e.preventDefault()
+  const newX = transform.x - e.deltaX
+  const newY = transform.y - e.deltaY
+  d3.select(canvasEl.value).call(zoomBehavior.transform, d3.zoomIdentity.translate(newX, newY).scale(transform.k))
+}
+
+// Middle-mouse-button drag pans regardless of pan-mode state — matches the
+// convention in most canvas/design tools where the scroll-wheel click is a
+// dedicated pan gesture independent of whichever tool is active.
+function handleMouseDown(e) {
+  if (e.button !== 1) return
+  e.preventDefault()
+  middlePanning = true
+  lastMid = [e.clientX, e.clientY]
+  canvasEl.value.style.cursor = 'grabbing'
+}
+
+function handleWindowMouseMove(e) {
+  if (!middlePanning) return
+  const dx = e.clientX - lastMid[0]
+  const dy = e.clientY - lastMid[1]
+  lastMid = [e.clientX, e.clientY]
+  const newX = transform.x + dx
+  const newY = transform.y + dy
+  d3.select(canvasEl.value).call(zoomBehavior.transform, d3.zoomIdentity.translate(newX, newY).scale(transform.k))
+}
+
+function handleWindowMouseUp(e) {
+  if (e.button !== 1 || !middlePanning) return
+  middlePanning = false
+  saveCamera()
+  canvasEl.value.style.cursor = panMode.value ? 'grab' : 'default'
+}
+
 let ro = null
 let themeObserver = null
 onMounted(() => {
@@ -700,6 +743,10 @@ onMounted(() => {
   })
   ro.observe(canvasEl.value.parentElement)
   window.addEventListener('keydown', handleKeydown)
+  canvasEl.value.addEventListener('wheel', handleWheel, { passive: false })
+  canvasEl.value.addEventListener('mousedown', handleMouseDown)
+  window.addEventListener('mousemove', handleWindowMouseMove)
+  window.addEventListener('mouseup', handleWindowMouseUp)
 
   // Theme flips restyle CSS variables — drop the cached canvas colors and
   // repaint (the canvas doesn't react to CSS changes on its own).
@@ -708,7 +755,13 @@ onMounted(() => {
 
   zoomBehavior = d3.zoom()
     .scaleExtent([0.2, 5])
-    .filter(event => event.type === 'wheel' || panMode.value)
+    // In pan mode, a plain wheel event (trackpad two-finger scroll) is
+    // handled by handleWheel instead — only a ctrlKey wheel (pinch-zoom)
+    // is left for d3.zoom to treat as zoom.
+    .filter(event => {
+      if (event.type === 'wheel') return !panMode.value || event.ctrlKey
+      return panMode.value
+    })
     .on('start', event => {
       if (panMode.value && event.sourceEvent?.type !== 'wheel') {
         panning = true
@@ -772,6 +825,10 @@ onUnmounted(() => {
   sim?.stop()
   if (rafId) cancelAnimationFrame(rafId)
   window.removeEventListener('keydown', handleKeydown)
+  canvasEl.value?.removeEventListener('wheel', handleWheel)
+  canvasEl.value?.removeEventListener('mousedown', handleMouseDown)
+  window.removeEventListener('mousemove', handleWindowMouseMove)
+  window.removeEventListener('mouseup', handleWindowMouseUp)
 })
 
 watch([nodeData, linkData], () => startSimulation())
