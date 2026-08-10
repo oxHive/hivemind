@@ -133,7 +133,13 @@ async fn run_server() -> Result<()> {
                     org_sync.sync_on_startup,
                     org_trigger.clone(),
                 ));
-                service = service.with_org_store(org_store);
+                service = if org_sync.sync_on_store {
+                    service
+                        .with_org_store(org_store)
+                        .with_org_sync_trigger(org_trigger)
+                } else {
+                    service.with_org_store(org_store)
+                };
             }
             Err(e) => {
                 tracing::warn!(

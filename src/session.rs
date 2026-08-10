@@ -203,29 +203,41 @@ pub async fn execute_session_start(
         .await;
     }
 
-    // A query loaded in either pass is not "skipped" overall, even if the
-    // other pass (a different store) didn't have it. Drop those first.
-    skipped.retain(|s| !loaded_queries.contains(&s.query));
+    // This merge/collapse pass only matters when a second (org) pass ran —
+    // with a single store, `loaded_queries` can't diverge from `skipped` in
+    // a way this logic would change, but gating it here makes the
+    // single-store path byte-for-byte identical to pre-org-layer behavior
+    // by construction, not by coincidence (e.g. duplicate recall query
+    // strings from project + `.hivemind.local.toml` recall lists, with no
+    // dedup, could otherwise reorder `skipped` even with only one store).
+    let skipped = if org_store.is_some() {
+        // A query loaded in either pass is not "skipped" overall, even if the
+        // other pass (a different store) didn't have it. Drop those first.
+        skipped.retain(|s| !loaded_queries.contains(&s.query));
 
-    // Remaining entries are genuinely unsatisfied in every store tried. A
-    // query can still appear once per pass (e.g. NotFound in primary,
-    // BudgetExceeded in org) — collapse to one entry per query, preferring
-    // BudgetExceeded (it means the memory exists somewhere, it just didn't
-    // fit) over NotFound (it exists nowhere).
-    let mut by_query: std::collections::HashMap<String, SkippedEntry> =
-        std::collections::HashMap::new();
-    for entry in skipped {
-        by_query
-            .entry(entry.query.clone())
-            .and_modify(|existing| {
-                if entry.reason == SkipReason::BudgetExceeded {
-                    existing.reason = SkipReason::BudgetExceeded;
-                }
-            })
-            .or_insert(entry);
-    }
-    let mut skipped: Vec<SkippedEntry> = by_query.into_values().collect();
-    skipped.sort_by(|a, b| a.query.cmp(&b.query));
+        // Remaining entries are genuinely unsatisfied in every store tried. A
+        // query can still appear once per pass (e.g. NotFound in primary,
+        // BudgetExceeded in org) — collapse to one entry per query, preferring
+        // BudgetExceeded (it means the memory exists somewhere, it just didn't
+        // fit) over NotFound (it exists nowhere).
+        let mut by_query: std::collections::HashMap<String, SkippedEntry> =
+            std::collections::HashMap::new();
+        for entry in skipped {
+            by_query
+                .entry(entry.query.clone())
+                .and_modify(|existing| {
+                    if entry.reason == SkipReason::BudgetExceeded {
+                        existing.reason = SkipReason::BudgetExceeded;
+                    }
+                })
+                .or_insert(entry);
+        }
+        let mut skipped: Vec<SkippedEntry> = by_query.into_values().collect();
+        skipped.sort_by(|a, b| a.query.cmp(&b.query));
+        skipped
+    } else {
+        skipped
+    };
 
     let memories_recalled = loaded.len();
     Ok(SessionStartResult {
@@ -506,5 +518,28 @@ mod tests {
         assert_eq!(r.loaded[0].entry.title, "pref a");
         assert_eq!(r.skipped.len(), 1);
         assert_eq!(r.skipped[0].reason, SkipReason::BudgetExceeded);
+    }
+
+    /// Fix 5 regression: the merge/collapse pass (retain + HashMap collapse +
+    /// sort) must be a structural no-op guarantee when `org_store` is `None`,
+    /// not merely an empirical one. A duplicate recall query (e.g. from
+    /// project + `.hivemind.local.toml` recall lists with no dedup) would be
+    /// silently collapsed into one `SkippedEntry` if the merge block ran
+    /// unconditionally — this asserts it does NOT run for the single-store
+    /// path: both duplicate skips survive, in original insertion order.
+    #[tokio::test]
+    async fn single_store_skipped_list_preserves_duplicates_and_order_when_no_org() {
+        let (s, _dir) = store_with(&[]).await;
+        let r = execute_session_start(&config(2000, vec!["dup", "dup"]), &s, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            r.skipped.len(),
+            2,
+            "no org_store: the merge/collapse pass must not run, so duplicate \
+             recall queries are not deduped away"
+        );
+        assert_eq!(r.skipped[0].query, "dup");
+        assert_eq!(r.skipped[1].query, "dup");
     }
 }

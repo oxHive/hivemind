@@ -164,6 +164,7 @@ pub struct HiveMind {
     store: Arc<SqliteStore>,
     org_store: Option<Arc<SqliteStore>>,
     sync_trigger: Option<Arc<tokio::sync::Notify>>,
+    org_sync_trigger: Option<Arc<tokio::sync::Notify>>,
     events: Option<tokio::sync::broadcast::Sender<serde_json::Value>>,
 }
 
@@ -174,6 +175,7 @@ impl HiveMind {
             store: Arc::new(store),
             org_store: None,
             sync_trigger: None,
+            org_sync_trigger: None,
             events: None,
         }
     }
@@ -183,6 +185,7 @@ impl HiveMind {
             store,
             org_store: None,
             sync_trigger: None,
+            org_sync_trigger: None,
             events: None,
         }
     }
@@ -192,6 +195,7 @@ impl HiveMind {
             store,
             org_store: None,
             sync_trigger: Some(trigger),
+            org_sync_trigger: None,
             events: None,
         }
     }
@@ -201,6 +205,14 @@ impl HiveMind {
     /// not configured" or "skip" rather than assuming this was called.
     pub fn with_org_store(mut self, org_store: Arc<SqliteStore>) -> Self {
         self.org_store = Some(org_store);
+        self
+    }
+
+    /// Lets an org-layer write wake the org sync loop immediately, the same
+    /// way `with_sync`'s trigger does for the primary store. Optional —
+    /// without it, org syncs still happen, just only on the interval timer.
+    pub fn with_org_sync_trigger(mut self, trigger: Arc<tokio::sync::Notify>) -> Self {
+        self.org_sync_trigger = Some(trigger);
         self
     }
 
@@ -221,9 +233,17 @@ impl HiveMind {
     /// dashboard-configurable `max_content_tokens` guardrail (default
     /// `DEFAULT_MAX_CONTENT_TOKENS`). Applied to both `memory_store` and
     /// `memory_update` so the limit holds on edits too, not just creation.
-    async fn check_content_size(&self, title: &str, content: &str) -> Result<(), ErrorData> {
+    /// Takes the target store explicitly so an org-layer write is checked
+    /// against the org store's own configured limit, not the primary
+    /// store's.
+    async fn check_content_size(
+        &self,
+        store: &SqliteStore,
+        title: &str,
+        content: &str,
+    ) -> Result<(), ErrorData> {
         let tokens = crate::budget::count_entry_tokens(title, content) as i64;
-        let limit = self.store.max_content_tokens().await;
+        let limit = store.max_content_tokens().await;
         if tokens > limit {
             return Err(ErrorData::invalid_params(
                 format!(
@@ -252,14 +272,16 @@ impl HiveMind {
         {
             return Ok(Some(&self.store));
         }
-        if let Some(org) = &self.org_store
-            && org
-                .recall_by_id(id)
-                .await
-                .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
-                .is_some()
-        {
-            return Ok(Some(org));
+        if let Some(org) = &self.org_store {
+            match org.recall_by_id(id).await {
+                Ok(Some(_)) => return Ok(Some(org)),
+                Ok(None) => {}
+                Err(e) => {
+                    tracing::warn!(
+                        "org store lookup failed for id {id}: {e:#}; treating as not found in org"
+                    );
+                }
+            }
         }
         Ok(None)
     }
@@ -278,8 +300,6 @@ impl HiveMind {
             .parse::<crate::model::MemoryType>()
             .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
 
-        self.check_content_size(&p.title, &p.content).await?;
-
         let target_store = if parsed_layer == crate::model::Layer::Org {
             self.org_store.as_ref().ok_or_else(|| {
                 ErrorData::invalid_params(
@@ -290,6 +310,9 @@ impl HiveMind {
         } else {
             &self.store
         };
+
+        self.check_content_size(target_store, &p.title, &p.content)
+            .await?;
 
         target_store
             .store(&crate::store::NewMemoryRow {
@@ -303,7 +326,12 @@ impl HiveMind {
             })
             .await
             .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
-        if let Some(t) = &self.sync_trigger {
+        let trigger = if parsed_layer == crate::model::Layer::Org {
+            &self.org_sync_trigger
+        } else {
+            &self.sync_trigger
+        };
+        if let Some(t) = trigger {
             t.notify_one();
         }
         self.notify_change();
@@ -323,7 +351,22 @@ impl HiveMind {
                 None => Ok(None),
             }
         } else if let Some(ref title) = p.title {
-            self.store.recall_by_title(title).await
+            match self.store.recall_by_title(title).await {
+                Ok(Some(e)) => Ok(Some(e)),
+                Ok(None) => match &self.org_store {
+                    Some(org) => match org.recall_by_title(title).await {
+                        Ok(found) => Ok(found),
+                        Err(e) => {
+                            tracing::warn!(
+                                "org store recall_by_title failed: {e:#}; treating as not found in org"
+                            );
+                            Ok(None)
+                        }
+                    },
+                    None => Ok(None),
+                },
+                Err(e) => Err(e),
+            }
         } else {
             return Err(ErrorData::invalid_params(
                 "provide either 'id' or 'title'",
@@ -348,6 +391,50 @@ impl HiveMind {
         }
     }
 
+    /// Runs the query/tags search logic against a single store. Factored out
+    /// of `do_memory_search` so it can be run once for the primary store and
+    /// once more for the org store, merging results with primary-first
+    /// priority.
+    async fn search_in(
+        &self,
+        store: &SqliteStore,
+        query: Option<&str>,
+        tags: Option<&[String]>,
+        limit: i64,
+    ) -> Result<Vec<crate::store::MemoryEntry>, ErrorData> {
+        match (query, tags) {
+            (Some(q), Some(tags)) => {
+                let expr = crate::tag_query::TagExpr::and_all(tags)
+                    .expect("tags checked non-empty above");
+                let candidates = store
+                    .search(q, 50)
+                    .await
+                    .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+                let mut filtered: Vec<_> = candidates
+                    .into_iter()
+                    .filter(|e| expr.eval(&e.tags))
+                    .collect();
+                filtered.truncate(limit as usize);
+                Ok(filtered)
+            }
+            (Some(q), None) => store
+                .search(q, limit)
+                .await
+                .map_err(|e| ErrorData::internal_error(e.to_string(), None)),
+            (None, Some(tags)) => {
+                let expr = crate::tag_query::TagExpr::and_all(tags)
+                    .expect("tags checked non-empty above");
+                let mut results = store
+                    .find_by_tag_expr(&expr)
+                    .await
+                    .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+                results.truncate(limit as usize);
+                Ok(results)
+            }
+            (None, None) => unreachable!("caller returns early before calling this"),
+        }
+    }
+
     pub async fn do_memory_search(
         &self,
         p: MemorySearchInput,
@@ -363,40 +450,26 @@ impl HiveMind {
             })));
         }
 
-        let hits = match (query, tags) {
-            (Some(q), Some(tags)) => {
-                let expr = crate::tag_query::TagExpr::and_all(&tags)
-                    .expect("tags checked non-empty above");
-                let candidates = self
-                    .store
-                    .search(q, 50)
-                    .await
-                    .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
-                let mut filtered: Vec<_> = candidates
-                    .into_iter()
-                    .filter(|e| expr.eval(&e.tags))
-                    .collect();
-                filtered.truncate(limit as usize);
-                filtered
-            }
-            (Some(q), None) => self
-                .store
-                .search(q, limit)
+        let mut hits = self
+            .search_in(&self.store, query, tags.as_deref(), limit)
+            .await?;
+
+        if hits.len() < limit as usize
+            && let Some(org) = &self.org_store
+        {
+            match self
+                .search_in(org, query, tags.as_deref(), limit - hits.len() as i64)
                 .await
-                .map_err(|e| ErrorData::internal_error(e.to_string(), None))?,
-            (None, Some(tags)) => {
-                let expr = crate::tag_query::TagExpr::and_all(&tags)
-                    .expect("tags checked non-empty above");
-                let mut results = self
-                    .store
-                    .find_by_tag_expr(&expr)
-                    .await
-                    .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
-                results.truncate(limit as usize);
-                results
+            {
+                Ok(org_hits) => hits.extend(org_hits),
+                Err(e) => {
+                    tracing::warn!(
+                        "org store search failed: {}; showing primary results only",
+                        e.message
+                    );
+                }
             }
-            (None, None) => unreachable!("handled by the early return above"),
-        };
+        }
 
         let results: Vec<_> = hits
             .iter()
@@ -464,7 +537,8 @@ impl HiveMind {
         let content = p.content.as_deref().unwrap_or(&current.content);
         let tags = p.tags.as_deref().unwrap_or(&current.tags);
 
-        self.check_content_size(title, content).await?;
+        self.check_content_size(owning_store, title, content)
+            .await?;
 
         let updated = owning_store
             .update(&p.id, title, content, tags)
@@ -511,11 +585,21 @@ impl HiveMind {
             .list_memories(50, 0)
             .await
             .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
-        let count = memories.len();
-        let body = if memories.is_empty() {
+        let org_memories = match &self.org_store {
+            Some(org) => match org.list_memories(50, 0).await {
+                Ok(m) => m,
+                Err(e) => {
+                    tracing::warn!("org store list_memories failed: {e:#}; omitting org memories");
+                    vec![]
+                }
+            },
+            None => vec![],
+        };
+        let count = memories.len() + org_memories.len();
+        let body = if memories.is_empty() && org_memories.is_empty() {
             "No memories stored yet. Use memory_store to add some.".to_string()
         } else {
-            let lines: Vec<String> = memories
+            let mut lines: Vec<String> = memories
                 .iter()
                 .map(|m| {
                     let tags = if m.tags.is_empty() {
@@ -526,6 +610,14 @@ impl HiveMind {
                     format!("• {} — {}{}", m.id, m.title, tags)
                 })
                 .collect();
+            lines.extend(org_memories.iter().map(|m| {
+                let tags = if m.tags.is_empty() {
+                    String::new()
+                } else {
+                    format!(" [{}]", m.tags.join(", "))
+                };
+                format!("• {} — {}{} [org]", m.id, m.title, tags)
+            }));
             format!(
                 "HiveMind Memory List ({count} memories):\n\n{}",
                 lines.join("\n")
@@ -540,16 +632,47 @@ impl HiveMind {
             .count()
             .await
             .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+        let org_count = match &self.org_store {
+            Some(org) => match org.count().await {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!("org store count failed: {e:#}; treating org count as 0");
+                    0
+                }
+            },
+            None => 0,
+        };
+        let count = count + org_count;
         let recent = self
             .store
             .list_memories(5, 0)
             .await
             .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
 
-        let recent_lines: Vec<String> = recent
+        let mut recent_lines: Vec<String> = recent
             .iter()
             .map(|m| format!("  \u{2022} {} \u{2014} {}", m.id, m.title))
             .collect();
+
+        if recent_lines.len() < 5
+            && let Some(org) = &self.org_store
+        {
+            match org.list_memories(5, 0).await {
+                Ok(org_recent) => {
+                    recent_lines.extend(
+                        org_recent
+                            .iter()
+                            .take(5 - recent_lines.len())
+                            .map(|m| format!("  \u{2022} {} \u{2014} {} [org]", m.id, m.title)),
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "org store list_memories failed: {e:#}; showing primary recents only"
+                    );
+                }
+            }
+        }
 
         let mut parts = vec![
             "HiveMind Status".to_string(),
@@ -573,10 +696,24 @@ impl HiveMind {
         let hits = if trimmed.is_empty() {
             vec![]
         } else {
-            self.store
-                .search(&trimmed, 10)
-                .await
-                .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
+            let mut hits = self.search_in(&self.store, Some(&trimmed), None, 10).await?;
+            if hits.len() < 10
+                && let Some(org) = &self.org_store
+            {
+                match self
+                    .search_in(org, Some(&trimmed), None, 10 - hits.len() as i64)
+                    .await
+                {
+                    Ok(org_hits) => hits.extend(org_hits),
+                    Err(e) => {
+                        tracing::warn!(
+                            "org store search failed: {}; showing primary results only",
+                            e.message
+                        );
+                    }
+                }
+            }
+            hits
         };
         let body = if hits.is_empty() {
             format!(
@@ -855,15 +992,25 @@ impl HiveMind {
             .await;
         let result = match (&primary_result, &self.org_store) {
             (Ok(EdgeCreate::MissingEndpoint), Some(org)) => {
-                org.create_edge_with_status(
-                    &p.source_id,
-                    &p.target_id,
-                    &p.relationship,
-                    status,
-                    None,
-                    p.reason.as_deref(),
-                )
-                .await
+                match org
+                    .create_edge_with_status(
+                        &p.source_id,
+                        &p.target_id,
+                        &p.relationship,
+                        status,
+                        None,
+                        p.reason.as_deref(),
+                    )
+                    .await
+                {
+                    Ok(r) => Ok(r),
+                    Err(e) => {
+                        tracing::warn!(
+                            "org store lookup failed while resolving edge endpoints: {e:#}"
+                        );
+                        primary_result
+                    }
+                }
             }
             _ => primary_result,
         };
@@ -909,13 +1056,21 @@ impl HiveMind {
             .await;
         let result = match (&primary, &self.org_store) {
             (Ok(false), Some(org)) => {
-                org.update_edge(
-                    &p.id,
-                    p.relationship.as_deref(),
-                    p.reason.as_deref(),
-                    p.link_text.as_deref(),
-                )
-                .await
+                match org
+                    .update_edge(
+                        &p.id,
+                        p.relationship.as_deref(),
+                        p.reason.as_deref(),
+                        p.link_text.as_deref(),
+                    )
+                    .await
+                {
+                    Ok(r) => Ok(r),
+                    Err(e) => {
+                        tracing::warn!("org store lookup failed while updating edge: {e:#}");
+                        primary
+                    }
+                }
             }
             _ => primary,
         };
