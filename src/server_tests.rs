@@ -15,6 +15,20 @@ async fn test_hivemind() -> (HiveMind, TempDir) {
     (HiveMind::new(SqliteStore::new(conn)), dir)
 }
 
+async fn test_hivemind_with_org() -> (HiveMind, TempDir, TempDir) {
+    let (hm, primary_dir) = test_hivemind().await;
+    let org_dir = tempfile::tempdir().unwrap();
+    let org_path = org_dir.path().join("org.db");
+    let sync = SyncSettings::default();
+    let org_database = db::open_database(&sync, org_path.to_str().unwrap())
+        .await
+        .unwrap();
+    let org_conn = org_database.connect().unwrap();
+    db::run_migrations(&org_conn).await.unwrap();
+    let hm = hm.with_org_store(std::sync::Arc::new(SqliteStore::new(org_conn)));
+    (hm, primary_dir, org_dir)
+}
+
 async fn seed_two(hm: &HiveMind) -> (String, String) {
     for (t, c) in [("alpha", "a"), ("beta", "b")] {
         hm.do_memory_store(MemoryStoreInput {
@@ -84,6 +98,49 @@ async fn memory_store_accepts_content_under_max_content_tokens() {
     assert!(
         res.is_ok(),
         "should accept content under the configured limit"
+    );
+}
+
+#[tokio::test]
+async fn memory_store_with_org_layer_writes_to_org_store_not_primary() {
+    let (hm, _primary_dir, _org_dir) = test_hivemind_with_org().await;
+    hm.do_memory_store(MemoryStoreInput {
+        title: "org secret".to_string(),
+        content: "org content".to_string(),
+        tags: vec![],
+        token_count: None,
+        layer: Some("org".to_string()),
+        memory_type: None,
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(hm.store.list_memories(10, 0).await.unwrap().len(), 0);
+    let org_store = hm.org_store.as_ref().unwrap();
+    let org_memories = org_store.list_memories(10, 0).await.unwrap();
+    assert_eq!(org_memories.len(), 1);
+    assert_eq!(org_memories[0].title, "org secret");
+    assert_eq!(org_memories[0].layer, "org");
+}
+
+#[tokio::test]
+async fn memory_store_with_org_layer_errors_when_no_org_store_configured() {
+    let (hm, _dir) = test_hivemind().await;
+    let err = hm
+        .do_memory_store(MemoryStoreInput {
+            title: "org secret".to_string(),
+            content: "org content".to_string(),
+            tags: vec![],
+            token_count: None,
+            layer: Some("org".to_string()),
+            memory_type: None,
+        })
+        .await;
+    assert!(err.is_err());
+    assert!(
+        err.unwrap_err()
+            .to_string()
+            .contains("org layer not configured")
     );
 }
 

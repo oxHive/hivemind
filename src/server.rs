@@ -162,6 +162,7 @@ pub struct MemoryGetEdgesInput {
 #[derive(Clone)]
 pub struct HiveMind {
     store: Arc<SqliteStore>,
+    org_store: Option<Arc<SqliteStore>>,
     sync_trigger: Option<Arc<tokio::sync::Notify>>,
     events: Option<tokio::sync::broadcast::Sender<serde_json::Value>>,
 }
@@ -171,6 +172,7 @@ impl HiveMind {
     pub fn new(store: SqliteStore) -> Self {
         Self {
             store: Arc::new(store),
+            org_store: None,
             sync_trigger: None,
             events: None,
         }
@@ -179,6 +181,7 @@ impl HiveMind {
     pub fn with_store(store: Arc<SqliteStore>) -> Self {
         Self {
             store,
+            org_store: None,
             sync_trigger: None,
             events: None,
         }
@@ -187,9 +190,18 @@ impl HiveMind {
     pub fn with_sync(store: Arc<SqliteStore>, trigger: Arc<tokio::sync::Notify>) -> Self {
         Self {
             store,
+            org_store: None,
             sync_trigger: Some(trigger),
             events: None,
         }
+    }
+
+    /// Attaches the org-layer store. No-op on the org layer's absence — every
+    /// org-layer tool path checks `self.org_store` and degrades to "org layer
+    /// not configured" or "skip" rather than assuming this was called.
+    pub fn with_org_store(mut self, org_store: Arc<SqliteStore>) -> Self {
+        self.org_store = Some(org_store);
+        self
     }
 
     /// Broadcasts a "changed" signal to dashboard SSE subscribers whenever a
@@ -231,7 +243,7 @@ impl HiveMind {
         let title = p.title.clone();
 
         let layer = p.layer.as_deref().unwrap_or("workspace");
-        layer
+        let parsed_layer = layer
             .parse::<crate::model::Layer>()
             .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
 
@@ -242,7 +254,18 @@ impl HiveMind {
 
         self.check_content_size(&p.title, &p.content).await?;
 
-        self.store
+        let target_store = if parsed_layer == crate::model::Layer::Org {
+            self.org_store.as_ref().ok_or_else(|| {
+                ErrorData::invalid_params(
+                    "org layer not configured — set [org_sync] in the global config",
+                    None,
+                )
+            })?
+        } else {
+            &self.store
+        };
+
+        target_store
             .store(&crate::store::NewMemoryRow {
                 id: &id,
                 title: &p.title,
