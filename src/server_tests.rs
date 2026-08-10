@@ -631,6 +631,89 @@ async fn memory_update_returns_updated_false_for_missing() {
     assert_eq!(result.structured_content.unwrap()["updated"], false);
 }
 
+/// Regression test for a TOCTOU panic: `do_memory_update` used to look up a
+/// memory once via `find_owning_store` to confirm it exists, then a second
+/// time to fetch it, `.expect()`-ing the second lookup to succeed. If a
+/// concurrent `memory_delete` removed the row between the two lookups, the
+/// `.expect()` would panic instead of returning `updated: false`. This is
+/// plausible in production because `HiveMind` instances share a cloned
+/// `Arc<SqliteStore>` across connections (see http.rs) plus a background
+/// sync loop that mutates the store concurrently.
+///
+/// There's no seam to pause `do_memory_update` mid-function, so the exact
+/// interleaving (delete lands strictly between the two lookups) can't be
+/// forced deterministically from a test without adding test-only
+/// instrumentation to production code. Instead this races many concurrent
+/// update/delete pairs against the same id on a real multi-threaded
+/// runtime: whichever interleaving occurs, a reintroduced `.expect()`
+/// panic would surface as a failed `JoinHandle::await`, so asserting both
+/// tasks join cleanly is a meaningful, non-flaky check that the panic
+/// surface is gone (the assertion holds regardless of whether any given
+/// iteration actually lands in the narrow race window).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn memory_update_concurrent_with_delete_never_panics() {
+    let (hm, _dir) = test_hivemind().await;
+
+    for _ in 0..25 {
+        let stored = hm
+            .do_memory_store(MemoryStoreInput {
+                title: "race".to_string(),
+                content: "before".to_string(),
+                tags: vec![],
+                token_count: None,
+                layer: None,
+                memory_type: None,
+            })
+            .await
+            .unwrap();
+        let id = stored.structured_content.unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let hm_update = hm.clone();
+        let id_update = id.clone();
+        let update_task = tokio::spawn(async move {
+            hm_update
+                .do_memory_update(MemoryUpdateInput {
+                    id: id_update,
+                    title: None,
+                    content: Some("after".to_string()),
+                    tags: None,
+                })
+                .await
+        });
+
+        let hm_delete = hm.clone();
+        let id_delete = id.clone();
+        let delete_task = tokio::spawn(async move {
+            hm_delete
+                .do_memory_delete(MemoryDeleteInput {
+                    id: id_delete,
+                    confirm: true,
+                })
+                .await
+        });
+
+        let (update_res, delete_res) = tokio::join!(update_task, delete_task);
+        assert!(
+            update_res.is_ok(),
+            "do_memory_update panicked instead of returning gracefully: {:?}",
+            update_res.err()
+        );
+        assert!(
+            delete_res.is_ok(),
+            "do_memory_delete panicked: {:?}",
+            delete_res.err()
+        );
+
+        // Whichever order they actually landed in, both must still be
+        // well-formed tool results, never a panic unwound through the task.
+        update_res.unwrap().unwrap();
+        delete_res.unwrap().unwrap();
+    }
+}
+
 #[tokio::test]
 async fn session_start_loads_configured_recalls() {
     let (hm, _dir) = test_hivemind().await;

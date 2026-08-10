@@ -444,11 +444,22 @@ impl HiveMind {
                 })));
             }
         };
-        let current = owning_store
+        let current = match owning_store
             .recall_by_id(&p.id)
             .await
             .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
-            .expect("find_owning_store just confirmed this id exists in owning_store");
+        {
+            Some(c) => c,
+            // Vanished between find_owning_store's existence check and this
+            // fetch (e.g. a concurrent delete on a shared, cloned store).
+            // Treat identically to "never existed" rather than panicking.
+            None => {
+                return Ok(CallToolResult::structured(json!({
+                    "updated": false,
+                    "id": p.id,
+                })));
+            }
+        };
         let title = p.title.as_deref().unwrap_or(&current.title);
         let content = p.content.as_deref().unwrap_or(&current.content);
         let tags = p.tags.as_deref().unwrap_or(&current.tags);
