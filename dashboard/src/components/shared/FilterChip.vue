@@ -12,7 +12,7 @@ const chipStyle = computed(() => {
 </script>
 
 <template>
-  <button @click="$emit('select', value)" class="hm-btn hm-btn-sm rounded-sm" :style="chipStyle">
+  <button @click="$emit('select', value)" class="hm-btn hm-btn-sm" :style="chipStyle">
     {{ label }}
   </button>
 </template>

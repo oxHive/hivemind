@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { PhMagnifyingGlass, PhPlus } from '@phosphor-icons/vue'
 import { useMemoriesStore } from '../../stores/memories.js'
 import MemoryCard from './MemoryCard.vue'
 import FilterChip from '../shared/FilterChip.vue'
@@ -33,32 +34,38 @@ const filters = [
 
     <!-- Header -->
     <div class="px-4 pt-4 pb-3" style="border-bottom:0.5px solid var(--hm-border-subtle)">
-      <button class="hm-btn hm-btn-primary hm-btn-sm mb-3 w-full justify-center gap-1.5"
-        @click="memories.startNew()">
-        + New memory
-        <span v-if="memories.hasNewDraft" class="font-mono rounded-sm px-1"
-          style="font-size:9px; background:var(--hm-warning-bg); color:var(--hm-warning)">DRAFT</span>
-      </button>
-      <div class="relative mb-3">
-        <span class="absolute left-2.5 top-1/2 -translate-y-1/2" style="color:var(--hm-text-tertiary); font-size:13px">⌕</span>
-        <input
-          ref="searchEl"
-          class="hm-input pl-7"
-          placeholder="Search memories…  ( / )"
-          :value="memories.searchQuery"
-          @input="memories.searchQuery = $event.target.value"
-        />
+      <div class="flex items-center gap-2 mb-3">
+        <div class="relative flex-1">
+          <PhMagnifyingGlass :size="13" class="absolute left-2.5 top-1/2 -translate-y-1/2"
+            style="color:var(--hm-text-tertiary)" />
+          <input
+            ref="searchEl"
+            class="hm-input pl-7"
+            placeholder="Search…  ( / )"
+            :value="memories.searchQuery"
+            @input="memories.searchQuery = $event.target.value"
+          />
+        </div>
+        <button class="hm-btn hm-btn-primary hm-btn-sm shrink-0 gap-1" title="New memory"
+          @click="memories.startNew()">
+          <PhPlus :size="13" weight="bold" />
+          New
+          <span v-if="memories.hasNewDraft" class="font-mono rounded-sm px-1"
+            style="font-size:9px; background:var(--hm-warning-bg); color:var(--hm-warning)">DRAFT</span>
+        </button>
       </div>
-      <div class="flex gap-1.5 mb-3">
-        <FilterChip
-          v-for="f in filters" :key="f.value"
-          :label="f.label" :value="f.value"
-          :active="memories.layerFilter === f.value"
-          :layer="f.layer"
-          @select="memories.layerFilter = $event"
-        />
+      <div class="flex items-center flex-wrap gap-y-2 gap-x-2">
+        <div class="flex gap-1.5">
+          <FilterChip
+            v-for="f in filters" :key="f.value"
+            :label="f.label" :value="f.value"
+            :active="memories.layerFilter === f.value"
+            :layer="f.layer"
+            @select="memories.layerFilter = $event"
+          />
+        </div>
+        <TagFilter v-model="memories.tagFilter" />
       </div>
-      <TagFilter v-model="memories.tagFilter" />
     </div>
 
     <!-- List -->
