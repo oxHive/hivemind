@@ -1418,3 +1418,76 @@ async fn memory_update_edge_invalid_relationship_errors() {
         .await;
     assert!(res.is_err());
 }
+
+#[tokio::test]
+async fn store_edge_between_two_org_memories_succeeds() {
+    let (hm, _primary_dir, _org_dir) = test_hivemind_with_org().await;
+    for (t, c) in [("org a", "a"), ("org b", "b")] {
+        hm.do_memory_store(MemoryStoreInput {
+            title: t.to_string(),
+            content: c.to_string(),
+            tags: vec![],
+            token_count: None,
+            layer: Some("org".to_string()),
+            memory_type: None,
+        })
+        .await
+        .unwrap();
+    }
+    let org_store = hm.org_store.as_ref().unwrap();
+    let mems = org_store.list_memories(10, 0).await.unwrap();
+    let a = mems.iter().find(|m| m.title == "org a").unwrap().id.clone();
+    let b = mems.iter().find(|m| m.title == "org b").unwrap().id.clone();
+
+    let result = hm
+        .do_memory_store_edge(MemoryStoreEdgeInput {
+            source_id: a,
+            target_id: b,
+            relationship: "sibling".to_string(),
+            status: None,
+            reason: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(result.structured_content.unwrap()["created"], true);
+}
+
+#[tokio::test]
+async fn store_edge_across_primary_and_org_fails_with_missing_endpoint() {
+    let (hm, _primary_dir, _org_dir) = test_hivemind_with_org().await;
+    hm.do_memory_store(MemoryStoreInput {
+        title: "workspace mem".to_string(),
+        content: "a".to_string(),
+        tags: vec![],
+        token_count: None,
+        layer: None,
+        memory_type: None,
+    })
+    .await
+    .unwrap();
+    hm.do_memory_store(MemoryStoreInput {
+        title: "org mem".to_string(),
+        content: "b".to_string(),
+        tags: vec![],
+        token_count: None,
+        layer: Some("org".to_string()),
+        memory_type: None,
+    })
+    .await
+    .unwrap();
+    let primary_id = hm.store.list_memories(10, 0).await.unwrap()[0].id.clone();
+    let org_id = hm.org_store.as_ref().unwrap().list_memories(10, 0).await.unwrap()[0]
+        .id
+        .clone();
+
+    let result = hm
+        .do_memory_store_edge(MemoryStoreEdgeInput {
+            source_id: primary_id,
+            target_id: org_id,
+            relationship: "sibling".to_string(),
+            status: None,
+            reason: None,
+        })
+        .await;
+    assert!(result.is_err(), "cross-layer edges must be rejected");
+}

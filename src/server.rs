@@ -841,7 +841,7 @@ impl HiveMind {
                 None,
             ));
         }
-        match self
+        let primary_result = self
             .store
             .create_edge_with_status(
                 &p.source_id,
@@ -851,8 +851,22 @@ impl HiveMind {
                 None,
                 p.reason.as_deref(),
             )
-            .await
-        {
+            .await;
+        let result = match (&primary_result, &self.org_store) {
+            (Ok(EdgeCreate::MissingEndpoint), Some(org)) => {
+                org.create_edge_with_status(
+                    &p.source_id,
+                    &p.target_id,
+                    &p.relationship,
+                    status,
+                    None,
+                    p.reason.as_deref(),
+                )
+                .await
+            }
+            _ => primary_result,
+        };
+        match result {
             Ok(EdgeCreate::Created(id)) => {
                 self.notify_change();
                 Ok(CallToolResult::structured(json!({
@@ -883,7 +897,7 @@ impl HiveMind {
         &self,
         p: MemoryUpdateEdgeInput,
     ) -> Result<CallToolResult, ErrorData> {
-        match self
+        let primary = self
             .store
             .update_edge(
                 &p.id,
@@ -891,8 +905,20 @@ impl HiveMind {
                 p.reason.as_deref(),
                 p.link_text.as_deref(),
             )
-            .await
-        {
+            .await;
+        let result = match (&primary, &self.org_store) {
+            (Ok(false), Some(org)) => {
+                org.update_edge(
+                    &p.id,
+                    p.relationship.as_deref(),
+                    p.reason.as_deref(),
+                    p.link_text.as_deref(),
+                )
+                .await
+            }
+            _ => primary,
+        };
+        match result {
             Ok(true) => {
                 self.notify_change();
                 Ok(CallToolResult::structured(
@@ -923,7 +949,11 @@ impl HiveMind {
         &self,
         Parameters(p): Parameters<MemoryGetEdgesInput>,
     ) -> Result<CallToolResult, ErrorData> {
-        match self.store.get_edges_grouped(&p.memory_id).await {
+        let store = self
+            .find_owning_store(&p.memory_id)
+            .await?
+            .unwrap_or(&self.store);
+        match store.get_edges_grouped(&p.memory_id).await {
             Ok(grouped) => Ok(CallToolResult::structured(
                 serde_json::to_value(grouped).unwrap(),
             )),
