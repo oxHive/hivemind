@@ -151,7 +151,7 @@ pub fn cmd_session_start(json: bool) -> Result<()> {
             crate::db::run_migrations(&conn).await?;
             let store = crate::store::SqliteStore::new(conn);
             let config = crate::config::load_config(&cwd)?;
-            let result = crate::session::execute_session_start(&config, &store).await?;
+            let result = crate::session::execute_session_start(&config, &store, None).await?;
             if let Err(e) = store
                 .log_session_start(&cwd.to_string_lossy(), &result)
                 .await
@@ -362,7 +362,7 @@ pub async fn build_status_data(
         return Ok(data);
     };
 
-    let result = crate::session::execute_session_start(&config, store).await?;
+    let result = crate::session::execute_session_start(&config, store, None).await?;
 
     data.project = Some(ProjectStatus {
         project_name: config.project_name.clone(),

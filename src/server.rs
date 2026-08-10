@@ -731,9 +731,10 @@ impl HiveMind {
         let config = crate::config::load_config(&canon)
             .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
 
-        let result = crate::session::execute_session_start(&config, &self.store)
-            .await
-            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+        let result =
+            crate::session::execute_session_start(&config, &self.store, self.org_store.as_deref())
+                .await
+                .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
 
         if let Err(e) = self
             .store
