@@ -183,7 +183,41 @@ async fn run_up(headless: bool, plain: bool) -> Result<()> {
         _db_guard = Some(database);
     }
 
-    http::run_up(store, &settings, headless, plain, notify_on_store).await
+    // Org layer is entirely optional here too — mirrors run_server's wiring.
+    // Unlike the primary store, org's database handle never needs a bare
+    // guard variable: ServerSettings.org_sync is only ever Some when already
+    // enabled, so this branch always spawns a sync loop that owns the handle.
+    let mut org_store = None;
+    if let Some(org_sync) = &settings.org_sync {
+        match open_store(org_sync, &db::resolve_org_db_path()).await {
+            Ok((store, org_database)) => {
+                let org_trigger = Arc::new(Notify::new());
+                tokio::spawn(sync::run_sync_loop(
+                    Arc::new(org_database),
+                    store.clone(),
+                    org_sync.interval_seconds,
+                    org_sync.sync_on_startup,
+                    org_trigger,
+                ));
+                org_store = Some(store);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "could not open org database ({e:#}); org layer unavailable this session"
+                );
+            }
+        }
+    }
+
+    http::run_up(
+        store,
+        org_store,
+        &settings,
+        headless,
+        plain,
+        notify_on_store,
+    )
+    .await
 }
 
 #[tokio::main]

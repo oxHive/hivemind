@@ -73,7 +73,9 @@ async fn test_router_with_guard(guard_predefined_namespaces: bool) -> (Router, T
     let suggest = test_suggest_manager(Arc::clone(&store), dir.path(), events.clone());
     let r = router(
         store,
+        None,
         SyncSettings::default(),
+        None,
         "http://127.0.0.1:3457",
         events,
         suggest,
@@ -90,7 +92,9 @@ async fn test_router_with_events() -> (Router, broadcast::Receiver<Value>, TempD
     let suggest = test_suggest_manager(Arc::clone(&store), dir.path(), events.clone());
     let r = router(
         store,
+        None,
         SyncSettings::default(),
+        None,
         "http://127.0.0.1:3457",
         events,
         suggest,
@@ -107,7 +111,9 @@ async fn test_router_with_store() -> (Router, Arc<SqliteStore>, TempDir) {
     let suggest = test_suggest_manager(Arc::clone(&store), dir.path(), events.clone());
     let r = router(
         Arc::clone(&store),
+        None,
         SyncSettings::default(),
+        None,
         "http://127.0.0.1:3457",
         events,
         suggest,
@@ -116,6 +122,33 @@ async fn test_router_with_store() -> (Router, Arc<SqliteStore>, TempDir) {
         true,
     );
     (r, store, dir)
+}
+
+async fn test_router_with_org() -> (Router, TempDir, TempDir) {
+    let (store, dir) = test_store().await;
+    let (org_store, org_dir) = test_store().await;
+    let (events, _) = broadcast::channel(16);
+    let suggest = test_suggest_manager(Arc::clone(&store), dir.path(), events.clone());
+    let r = router(
+        store,
+        Some(org_store),
+        SyncSettings::default(),
+        Some(SyncSettings {
+            enabled: true,
+            remote_url: "https://gateway.example/org".into(),
+            api_key: "hm_org_x".into(),
+            interval_seconds: 60,
+            sync_on_store: true,
+            sync_on_startup: true,
+        }),
+        "http://127.0.0.1:3457",
+        events,
+        suggest,
+        test_update_state(),
+        test_agent_settings(),
+        true,
+    );
+    (r, dir, org_dir)
 }
 
 async fn req(app: Router, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
@@ -312,6 +345,45 @@ async fn status_reports_version_and_count() {
     assert_eq!(status["sync"]["enabled"], false);
     assert_eq!(status["agent"]["kind"], "claude");
     assert_eq!(status["agent"]["command"], "claude");
+}
+
+#[tokio::test]
+async fn status_reports_org_not_configured_when_absent() {
+    let (app, _dir) = test_router().await;
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["org"]["configured"], false);
+    assert!(json["org"].get("last_synced_at").is_none() || json["org"]["last_synced_at"].is_null());
+}
+
+#[tokio::test]
+async fn status_reports_org_configured_and_counts_when_present() {
+    let (app, _dir, _org_dir) = test_router_with_org().await;
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["org"]["configured"], true);
+    assert_eq!(json["org"]["enabled"], true);
+    assert_eq!(json["org"]["conflict_count"], 0);
 }
 
 #[tokio::test]

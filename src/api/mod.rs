@@ -23,6 +23,7 @@ use tower_http::cors::{AllowOrigin, CorsLayer};
 
 type Store = Arc<SqliteStore>;
 type Events = broadcast::Sender<serde_json::Value>;
+pub(crate) type OrgStore = Option<Arc<SqliteStore>>;
 
 /// Whether predefined tag namespaces can be deleted/modified via
 /// `save_tag_settings` — wrapped so it's a distinct Extension type rather
@@ -84,7 +85,9 @@ fn localhost_origins(origin: &str) -> AllowOrigin {
 #[allow(clippy::too_many_arguments)]
 pub fn router(
     store: Store,
+    org_store: OrgStore,
     sync: SyncSettings,
+    org_sync: Option<SyncSettings>,
     dashboard_origin: &str,
     events: Events,
     suggest: Arc<SuggestSessionManager>,
@@ -150,7 +153,9 @@ pub fn router(
             post(revise_suggest_session),
         )
         .with_state(store)
+        .layer(Extension(org_store))
         .layer(Extension(sync))
+        .layer(Extension(org_sync))
         .layer(Extension(events))
         .layer(Extension(suggest))
         .layer(Extension(update_state))
