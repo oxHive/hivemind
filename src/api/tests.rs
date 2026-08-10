@@ -396,6 +396,43 @@ async fn settings_sync_returns_defaults() {
 }
 
 #[tokio::test]
+async fn sync_settings_reports_org_sync_null_when_absent() {
+    let (app, _dir) = test_router().await;
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/settings/sync")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert!(json["org_sync"].is_null());
+}
+
+#[tokio::test]
+async fn sync_settings_reports_org_sync_fields_when_present() {
+    let (app, _dir, _org_dir) = test_router_with_org().await;
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/settings/sync")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["org_sync"]["enabled"], true);
+    assert_eq!(json["org_sync"]["remote_url"], "https://gateway.example/org");
+}
+
+#[tokio::test]
 async fn delete_memory_returns_404_when_not_found() {
     let (app, _dir) = test_router().await;
     let (status, _) = req(app, "DELETE", "/api/v1/memories/mem_nonexistent", None).await;
