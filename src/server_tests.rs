@@ -145,6 +145,109 @@ async fn memory_store_with_org_layer_errors_when_no_org_store_configured() {
 }
 
 #[tokio::test]
+async fn memory_recall_by_id_finds_org_memory_when_not_in_primary() {
+    let (hm, _primary_dir, _org_dir) = test_hivemind_with_org().await;
+    hm.do_memory_store(MemoryStoreInput {
+        title: "org only".to_string(),
+        content: "lives in org".to_string(),
+        tags: vec![],
+        token_count: None,
+        layer: Some("org".to_string()),
+        memory_type: None,
+    })
+    .await
+    .unwrap();
+    let org_id = hm.org_store.as_ref().unwrap().list_memories(10, 0).await.unwrap()[0]
+        .id
+        .clone();
+
+    let result = hm
+        .do_memory_recall(MemoryRecallInput {
+            id: Some(org_id),
+            title: None,
+        })
+        .await
+        .unwrap();
+    let content = result.structured_content.unwrap();
+    assert_eq!(content["found"], true);
+    assert_eq!(content["title"], "org only");
+}
+
+#[tokio::test]
+async fn memory_update_finds_and_updates_org_memory() {
+    let (hm, _primary_dir, _org_dir) = test_hivemind_with_org().await;
+    hm.do_memory_store(MemoryStoreInput {
+        title: "org only".to_string(),
+        content: "old content".to_string(),
+        tags: vec![],
+        token_count: None,
+        layer: Some("org".to_string()),
+        memory_type: None,
+    })
+    .await
+    .unwrap();
+    let org_id = hm.org_store.as_ref().unwrap().list_memories(10, 0).await.unwrap()[0]
+        .id
+        .clone();
+
+    let result = hm
+        .do_memory_update(MemoryUpdateInput {
+            id: org_id.clone(),
+            title: None,
+            content: Some("new content".to_string()),
+            tags: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(result.structured_content.unwrap()["updated"], true);
+
+    let updated = hm.org_store.as_ref().unwrap().recall_by_id(&org_id).await.unwrap().unwrap();
+    assert_eq!(updated.content, "new content");
+    assert_eq!(hm.store.recall_by_id(&org_id).await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn memory_delete_finds_and_deletes_org_memory() {
+    let (hm, _primary_dir, _org_dir) = test_hivemind_with_org().await;
+    hm.do_memory_store(MemoryStoreInput {
+        title: "org only".to_string(),
+        content: "content".to_string(),
+        tags: vec![],
+        token_count: None,
+        layer: Some("org".to_string()),
+        memory_type: None,
+    })
+    .await
+    .unwrap();
+    let org_id = hm.org_store.as_ref().unwrap().list_memories(10, 0).await.unwrap()[0]
+        .id
+        .clone();
+
+    let result = hm
+        .do_memory_delete(MemoryDeleteInput {
+            id: org_id.clone(),
+            confirm: true,
+        })
+        .await
+        .unwrap();
+    assert_eq!(result.structured_content.unwrap()["deleted"], true);
+    assert_eq!(hm.org_store.as_ref().unwrap().recall_by_id(&org_id).await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn memory_recall_by_id_not_found_when_absent_from_both_stores() {
+    let (hm, _primary_dir, _org_dir) = test_hivemind_with_org().await;
+    let result = hm
+        .do_memory_recall(MemoryRecallInput {
+            id: Some("mem_does_not_exist".to_string()),
+            title: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(result.structured_content.unwrap()["found"], false);
+}
+
+#[tokio::test]
 async fn memory_update_rejects_content_over_max_content_tokens() {
     let (hm, _dir) = test_hivemind().await;
     let (a, _b) = seed_two(&hm).await;

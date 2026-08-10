@@ -238,6 +238,32 @@ impl HiveMind {
         Ok(())
     }
 
+    /// Tries the primary store first, then the org store if configured.
+    /// Returns the store that has a memory with this id, or `None` if
+    /// neither does. Used by every ID-addressed tool (recall/update/delete)
+    /// so a caller never needs to know which layer an id belongs to.
+    async fn find_owning_store(&self, id: &str) -> Result<Option<&Arc<SqliteStore>>, ErrorData> {
+        if self
+            .store
+            .recall_by_id(id)
+            .await
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
+            .is_some()
+        {
+            return Ok(Some(&self.store));
+        }
+        if let Some(org) = &self.org_store
+            && org
+                .recall_by_id(id)
+                .await
+                .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
+                .is_some()
+        {
+            return Ok(Some(org));
+        }
+        Ok(None)
+    }
+
     pub async fn do_memory_store(&self, p: MemoryStoreInput) -> Result<CallToolResult, ErrorData> {
         let id = format!("mem_{}", uuid::Uuid::new_v4().simple());
         let title = p.title.clone();
@@ -292,7 +318,10 @@ impl HiveMind {
         p: MemoryRecallInput,
     ) -> Result<CallToolResult, ErrorData> {
         let entry = if let Some(ref id) = p.id {
-            self.store.recall_by_id(id).await
+            match self.find_owning_store(id).await? {
+                Some(store) => store.recall_by_id(id).await,
+                None => Ok(None),
+            }
         } else if let Some(ref title) = p.title {
             self.store.recall_by_title(title).await
         } else {
@@ -406,28 +435,27 @@ impl HiveMind {
         p: MemoryUpdateInput,
     ) -> Result<CallToolResult, ErrorData> {
         // Fetch current state to fill in unchanged fields
-        let current = self
-            .store
-            .recall_by_id(&p.id)
-            .await
-            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
-        let current = match current {
+        let owning_store = match self.find_owning_store(&p.id).await? {
+            Some(s) => s,
             None => {
                 return Ok(CallToolResult::structured(json!({
                     "updated": false,
                     "id": p.id,
                 })));
             }
-            Some(c) => c,
         };
+        let current = owning_store
+            .recall_by_id(&p.id)
+            .await
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
+            .expect("find_owning_store just confirmed this id exists in owning_store");
         let title = p.title.as_deref().unwrap_or(&current.title);
         let content = p.content.as_deref().unwrap_or(&current.content);
         let tags = p.tags.as_deref().unwrap_or(&current.tags);
 
         self.check_content_size(title, content).await?;
 
-        let updated = self
-            .store
+        let updated = owning_store
             .update(&p.id, title, content, tags)
             .await
             .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
@@ -450,11 +478,13 @@ impl HiveMind {
                 None,
             ));
         }
-        let deleted = self
-            .store
-            .delete(&p.id)
-            .await
-            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+        let deleted = match self.find_owning_store(&p.id).await? {
+            Some(store) => store
+                .delete(&p.id)
+                .await
+                .map_err(|e| ErrorData::internal_error(e.to_string(), None))?,
+            None => false,
+        };
         if deleted {
             self.notify_change();
         }
