@@ -96,6 +96,7 @@ pub(super) struct ResolveBody {
 
 pub(super) async fn resolve_conflict_handler(
     State(store): State<Store>,
+    Extension(org_store): Extension<OrgStore>,
     Path(id): Path<String>,
     Json(b): Json<ResolveBody>,
 ) -> Result<Json<Value>, ApiError> {
@@ -105,7 +106,22 @@ pub(super) async fn resolve_conflict_handler(
             "resolution must be keep_local|keep_remote".into(),
         ));
     }
-    if !store.resolve_conflict(&id, &b.resolution).await? {
+    let primary_resolved = store.resolve_conflict(&id, &b.resolution).await?;
+    let resolved = if !primary_resolved {
+        match &org_store {
+            Some(org) => match org.resolve_conflict(&id, &b.resolution).await {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::warn!("org store resolve_conflict failed: {e:#}");
+                    false
+                }
+            },
+            None => false,
+        }
+    } else {
+        true
+    };
+    if !resolved {
         return Err(not_found(format!(
             "conflict {id} not found or already resolved"
         )));

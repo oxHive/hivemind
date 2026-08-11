@@ -1020,6 +1020,46 @@ async fn resolve_conflict_returns_404_for_missing() {
 }
 
 #[tokio::test]
+async fn resolve_conflict_retries_against_org_when_not_found_in_primary() {
+    let (app, _dir, org_dir) = test_router_with_org().await;
+
+    let org_path = org_dir.path().join("test.db");
+    let sync = SyncSettings::default();
+    let database = db::open_database(&sync, org_path.to_str().unwrap())
+        .await
+        .unwrap();
+    let conn = database.connect().unwrap();
+    db::run_migrations(&conn).await.unwrap();
+    let org_store = SqliteStore::new(conn);
+    org_store
+        .store(&crate::store::NewMemoryRow {
+            id: "mem_org_resolve",
+            title: "org resolve memory",
+            content: "content",
+            tags: &[],
+            token_count: None,
+            layer: "org",
+            memory_type: "project",
+        })
+        .await
+        .unwrap();
+    let conflict = org_store
+        .write_conflict("mem_org_resolve", "remote content", "local content", 2, 1)
+        .await
+        .unwrap();
+
+    let (status, body) = req(
+        app,
+        "POST",
+        &format!("/api/v1/conflicts/{}/resolve", conflict.id),
+        Some(json!({ "resolution": "keep_local" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["resolved"], true);
+}
+
+#[tokio::test]
 async fn list_conflicts_includes_org_conflicts_stamped_with_layer() {
     let (app, _dir, org_dir) = test_router_with_org().await;
 
