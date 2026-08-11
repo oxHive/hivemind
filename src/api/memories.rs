@@ -10,11 +10,18 @@ pub(super) struct ListMemoriesParams {
 
 pub(super) async fn list_memories(
     State(store): State<Store>,
+    Extension(org_store): Extension<OrgStore>,
     Query(p): Query<ListMemoriesParams>,
 ) -> Result<Json<Value>, ApiError> {
     let limit = p.limit.unwrap_or(200).clamp(1, 1000);
     let offset = p.offset.unwrap_or(0).max(0);
-    let entries = store.list_memories(limit, offset).await?;
+    let mut entries = store.list_memories(limit, offset).await?;
+    if let Some(org) = &org_store {
+        match org.list_memories(limit, offset).await {
+            Ok(mut org_entries) => entries.append(&mut org_entries),
+            Err(e) => tracing::warn!("org store list_memories failed: {e:#}"),
+        }
+    }
     Ok(Json(json!({
         "count": entries.len(),
         "memories": entries.iter().map(entry_json).collect::<Vec<_>>(),
@@ -237,10 +244,11 @@ pub(super) struct SearchParams {
 
 pub(super) async fn search(
     State(store): State<Store>,
+    Extension(org_store): Extension<OrgStore>,
     Query(p): Query<SearchParams>,
 ) -> Result<Json<Value>, ApiError> {
     let limit = p.limit.unwrap_or(20).clamp(1, 50);
-    let hits = if crate::tag_query::looks_like_tag_expr(&p.q) {
+    let mut hits = if crate::tag_query::looks_like_tag_expr(&p.q) {
         let expr = crate::tag_query::parse(&p.q)
             .map_err(|e| ApiError(StatusCode::UNPROCESSABLE_ENTITY, e.to_string()))?;
         let mut matches = store.find_by_tag_expr(&expr).await?;
@@ -249,6 +257,25 @@ pub(super) async fn search(
     } else {
         store.search(&p.q, limit).await?
     };
+    if hits.len() < limit as usize
+        && let Some(org) = &org_store
+    {
+        let remaining = limit - hits.len() as i64;
+        let org_hits = if crate::tag_query::looks_like_tag_expr(&p.q) {
+            let expr = crate::tag_query::parse(&p.q)
+                .map_err(|e| ApiError(StatusCode::UNPROCESSABLE_ENTITY, e.to_string()))?;
+            org.find_by_tag_expr(&expr).await
+        } else {
+            org.search(&p.q, remaining).await
+        };
+        match org_hits {
+            Ok(mut org_hits) => {
+                org_hits.truncate(remaining as usize);
+                hits.append(&mut org_hits);
+            }
+            Err(e) => tracing::warn!("org store search failed: {e:#}"),
+        }
+    }
     let results: Vec<_> = hits.iter().map(entry_json).collect();
     Ok(Json(json!({ "count": results.len(), "results": results })))
 }

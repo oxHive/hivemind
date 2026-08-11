@@ -1260,3 +1260,81 @@ async fn create_memory_with_org_layer_errors_when_not_configured() {
         "org layer not configured — set [org_sync] in the global config"
     );
 }
+
+#[tokio::test]
+async fn list_memories_includes_org_entries_when_configured() {
+    let (app, _dir, _org_dir) = test_router_with_org().await;
+    // Create one workspace memory and one org memory via the API itself.
+    for layer in ["workspace", "org"] {
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/memories")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({ "title": layer, "content": "c", "layer": layer }).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+    }
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/memories")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    let titles: Vec<&str> = json["memories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["title"].as_str().unwrap())
+        .collect();
+    assert!(titles.contains(&"workspace"));
+    assert!(titles.contains(&"org"));
+}
+
+#[tokio::test]
+async fn search_includes_org_entries_when_configured() {
+    let (app, _dir, _org_dir) = test_router_with_org().await;
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/memories")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({ "title": "orgsearchable", "content": "unique org content", "layer": "org" })
+                        .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/search?q=orgsearchable")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["count"], 1);
+    assert_eq!(json["results"][0]["title"], "orgsearchable");
+}
