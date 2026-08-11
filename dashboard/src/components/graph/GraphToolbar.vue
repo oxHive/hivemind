@@ -13,6 +13,7 @@ const LAYER_FILTERS = [
   { label: 'All', value: 'all' },
   { label: 'Personal', value: 'personal' },
   { label: 'Workspace', value: 'workspace' },
+  { label: 'Org', value: 'org' },
 ]
 
 function jumpToMatch() {

@@ -25,6 +25,7 @@ const filters = [
   { label: 'all', value: 'all' },
   { label: 'personal', value: 'personal', layer: 'personal' },
   { label: 'workspace', value: 'workspace', layer: 'workspace' },
+  { label: 'org', value: 'org', layer: 'org' },
 ]
 </script>
 
