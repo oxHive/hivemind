@@ -1195,3 +1195,68 @@ async fn revise_validates_session_and_edge() {
     .await;
     assert_eq!(st, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn create_memory_with_org_layer_routes_to_org_store_when_configured() {
+    let (app, _dir, _org_dir) = test_router_with_org().await;
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/memories")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({ "title": "t", "content": "c", "layer": "org" }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    let id = json["id"].as_str().unwrap().to_string();
+
+    // Confirm it landed in org, not primary, by checking it's retrievable
+    // (get_memory's org fallback from Task 3 makes this ambiguous on its
+    // own, so this test instead directly inspects the response's layer).
+    let get_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/memories/{id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let get_body = get_resp.into_body().collect().await.unwrap().to_bytes();
+    let get_json: Value = serde_json::from_slice(&get_body).unwrap();
+    assert_eq!(get_json["layer"], "org");
+}
+
+#[tokio::test]
+async fn create_memory_with_org_layer_errors_when_not_configured() {
+    let (app, _dir) = test_router().await;
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/memories")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({ "title": "t", "content": "c", "layer": "org" }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        json["error"],
+        "org layer not configured — set [org_sync] in the global config"
+    );
+}

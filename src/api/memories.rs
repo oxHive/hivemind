@@ -60,6 +60,7 @@ pub(super) struct CreateMemoryBody {
 
 pub(super) async fn create_memory(
     State(store): State<Store>,
+    Extension(org_store): Extension<OrgStore>,
     Extension(events): Extension<Events>,
     Json(b): Json<CreateMemoryBody>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
@@ -77,8 +78,18 @@ pub(super) async fn create_memory(
             .to_string(),
         None => "project".to_string(),
     };
+    let target_store = if layer == "org" {
+        org_store.as_ref().ok_or_else(|| {
+            ApiError(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "org layer not configured — set [org_sync] in the global config".to_string(),
+            )
+        })?
+    } else {
+        &store
+    };
     let id = format!("mem_{}", uuid::Uuid::new_v4().simple());
-    store
+    target_store
         .store(&crate::store::NewMemoryRow {
             id: &id,
             title: &b.title,
