@@ -157,7 +157,13 @@ async fn memory_recall_by_id_finds_org_memory_when_not_in_primary() {
     })
     .await
     .unwrap();
-    let org_id = hm.org_store.as_ref().unwrap().list_memories(10, 0).await.unwrap()[0]
+    let org_id = hm
+        .org_store
+        .as_ref()
+        .unwrap()
+        .list_memories(10, 0)
+        .await
+        .unwrap()[0]
         .id
         .clone();
 
@@ -186,7 +192,13 @@ async fn memory_update_finds_and_updates_org_memory() {
     })
     .await
     .unwrap();
-    let org_id = hm.org_store.as_ref().unwrap().list_memories(10, 0).await.unwrap()[0]
+    let org_id = hm
+        .org_store
+        .as_ref()
+        .unwrap()
+        .list_memories(10, 0)
+        .await
+        .unwrap()[0]
         .id
         .clone();
 
@@ -201,7 +213,14 @@ async fn memory_update_finds_and_updates_org_memory() {
         .unwrap();
     assert_eq!(result.structured_content.unwrap()["updated"], true);
 
-    let updated = hm.org_store.as_ref().unwrap().recall_by_id(&org_id).await.unwrap().unwrap();
+    let updated = hm
+        .org_store
+        .as_ref()
+        .unwrap()
+        .recall_by_id(&org_id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(updated.content, "new content");
     assert_eq!(hm.store.recall_by_id(&org_id).await.unwrap(), None);
 }
@@ -219,7 +238,13 @@ async fn memory_delete_finds_and_deletes_org_memory() {
     })
     .await
     .unwrap();
-    let org_id = hm.org_store.as_ref().unwrap().list_memories(10, 0).await.unwrap()[0]
+    let org_id = hm
+        .org_store
+        .as_ref()
+        .unwrap()
+        .list_memories(10, 0)
+        .await
+        .unwrap()[0]
         .id
         .clone();
 
@@ -231,7 +256,15 @@ async fn memory_delete_finds_and_deletes_org_memory() {
         .await
         .unwrap();
     assert_eq!(result.structured_content.unwrap()["deleted"], true);
-    assert_eq!(hm.org_store.as_ref().unwrap().recall_by_id(&org_id).await.unwrap(), None);
+    assert_eq!(
+        hm.org_store
+            .as_ref()
+            .unwrap()
+            .recall_by_id(&org_id)
+            .await
+            .unwrap(),
+        None
+    );
 }
 
 #[tokio::test]
@@ -1476,7 +1509,13 @@ async fn store_edge_across_primary_and_org_fails_with_missing_endpoint() {
     .await
     .unwrap();
     let primary_id = hm.store.list_memories(10, 0).await.unwrap()[0].id.clone();
-    let org_id = hm.org_store.as_ref().unwrap().list_memories(10, 0).await.unwrap()[0]
+    let org_id = hm
+        .org_store
+        .as_ref()
+        .unwrap()
+        .list_memories(10, 0)
+        .await
+        .unwrap()[0]
         .id
         .clone();
 
@@ -1526,10 +1565,7 @@ async fn find_owning_store_degrades_when_org_connection_is_broken() {
         result.is_ok(),
         "a broken org connection must degrade to not-found, not error: {result:?}"
     );
-    assert_eq!(
-        result.unwrap().structured_content.unwrap()["found"],
-        false
-    );
+    assert_eq!(result.unwrap().structured_content.unwrap()["found"], false);
 }
 
 #[tokio::test]
@@ -1999,8 +2035,7 @@ async fn org_update_checked_against_orgs_own_max_content_tokens() {
             id,
             title: None,
             content: Some(
-                "this content also has plenty of words in it to push past five tokens"
-                    .to_string(),
+                "this content also has plenty of words in it to push past five tokens".to_string(),
             ),
             tags: None,
         })

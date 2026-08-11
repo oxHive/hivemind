@@ -404,8 +404,8 @@ impl HiveMind {
     ) -> Result<Vec<crate::store::MemoryEntry>, ErrorData> {
         match (query, tags) {
             (Some(q), Some(tags)) => {
-                let expr = crate::tag_query::TagExpr::and_all(tags)
-                    .expect("tags checked non-empty above");
+                let expr =
+                    crate::tag_query::TagExpr::and_all(tags).expect("tags checked non-empty above");
                 let candidates = store
                     .search(q, 50)
                     .await
@@ -422,8 +422,8 @@ impl HiveMind {
                 .await
                 .map_err(|e| ErrorData::internal_error(e.to_string(), None)),
             (None, Some(tags)) => {
-                let expr = crate::tag_query::TagExpr::and_all(tags)
-                    .expect("tags checked non-empty above");
+                let expr =
+                    crate::tag_query::TagExpr::and_all(tags).expect("tags checked non-empty above");
                 let mut results = store
                     .find_by_tag_expr(&expr)
                     .await
@@ -696,7 +696,9 @@ impl HiveMind {
         let hits = if trimmed.is_empty() {
             vec![]
         } else {
-            let mut hits = self.search_in(&self.store, Some(&trimmed), None, 10).await?;
+            let mut hits = self
+                .search_in(&self.store, Some(&trimmed), None, 10)
+                .await?;
             if hits.len() < 10
                 && let Some(org) = &self.org_store
             {

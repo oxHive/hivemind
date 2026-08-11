@@ -49,10 +49,7 @@ pub fn resolve_org_db_path() -> String {
     if let Ok(p) = std::env::var("HIVEMIND_ORG_DB_PATH") {
         return p;
     }
-    xdg_data_dir()
-        .join("org.db")
-        .to_string_lossy()
-        .into_owned()
+    xdg_data_dir().join("org.db").to_string_lossy().into_owned()
 }
 
 pub async fn open_database(sync: &SyncSettings, path: &str) -> Result<libsql::Database> {

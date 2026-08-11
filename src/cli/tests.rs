@@ -651,11 +651,7 @@ async fn build_status_data_includes_org_memory_when_org_sync_configured() {
     assert!(
         project.loaded.iter().any(|l| l.title == "org pref"),
         "build_status_data should load an org memory when org_sync is configured; loaded: {:?}",
-        project
-            .loaded
-            .iter()
-            .map(|l| &l.title)
-            .collect::<Vec<_>>()
+        project.loaded.iter().map(|l| &l.title).collect::<Vec<_>>()
     );
 }
 
@@ -1195,7 +1191,10 @@ fn global_config_template_parses_with_org_sync_disabled_by_default() {
     let path = tmp.path().join("config.toml");
     std::fs::write(&path, crate::cli::init::GLOBAL_CONFIG).unwrap();
     let settings = crate::config::load_server_settings(&path).unwrap();
-    assert_eq!(settings.org_sync, None, "template ships with org_sync disabled");
+    assert_eq!(
+        settings.org_sync, None,
+        "template ships with org_sync disabled"
+    );
     assert!(
         crate::cli::init::GLOBAL_CONFIG.contains("[org_sync]"),
         "template should document the org_sync block, even commented out"

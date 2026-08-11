@@ -462,7 +462,10 @@ async fn sync_settings_reports_org_sync_fields_when_present() {
     let body = resp.into_body().collect().await.unwrap().to_bytes();
     let json: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["org_sync"]["enabled"], true);
-    assert_eq!(json["org_sync"]["remote_url"], "https://gateway.example/org");
+    assert_eq!(
+        json["org_sync"]["remote_url"],
+        "https://gateway.example/org"
+    );
 }
 
 #[tokio::test]
@@ -480,7 +483,9 @@ async fn get_memory_falls_back_to_org_store() {
     // test writes through a fresh connection to the same file.
     let org_path = org_dir.path().join("test.db");
     let sync = SyncSettings::default();
-    let database = db::open_database(&sync, org_path.to_str().unwrap()).await.unwrap();
+    let database = db::open_database(&sync, org_path.to_str().unwrap())
+        .await
+        .unwrap();
     let conn = database.connect().unwrap();
     db::run_migrations(&conn).await.unwrap(); // idempotent — also sets this connection's pragmas
     let org_store = SqliteStore::new(conn);

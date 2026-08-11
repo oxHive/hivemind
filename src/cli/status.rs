@@ -180,8 +180,7 @@ pub fn cmd_session_start(json: bool) -> Result<()> {
 
             let config = crate::config::load_config(&cwd)?;
             let result =
-                crate::session::execute_session_start(&config, &store, org_store.as_ref())
-                    .await?;
+                crate::session::execute_session_start(&config, &store, org_store.as_ref()).await?;
             if let Err(e) = store
                 .log_session_start(&cwd.to_string_lossy(), &result)
                 .await
@@ -418,8 +417,7 @@ pub async fn build_status_data(
         None => None,
     };
 
-    let result =
-        crate::session::execute_session_start(&config, store, org_store.as_ref()).await?;
+    let result = crate::session::execute_session_start(&config, store, org_store.as_ref()).await?;
 
     data.project = Some(ProjectStatus {
         project_name: config.project_name.clone(),
