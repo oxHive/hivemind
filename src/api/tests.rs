@@ -1020,6 +1020,70 @@ async fn resolve_conflict_returns_404_for_missing() {
 }
 
 #[tokio::test]
+async fn list_conflicts_includes_org_conflicts_stamped_with_layer() {
+    let (app, _dir, org_dir) = test_router_with_org().await;
+
+    // Seed a conflict directly into the org db (router() already holds the
+    // org store; this reopens a fresh connection to the same file, same
+    // pattern as get_memory_falls_back_to_org_store).
+    let org_path = org_dir.path().join("test.db");
+    let sync = SyncSettings::default();
+    let database = db::open_database(&sync, org_path.to_str().unwrap())
+        .await
+        .unwrap();
+    let conn = database.connect().unwrap();
+    db::run_migrations(&conn).await.unwrap();
+    let org_store = SqliteStore::new(conn);
+    org_store
+        .store(&crate::store::NewMemoryRow {
+            id: "mem_org_conflict",
+            title: "org conflict memory",
+            content: "content",
+            tags: &[],
+            token_count: None,
+            layer: "org",
+            memory_type: "project",
+        })
+        .await
+        .unwrap();
+    org_store
+        .write_conflict("mem_org_conflict", "remote content", "local content", 2, 1)
+        .await
+        .unwrap();
+
+    let (status, body) = req(app, "GET", "/api/v1/conflicts", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["count"], 1);
+    assert_eq!(body["conflicts"][0]["layer"], "org");
+}
+
+#[tokio::test]
+async fn list_conflicts_primary_entries_have_no_layer_field() {
+    let (app, store, _dir) = test_router_with_store().await;
+    store
+        .store(&crate::store::NewMemoryRow {
+            id: "mem_primary_conflict",
+            title: "primary conflict memory",
+            content: "content",
+            tags: &[],
+            token_count: None,
+            layer: "workspace",
+            memory_type: "project",
+        })
+        .await
+        .unwrap();
+    store
+        .write_conflict("mem_primary_conflict", "remote content", "local content", 2, 1)
+        .await
+        .unwrap();
+
+    let (status, body) = req(app, "GET", "/api/v1/conflicts", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["count"], 1);
+    assert!(body["conflicts"][0].get("layer").is_none());
+}
+
+#[tokio::test]
 async fn delete_all_memories_clears_store() {
     let (app, _dir) = test_router().await;
     req(

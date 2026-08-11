@@ -62,9 +62,27 @@ pub(super) struct ConflictsParams {
 
 pub(super) async fn list_conflicts(
     State(store): State<Store>,
+    Extension(org_store): Extension<OrgStore>,
     Query(p): Query<ConflictsParams>,
 ) -> Result<Json<Value>, ApiError> {
-    let items = store.list_conflicts(p.status.as_deref()).await?;
+    let mut items: Vec<Value> = store
+        .list_conflicts(p.status.as_deref())
+        .await?
+        .into_iter()
+        .map(|c| serde_json::to_value(c).unwrap())
+        .collect();
+    if let Some(org) = &org_store {
+        match org.list_conflicts(p.status.as_deref()).await {
+            Ok(org_items) => {
+                for c in org_items {
+                    let mut v = serde_json::to_value(c).unwrap();
+                    v["layer"] = json!("org");
+                    items.push(v);
+                }
+            }
+            Err(e) => tracing::warn!("org store list_conflicts failed: {e:#}"),
+        }
+    }
     Ok(Json(json!({ "count": items.len(), "conflicts": items })))
 }
 
