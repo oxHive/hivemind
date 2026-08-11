@@ -46,11 +46,19 @@ pub(super) async fn server_status(
                     0
                 }
             };
+            let org_count = match org.count().await {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!("org store count failed: {e:#}");
+                    0
+                }
+            };
             json!({
                 "configured": true,
                 "enabled": org_sync.as_ref().is_some_and(|s| s.enabled),
                 "last_synced_at": org_last_synced_at,
                 "conflict_count": org_conflict_count,
+                "count": org_count,
             })
         }
         None => json!({ "configured": false }),

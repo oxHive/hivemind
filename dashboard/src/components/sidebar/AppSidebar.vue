@@ -40,7 +40,12 @@ const statusDot = computed(() => {
   return 'green'
 })
 
-const memoryCount = computed(() => ui.serverInfo?.memory_count ?? ui.serverInfo?.memoryCount ?? '—')
+const memoryCount = computed(() => {
+  if (!ui.serverInfo) return '—'
+  const primary = ui.serverInfo?.memory_count ?? ui.serverInfo?.memoryCount ?? 0
+  const org = ui.orgInfo?.count ?? 0
+  return primary + org
+})
 
 const serverAddress = computed(() => (BASE || 'http://localhost:3456').replace(/^https?:\/\//, ''))
 

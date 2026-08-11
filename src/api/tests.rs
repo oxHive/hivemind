@@ -384,6 +384,39 @@ async fn status_reports_org_configured_and_counts_when_present() {
     assert_eq!(json["org"]["configured"], true);
     assert_eq!(json["org"]["enabled"], true);
     assert_eq!(json["org"]["conflict_count"], 0);
+    assert_eq!(json["org"]["count"], 0);
+}
+
+#[tokio::test]
+async fn status_degrades_gracefully_when_org_store_is_broken() {
+    let (app, _dir, org_dir) = test_router_with_org().await;
+    // Break the org db out from under the router's already-open connection
+    // by dropping tables that server_status's org block queries depend on.
+    let org_path = org_dir.path().join("test.db");
+    let sync = SyncSettings::default();
+    let database = db::open_database(&sync, org_path.to_str().unwrap())
+        .await
+        .unwrap();
+    let conn = database.connect().unwrap();
+    conn.execute_batch("DROP TABLE _meta; DROP TABLE conflicts; DROP TABLE memories;")
+        .await
+        .unwrap();
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["org"]["configured"], true);
+    assert_eq!(json["org"]["conflict_count"], 0);
+    assert_eq!(json["org"]["count"], 0);
 }
 
 #[tokio::test]
