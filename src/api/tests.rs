@@ -1113,7 +1113,13 @@ async fn list_conflicts_primary_entries_have_no_layer_field() {
         .await
         .unwrap();
     store
-        .write_conflict("mem_primary_conflict", "remote content", "local content", 2, 1)
+        .write_conflict(
+            "mem_primary_conflict",
+            "remote content",
+            "local content",
+            2,
+            1,
+        )
         .await
         .unwrap();
 
