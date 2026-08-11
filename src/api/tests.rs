@@ -837,6 +837,105 @@ async fn list_edges_filtered() {
 }
 
 #[tokio::test]
+async fn create_edge_retries_against_org_on_missing_endpoint() {
+    let (app, _dir, _org_dir) = test_router_with_org().await;
+    // Two org-layer memories — primary store has neither, so primary's
+    // create_edge returns MissingEndpoint and this should retry in org.
+    let mut ids = vec![];
+    for title in ["a", "b"] {
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/memories")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({ "title": title, "content": "c", "layer": "org" }).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        ids.push(json["id"].as_str().unwrap().to_string());
+    }
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/edges")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "source_id": ids[0],
+                        "target_id": ids[1],
+                        "relationship": "sibling"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+}
+
+#[tokio::test]
+async fn list_edges_includes_org_edges_when_configured() {
+    let (app, _dir, _org_dir) = test_router_with_org().await;
+    let mut ids = vec![];
+    for title in ["a", "b"] {
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/memories")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({ "title": title, "content": "c", "layer": "org" }).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        ids.push(json["id"].as_str().unwrap().to_string());
+    }
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/edges")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({ "source_id": ids[0], "target_id": ids[1], "relationship": "sibling" })
+                        .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/edges")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["count"], 1);
+}
+
+#[tokio::test]
 async fn resolve_conflict_success() {
     let (app, store, _dir) = test_router_with_store().await;
 
