@@ -440,6 +440,46 @@ async fn delete_memory_returns_404_when_not_found() {
 }
 
 #[tokio::test]
+async fn get_memory_falls_back_to_org_store() {
+    let (app, _dir, org_dir) = test_router_with_org().await;
+    // Reopen the same org.db this router was built with, to seed a memory
+    // directly — router() takes ownership of the Arc<SqliteStore>, so the
+    // test writes through a fresh connection to the same file.
+    let org_path = org_dir.path().join("test.db");
+    let sync = SyncSettings::default();
+    let database = db::open_database(&sync, org_path.to_str().unwrap()).await.unwrap();
+    let conn = database.connect().unwrap();
+    db::run_migrations(&conn).await.unwrap(); // idempotent — also sets this connection's pragmas
+    let org_store = SqliteStore::new(conn);
+    org_store
+        .store(&crate::store::NewMemoryRow {
+            id: "mem_org1",
+            title: "org title",
+            content: "org content",
+            tags: &[],
+            token_count: None,
+            layer: "org",
+            memory_type: "project",
+        })
+        .await
+        .unwrap();
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/memories/mem_org1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["title"], "org title");
+}
+
+#[tokio::test]
 async fn list_conflicts_returns_empty() {
     let (app, _dir) = test_router().await;
     let (status, body) = req(app, "GET", "/api/v1/conflicts", None).await;

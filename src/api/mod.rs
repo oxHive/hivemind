@@ -49,6 +49,33 @@ fn not_found(msg: impl Into<String>) -> ApiError {
     ApiError(StatusCode::NOT_FOUND, msg.into())
 }
 
+/// Tries the primary store first, then org_store — mirrors
+/// `HiveMind::find_owning_store` in `src/server.rs`. An org-store lookup
+/// failure degrades to "not found in org" (never propagates), consistent
+/// with this plan's Global Constraint that org failures never break
+/// primary-store behavior.
+pub(super) async fn find_owning_store<'a>(
+    store: &'a Store,
+    org_store: &'a OrgStore,
+    id: &str,
+) -> Result<Option<&'a Store>, ApiError> {
+    if store.recall_by_id(id).await?.is_some() {
+        return Ok(Some(store));
+    }
+    if let Some(org) = org_store {
+        match org.recall_by_id(id).await {
+            Ok(Some(_)) => return Ok(Some(org)),
+            Ok(None) => {}
+            Err(e) => {
+                tracing::warn!(
+                    "org store lookup failed for id {id}: {e:#}; treating as not found in org"
+                );
+            }
+        }
+    }
+    Ok(None)
+}
+
 /// Returns an `AllowOrigin` that accepts both the configured dashboard origin and
 /// its `localhost` / `127.0.0.1` counterpart, so the browser CORS check passes
 /// regardless of which loopback hostname the user typed.

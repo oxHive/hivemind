@@ -95,11 +95,16 @@ pub(super) async fn create_memory(
 
 pub(super) async fn get_memory(
     State(store): State<Store>,
+    Extension(org_store): Extension<OrgStore>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
-    match store.recall_by_id(&id).await? {
+    let owning = find_owning_store(&store, &org_store, &id).await?;
+    match owning {
         None => Err(not_found(format!("no memory {id}"))),
-        Some(e) => Ok(Json(entry_json(&e))),
+        Some(s) => match s.recall_by_id(&id).await? {
+            None => Err(not_found(format!("no memory {id}"))),
+            Some(e) => Ok(Json(entry_json(&e))),
+        },
     }
 }
 
@@ -112,23 +117,26 @@ pub(super) struct PatchMemoryBody {
 
 pub(super) async fn patch_memory(
     State(store): State<Store>,
+    Extension(org_store): Extension<OrgStore>,
     Extension(events): Extension<Events>,
     Path(id): Path<String>,
     Json(b): Json<PatchMemoryBody>,
 ) -> Result<Json<Value>, ApiError> {
-    // Fetch current state to fill in unchanged fields
-    let current = store
+    let owning = find_owning_store(&store, &org_store, &id)
+        .await?
+        .ok_or_else(|| not_found(format!("no memory {id}")))?;
+    let current = owning
         .recall_by_id(&id)
         .await?
         .ok_or_else(|| not_found(format!("no memory {id}")))?;
     let title = b.title.as_deref().unwrap_or(&current.title);
     let content = b.content.as_deref().unwrap_or(&current.content);
     let tags = b.tags.as_deref().unwrap_or(&current.tags);
-    let updated = store.update(&id, title, content, tags).await?;
+    let updated = owning.update(&id, title, content, tags).await?;
     if !updated {
         return Err(not_found(format!("no memory {id}")));
     }
-    let entry = store
+    let entry = owning
         .recall_by_id(&id)
         .await?
         .ok_or_else(|| not_found(format!("no memory {id}")))?;
@@ -143,14 +151,18 @@ pub(super) struct TagsBody {
 
 pub(super) async fn add_memory_tags(
     State(store): State<Store>,
+    Extension(org_store): Extension<OrgStore>,
     Extension(events): Extension<Events>,
     Path(id): Path<String>,
     Json(b): Json<TagsBody>,
 ) -> Result<Json<Value>, ApiError> {
-    if !store.add_tags(&id, &b.tags).await? {
+    let owning = find_owning_store(&store, &org_store, &id)
+        .await?
+        .ok_or_else(|| not_found(format!("no memory {id}")))?;
+    if !owning.add_tags(&id, &b.tags).await? {
         return Err(not_found(format!("no memory {id}")));
     }
-    let entry = store
+    let entry = owning
         .recall_by_id(&id)
         .await?
         .ok_or_else(|| not_found(format!("no memory {id}")))?;
@@ -160,14 +172,18 @@ pub(super) async fn add_memory_tags(
 
 pub(super) async fn remove_memory_tags(
     State(store): State<Store>,
+    Extension(org_store): Extension<OrgStore>,
     Extension(events): Extension<Events>,
     Path(id): Path<String>,
     Json(b): Json<TagsBody>,
 ) -> Result<Json<Value>, ApiError> {
-    if !store.remove_tags(&id, &b.tags).await? {
+    let owning = find_owning_store(&store, &org_store, &id)
+        .await?
+        .ok_or_else(|| not_found(format!("no memory {id}")))?;
+    if !owning.remove_tags(&id, &b.tags).await? {
         return Err(not_found(format!("no memory {id}")));
     }
-    let entry = store
+    let entry = owning
         .recall_by_id(&id)
         .await?
         .ok_or_else(|| not_found(format!("no memory {id}")))?;
@@ -177,10 +193,14 @@ pub(super) async fn remove_memory_tags(
 
 pub(super) async fn delete_memory(
     State(store): State<Store>,
+    Extension(org_store): Extension<OrgStore>,
     Extension(events): Extension<Events>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
-    if !store.delete(&id).await? {
+    let owning = find_owning_store(&store, &org_store, &id)
+        .await?
+        .ok_or_else(|| not_found(format!("no memory {id}")))?;
+    if !owning.delete(&id).await? {
         return Err(not_found(format!("no memory {id}")));
     }
     let _ = events.send(json!({ "type": "changed" }));
