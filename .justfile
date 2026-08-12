@@ -3,6 +3,7 @@ mod dashboard
 import 'recipes/release.just'
 import 'recipes/cargo.just'
 import 'recipes/keyring.just'
+import 'recipes/testenv.just'
 
 _default:
   @just --choose
@@ -21,7 +22,7 @@ matrix-test-send:
 
 up:
   just run up
-  
+
 headless:
   cargo run -- up --headless
 
