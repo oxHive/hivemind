@@ -3,6 +3,7 @@
 /docs/HIVEMIND_*.md
 /.superpowers/
 .hivemind.local.toml
+/.testenv/
 
 # opencode plugin build artifacts
 plugins/opencode/hivemind.js
