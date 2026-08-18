@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { Button } from '@oxhive/ui'
+import { Button, Input } from '@oxhive/ui'
 import { useUiStore } from '../../stores/ui.js'
 import { getSyncSettings, saveSyncSettings } from '../../api/settings.js'
 
@@ -39,6 +39,14 @@ async function save() {
   ui.showToast(message.value)
 }
 
+// Mirrors Vue's native v-model.number coercion (used for the raw <input>
+// this replaced) — component v-model doesn't auto-apply modifiers, so it's
+// reproduced here to keep behavior identical.
+function looseToNumber(val) {
+  const n = parseFloat(val)
+  return isNaN(n) ? val : n
+}
+
 const intervalLabel = computed(() => {
   const m = Math.round(intervalSeconds.value / 60)
   return m < 1 ? `${intervalSeconds.value}s` : `${m}m`
@@ -56,11 +64,12 @@ const intervalLabel = computed(() => {
       </label>
       <template v-if="enabled">
         <label class="hm-label">REMOTE URL</label>
-        <input class="hm-input mb-4" v-model="remoteUrl" placeholder="http://pi.local:3456" />
+        <Input class="mb-4" v-model="remoteUrl" placeholder="http://pi.local:3456" />
         <label class="hm-label">API KEY</label>
-        <input class="hm-input mb-4" type="password" v-model="apiKey" placeholder="Leave blank if no auth" />
+        <Input class="mb-4" type="password" v-model="apiKey" placeholder="Leave blank if no auth" />
         <label class="hm-label">SYNC INTERVAL — {{ intervalLabel }}</label>
-        <input class="hm-input mb-4" type="number" min="30" v-model.number="intervalSeconds" />
+        <Input class="mb-4" type="number" min="30" :model-value="intervalSeconds"
+          @update:model-value="v => intervalSeconds = looseToNumber(v)" />
         <label class="flex items-center gap-3 mb-5 cursor-pointer">
           <input type="checkbox" v-model="syncOnStore" class="w-4 h-4" />
           <span style="font-size:13px; color:var(--hm-text-secondary)">Sync immediately after storing a memory</span>

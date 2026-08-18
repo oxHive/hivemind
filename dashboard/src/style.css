@@ -26,8 +26,11 @@ body {
   min-width: 760px;
 }
 
-/* Inputs */
-.hm-input {
+/* Textareas — kept separate from @oxhive/ui's <Input> (which only renders
+   an <input>, not a <textarea>). These two multi-line fields
+   (TagsSection.vue namespace description, MemoryDetail.vue raw content)
+   need this class to carry the same look forward. */
+.hm-textarea {
   height: 32px;
   padding: 0 10px;
   font-size: 13px;
@@ -40,11 +43,11 @@ body {
   width: 100%;
 }
 
-.hm-input:focus {
+.hm-textarea:focus {
   border-color: var(--hm-accent);
 }
 
-.hm-input::placeholder {
+.hm-textarea::placeholder {
   color: var(--hm-text-tertiary);
 }
 

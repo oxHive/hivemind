@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue'
+import { Input } from '@oxhive/ui'
 import { useTagSettingsStore } from '../../stores/tagSettings.js'
 import TagChip from './TagChip.vue'
 import ConfirmModal from './ConfirmModal.vue'
@@ -132,7 +133,7 @@ function handleBlur() {
   <div class="relative">
     <div class="flex flex-wrap gap-1.5 p-2.5 rounded-md" style="border:0.5px solid var(--hm-border-subtle); min-height:40px">
       <TagChip v-for="tag in displayTags" :key="tag" :tag="tag" removable editable @remove="removeTag(tag)" @edit="handleEdit" />
-      <input class="hm-input" style="width:120px; height:22px; font-size:10px; padding:0 6px"
+      <Input style="width:120px; height:22px; font-size:10px; padding:0 6px"
         v-model="inputValue"
         placeholder="add tag…"
         @focus="showSuggestions = true"

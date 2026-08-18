@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { Button } from '@oxhive/ui'
+import { Button, Input } from '@oxhive/ui'
 import { useTagSettingsStore } from '../../stores/tagSettings.js'
 import { useUiStore } from '../../stores/ui.js'
 import TagChip from '../shared/TagChip.vue'
@@ -137,7 +137,7 @@ async function save() {
           </template>
         </div>
 
-        <textarea class="hm-input mb-4 resize-none" style="font-size:12px; height:auto; padding:8px 10px; white-space:pre-wrap"
+        <textarea class="hm-textarea mb-4 resize-none" style="font-size:12px; height:auto; padding:8px 10px; white-space:pre-wrap"
           rows="2" :disabled="isLocked(name)"
           v-model="ns.description" placeholder="What does this namespace mean? Shown to AI agents and in this UI."></textarea>
 
@@ -154,7 +154,7 @@ async function save() {
             :style="{ background: c, outline: ns.color === c ? '2px solid var(--hm-accent)' : 'none', outlineOffset: '1px' }"
             :aria-label="`Use color ${c}`"
             @click="setColor(name, c)"></button>
-          <input class="hm-input font-mono" style="width:98px; height:24px; font-size:11px; padding:0 6px"
+          <Input class="font-mono" style="width:98px; height:24px; font-size:11px; padding:0 6px"
             v-model="ns.color"
             :style="!HEX_RE.test(ns.color) ? `border-color:var(--hm-danger-border)` : ''" />
         </div>
@@ -186,7 +186,7 @@ async function save() {
           </div>
           <div class="flex flex-wrap items-center gap-1.5 mb-1.5">
             <TagChip v-for="v in ns.values" :key="v" :tag="`${name}:${v}`" :removable="!isLocked(name)" @remove="removeValue(name, v)" />
-            <input v-if="!isLocked(name)" class="hm-input" style="width:120px; height:24px; font-size:11px; padding:0 6px"
+            <Input v-if="!isLocked(name)" style="width:120px; height:24px; font-size:11px; padding:0 6px"
               v-model="newValueInput[name]" placeholder="Add a value…"
               @keydown.enter="addValue(name)" />
           </div>
@@ -196,7 +196,7 @@ async function save() {
 
       <div class="flex items-center gap-2 mb-4 rounded-md p-3"
         style="border:1px dashed var(--hm-border-default)">
-        <input class="hm-input" style="width:160px" v-model="newNamespaceName" placeholder="new namespace"
+        <Input style="width:160px" v-model="newNamespaceName" placeholder="new namespace"
           @keydown.enter="addNamespace" />
         <Button variant="default" size="sm" @click="addNamespace">+ Add namespace</Button>
       </div>

@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue'
-import { Button } from '@oxhive/ui'
+import { Button, Input } from '@oxhive/ui'
 import { useMemoriesStore } from '../../stores/memories.js'
 import { useUiStore } from '../../stores/ui.js'
 
@@ -41,7 +41,7 @@ async function handleClear() {
         Org-layer memories are not affected by this action.
       </p>
       <label class="hm-label">TYPE DELETE TO CONFIRM</label>
-      <input class="hm-input mb-4" v-model="confirmText" placeholder="DELETE" />
+      <Input class="mb-4" v-model="confirmText" placeholder="DELETE" />
       <div class="flex justify-end gap-2">
         <Button variant="default" @click="$emit('close')">Cancel</Button>
         <Button variant="danger" :disabled="!canConfirm || working" @click="handleClear">

@@ -339,7 +339,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
           <textarea
             id="mem-content"
             ref="contentEl"
-            class="hm-input resize-none w-full"
+            class="hm-textarea resize-none w-full"
             style="height:40vh; min-height:160px; padding:10px 12px; font-family:var(--hm-font-mono); font-size:12px; line-height:1.6; background:var(--hm-mono-bg)"
             :value="memories.draft?.content"
             @input="onContentInput"

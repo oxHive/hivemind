@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { PhX } from '@phosphor-icons/vue'
-import { Button } from '@oxhive/ui'
+import { Button, Input } from '@oxhive/ui'
 import { useGraphStore } from '../../stores/graph.js'
 import { useMemoriesStore } from '../../stores/memories.js'
 import { useSuggestStore } from '../../stores/suggest.js'
@@ -148,8 +148,8 @@ async function endSession() {
           <Button v-if="suggest.active" variant="ghost" size="sm" @click="openRevise(edge)">Revise</Button>
         </div>
 
-        <input v-if="revisingFor === edge.id" v-model="feedbackText"
-          class="hm-input mt-2 w-full" placeholder="What should change? Enter to send"
+        <Input v-if="revisingFor === edge.id" v-model="feedbackText"
+          class="mt-2 w-full" placeholder="What should change? Enter to send"
           @click.stop @keyup.enter="submitRevise(edge)" @keyup.esc="revisingFor = null" />
       </div>
     </div>

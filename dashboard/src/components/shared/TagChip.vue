@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, nextTick } from 'vue'
 import { PhX } from '@phosphor-icons/vue'
+import { Input } from '@oxhive/ui'
 import { useTagSettingsStore } from '../../stores/tagSettings.js'
 
 const props = defineProps({
@@ -45,8 +46,8 @@ function cancelEdit() {
 <template>
   <span v-if="editing" class="inline-flex items-center rounded-sm px-1.5 py-0.5"
     style="background:var(--hm-bg-elevated); border:0.5px solid var(--hm-border-default)">
-    <input ref="editInput" v-model="editValue"
-      class="hm-input text-[10px] font-mono" style="width:110px; height:16px; padding:0 2px; border:none; background:transparent"
+    <Input ref="editInput" v-model="editValue"
+      class="text-[10px] font-mono" style="width:110px; height:16px; padding:0 2px; border:none; background:transparent"
       @keydown.enter.prevent="commitEdit"
       @keydown.esc="cancelEdit"
       @blur="commitEdit" />

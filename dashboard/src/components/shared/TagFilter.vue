@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { PhX } from '@phosphor-icons/vue'
-import { Button } from '@oxhive/ui'
+import { Button, Input } from '@oxhive/ui'
 import { useMemoriesStore } from '../../stores/memories.js'
 import { useTagSettingsStore } from '../../stores/tagSettings.js'
 import TagChip from './TagChip.vue'
@@ -101,7 +101,7 @@ function toggle() {
     </Button>
 
     <div v-if="open" class="tag-filter-menu">
-      <input class="hm-input mb-2" style="font-size:12px" v-model="query" placeholder="Search tags…" autofocus />
+      <Input class="mb-2" style="font-size:12px" v-model="query" placeholder="Search tags…" autofocus />
 
       <div v-if="!filteredGroups.namespaces.length && !filteredGroups.bare.length"
         style="font-size:11px; color:var(--hm-text-tertiary); padding:6px 2px">
