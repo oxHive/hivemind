@@ -5,6 +5,7 @@
     "": {
       "name": "hivemind-dashboard",
       "dependencies": {
+        "@oxhive/ui": "file:../../ui-kit",
         "@phosphor-icons/vue": "^2.2.1",
         "d3": "^7.9.0",
         "dompurify": "^3.4.12",
@@ -117,6 +118,8 @@
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
 
     "@one-ini/wasm": ["@one-ini/wasm@0.1.1", "", {}, "sha512-XuySG1E38YScSJoMlqovLru4KTUNSjgVTIjyh7qMX6aNN5HY5Ct5LhRJdxO79JtTzKfzV/bnWpz+zquYrISsvw=="],
+
+    "@oxhive/ui": ["@oxhive/ui@file:../../ui-kit", { "devDependencies": { "@vitejs/plugin-vue": "^5.2.3", "@vue/test-utils": "^2.4.11", "jsdom": "^30.0.1", "vite": "^6.3.5", "vitest": "^4.1.10", "vue": "^3.5.13" }, "peerDependencies": { "vue": "^3.5.0" } }],
 
     "@phosphor-icons/vue": ["@phosphor-icons/vue@2.2.1", "", { "peerDependencies": { "vue": ">=3.2.39" } }, "sha512-3RNg1utc2Z5RwPKWFkW3eXI/0BfQAwXgtFxPUPeSzi55jGYUq16b+UqcgbKLazWFlwg5R92OCLKjDiJjeiJcnA=="],
 
