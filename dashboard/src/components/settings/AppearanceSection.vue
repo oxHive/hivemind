@@ -18,7 +18,7 @@ const options = [
     <p class="hm-label mb-4">APPEARANCE</p>
     <div class="flex gap-1.5 mb-6">
       <Button v-for="opt in options" :key="opt.id"
-        size="sm" class="rounded-sm"
+        size="sm" class="rounded-sm mode-btn"
         :aria-pressed="theme.mode === opt.id"
         :style="theme.mode === opt.id
           ? 'background:var(--hm-bg-elevated); border-color:var(--hm-border-default); color:var(--hm-text-primary)'
@@ -43,3 +43,18 @@ const options = [
     </p>
   </div>
 </template>
+
+<style scoped>
+/* These mode buttons use <Button> with no `variant` prop, defaulting to
+   `oxui-btn-default`, which carries `.oxui-btn-default:hover { background:
+   var(--hm-bg-elevated) }`. Pre-migration these were bare `hm-btn hm-btn-sm`
+   elements with no matching :hover rule, so hovering them was a visual
+   no-op. Both branches of the inline `:style` binding above already declare
+   their own `background`, which normally outranks any class selector
+   (including :hover ones) — so this rule is primarily defensive/documentary,
+   guarding against the hover tint reappearing if that inline background is
+   ever dropped from one branch. */
+.mode-btn:hover {
+  background: transparent;
+}
+</style>

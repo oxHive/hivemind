@@ -14,7 +14,22 @@ const chipStyle = computed(() => {
 </script>
 
 <template>
-  <Button @click="$emit('select', value)" size="sm" :style="chipStyle">
+  <Button @click="$emit('select', value)" size="sm" class="filter-chip-btn" :style="chipStyle">
     {{ label }}
   </Button>
 </template>
+
+<style scoped>
+/* This chip uses <Button> with no `variant` prop, defaulting to
+   `oxui-btn-default`, which carries `.oxui-btn-default:hover { background:
+   var(--hm-bg-elevated) }`. Pre-migration this was a bare `hm-btn hm-btn-sm`
+   element with no matching :hover rule, so hovering it was a visual no-op.
+   `chipStyle` always declares its own `background` (transparent, a layer
+   color, or the active default), which normally outranks any class selector
+   including :hover ones — so this rule is primarily defensive/documentary,
+   guarding against the hover tint (which would clash with the layer color)
+   reappearing if `chipStyle` is ever changed to omit `background`. */
+.filter-chip-btn:hover {
+  background: transparent;
+}
+</style>

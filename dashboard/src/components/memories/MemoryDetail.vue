@@ -380,13 +380,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
         <template v-if="memories.creatingNew">
           <label class="hm-label">LAYER</label>
           <div class="flex gap-1.5 mb-6">
-            <Button size="sm"
+            <Button size="sm" class="layer-btn"
               :style="memories.draft.layer==='workspace' ? 'background:var(--hm-workspace-bg); border-color:var(--hm-workspace); color:var(--hm-workspace)' : 'border-color:var(--hm-border-subtle); color:var(--hm-text-secondary)'"
               @click="memories.draft.layer='workspace'">workspace</Button>
-            <Button size="sm"
+            <Button size="sm" class="layer-btn"
               :style="memories.draft.layer==='personal' ? 'background:var(--hm-personal-bg); border-color:var(--hm-personal); color:var(--hm-personal)' : 'border-color:var(--hm-border-subtle); color:var(--hm-text-secondary)'"
               @click="memories.draft.layer='personal'">personal</Button>
-            <Button size="sm"
+            <Button size="sm" class="layer-btn"
               :disabled="!ui.orgInfo?.configured"
               :title="ui.orgInfo?.configured ? '' : 'Org layer not configured — set [org_sync] in the global config'"
               :style="memories.draft.layer==='org' ? 'background:var(--hm-org-bg); border-color:var(--hm-org); color:var(--hm-org)' : 'border-color:var(--hm-border-subtle); color:var(--hm-text-secondary)'"
@@ -465,6 +465,22 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
 </template>
 
 <style scoped>
+/* The layer-picker buttons use <Button> with no `variant` prop, so they fall
+   back to `oxui-btn-default`, which carries `.oxui-btn-default:hover {
+   background: var(--hm-bg-elevated) }`. Pre-migration these were bare
+   `hm-btn hm-btn-sm` elements with no matching :hover rule at all, so hovering
+   them was a visual no-op. The inline `:style` binding already blocks that
+   class-level :hover rule whenever it declares its own `background` (the
+   selected-layer case), but the non-selected branch omits `background`
+   entirely, letting `.oxui-btn-default:hover` win and tint the button on
+   hover. This rule restores the pre-migration "no visual change" behavior by
+   pinning hover background back to oxui-btn-default's own base value
+   (transparent). It is a no-op whenever the button IS selected, since the
+   inline style's `background` always outranks any class selector. */
+.layer-btn:hover {
+  background: transparent;
+}
+
 .mem-title-input {
   display: block;
   width: 100%;

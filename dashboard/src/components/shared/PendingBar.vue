@@ -17,7 +17,7 @@ const suggest = useSuggestStore()
     </span>
     <div class="flex items-center gap-4">
       <button class="pending-bar__link" @click="graph.rejectAllPending()">Reject all</button>
-      <Button size="sm" style="background:var(--hm-accent); border-color:var(--hm-accent); color:var(--hm-bg-base); font-weight:600"
+      <Button size="sm" class="accept-all-btn" style="background:var(--hm-accent); border-color:var(--hm-accent); color:var(--hm-bg-base); font-weight:600"
         @click="graph.acceptAllPending()">Accept all</Button>
     </div>
   </div>
@@ -36,5 +36,19 @@ const suggest = useSuggestStore()
 .pending-bar__link:hover {
   color: var(--hm-text-primary);
   text-decoration: underline;
+}
+
+/* This CTA uses <Button> with no `variant` prop, defaulting to
+   `oxui-btn-default`, which carries `.oxui-btn-default:hover { background:
+   var(--hm-bg-elevated) }` — a dim neutral tint that would visibly wash out
+   this solid accent-colored "Accept all" CTA on hover. Pre-migration this was
+   a bare `hm-btn hm-btn-sm` element with no matching :hover rule, so hovering
+   it was a visual no-op; the static inline `style` above always declares
+   `background: var(--hm-accent)`, which normally outranks any class selector
+   including :hover ones, so this rule is primarily defensive/documentary,
+   pinning the intended hover background explicitly in case the inline style
+   is ever refactored away from a literal always-on background. */
+.accept-all-btn:hover {
+  background: var(--hm-accent);
 }
 </style>
