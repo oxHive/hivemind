@@ -1,9 +1,8 @@
 <script setup>
 import { ref, computed } from 'vue'
-import { Input } from '@oxhive/ui'
+import { Input, Modal } from '@oxhive/ui'
 import { useTagSettingsStore } from '../../stores/tagSettings.js'
 import TagChip from './TagChip.vue'
-import ConfirmModal from './ConfirmModal.vue'
 
 const props = defineProps({ modelValue: { type: Array, default: () => [] } })
 const emit = defineEmits(['update:modelValue'])
@@ -151,7 +150,7 @@ function handleBlur() {
         style="font-size:11px; color:var(--hm-text-secondary)"
         @mousedown.prevent="selectSuggestion(s)">{{ s }}</button>
     </div>
-    <ConfirmModal v-if="pendingReplace"
+    <Modal v-if="pendingReplace"
       title="Replace project tag?"
       :body="`This memory is already tagged ${pendingReplace.oldTag}. Replace it with ${pendingReplace.newTag}?`"
       confirm-label="Replace"

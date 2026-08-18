@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { PhDownloadSimple, PhFlag, PhShareNetwork } from '@phosphor-icons/vue'
-import { Button } from '@oxhive/ui'
+import { Button, Modal } from '@oxhive/ui'
 import { useMemoriesStore } from '../../stores/memories.js'
 import { useUiStore } from '../../stores/ui.js'
 import { useGraphStore } from '../../stores/graph.js'
@@ -10,7 +10,6 @@ import TagInput from '../shared/TagInput.vue'
 import EmptyState from '../shared/EmptyState.vue'
 import DeleteConfirmModal from './DeleteConfirmModal.vue'
 import MarkdownContent from '../shared/MarkdownContent.vue'
-import ConfirmModal from '../shared/ConfirmModal.vue'
 import CopyIdButton from '../shared/CopyIdButton.vue'
 import { fmtDate, slugify } from '../../lib/format.js'
 import { createFeedback } from '../../api/feedback.js'
@@ -452,7 +451,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
       @cancel="showDeleteModal = false"
     />
 
-    <ConfirmModal
+    <Modal
       v-if="showResetModal"
       title="Reset changes?"
       body="Unsaved edits to this memory will be discarded and reverted to the last saved version. This cannot be undone."

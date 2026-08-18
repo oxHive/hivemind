@@ -15,7 +15,7 @@ describe('MemoryDetail org layer picker gating', () => {
       global: {
         stubs: {
           TagInput: true, MarkdownContent: true, DeleteConfirmModal: true,
-          ConfirmModal: true, CopyIdButton: true, EmptyState: true,
+          Modal: true, CopyIdButton: true, EmptyState: true,
         },
       },
     })

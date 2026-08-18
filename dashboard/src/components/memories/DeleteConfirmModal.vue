@@ -1,11 +1,11 @@
 <script setup>
-import ConfirmModal from '../shared/ConfirmModal.vue'
+import { Modal } from '@oxhive/ui'
 defineProps({ mem: Object })
 defineEmits(['confirm', 'cancel'])
 </script>
 
 <template>
-  <ConfirmModal
+  <Modal
     title="Delete memory?"
     :body="`&quot;${mem?.title}&quot; will be permanently deleted. This cannot be undone.`"
     confirmLabel="Delete"
