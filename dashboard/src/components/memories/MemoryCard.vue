@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import LayerBadge from '../shared/LayerBadge.vue'
 import TagChip from '../shared/TagChip.vue'
-import Tooltip from '../shared/Tooltip.vue'
+import { Tooltip } from '@oxhive/ui'
 import { useMemoriesStore } from '../../stores/memories.js'
 import { fmtDate } from '../../lib/format.js'
 

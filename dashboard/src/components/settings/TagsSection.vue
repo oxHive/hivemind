@@ -1,10 +1,9 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { Button, Input } from '@oxhive/ui'
+import { Button, Input, Tooltip } from '@oxhive/ui'
 import { useTagSettingsStore } from '../../stores/tagSettings.js'
 import { useUiStore } from '../../stores/ui.js'
 import TagChip from '../shared/TagChip.vue'
-import Tooltip from '../shared/Tooltip.vue'
 
 const tagSettings = useTagSettingsStore()
 const ui = useUiStore()

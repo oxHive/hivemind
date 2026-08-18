@@ -9,8 +9,7 @@ import PendingBar from '../components/shared/PendingBar.vue'
 import DetailPanel from '../components/graph/DetailPanel.vue'
 import MiniCard from '../components/graph/MiniCard.vue'
 import Legend from '../components/graph/Legend.vue'
-import { EmptyState } from '@oxhive/ui'
-import Tooltip from '../components/shared/Tooltip.vue'
+import { EmptyState, Tooltip } from '@oxhive/ui'
 
 const memories = useMemoriesStore()
 const suggest = useSuggestStore()
