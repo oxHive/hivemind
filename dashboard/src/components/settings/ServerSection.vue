@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from 'vue'
+import { Button } from '@oxhive/ui'
 import { useUiStore } from '../../stores/ui.js'
 import { useUpdateStore } from '../../stores/update.js'
 const ui = useUiStore()
@@ -39,8 +40,8 @@ const updateText = computed(() => {
             :style="{ color: update.status === 'failed' ? 'var(--hm-danger)' : (update.available ? 'var(--hm-warning)' : 'var(--hm-text-primary)') }">
             {{ updateText }}
           </span>
-          <button v-if="update.available && update.platformSupported && update.status !== 'updating'"
-            class="hm-btn hm-btn-default hm-btn-sm" @click="update.changelogOpen = true">View</button>
+          <Button v-if="update.available && update.platformSupported && update.status !== 'updating'"
+            variant="default" size="sm" @click="update.changelogOpen = true">View</Button>
         </span>
       </div>
       <div v-for="[label, value] in rowsAfterUpdate" :key="label" class="info-row">

@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { PhMagnifyingGlass, PhPlus } from '@phosphor-icons/vue'
+import { Button } from '@oxhive/ui'
 import { useMemoriesStore } from '../../stores/memories.js'
 import { useUiStore } from '../../stores/ui.js'
 import MemoryCard from './MemoryCard.vue'
@@ -55,13 +56,13 @@ const filters = computed(() =>
             @input="memories.searchQuery = $event.target.value"
           />
         </div>
-        <button class="hm-btn hm-btn-primary hm-btn-sm shrink-0 gap-1" title="New memory"
+        <Button variant="primary" size="sm" class="shrink-0 gap-1" title="New memory"
           @click="memories.startNew()">
           <PhPlus :size="13" weight="bold" />
           New
           <span v-if="memories.hasNewDraft" class="font-mono rounded-sm px-1"
             style="font-size:9px; background:var(--hm-warning-bg); color:var(--hm-warning)">DRAFT</span>
-        </button>
+        </Button>
       </div>
       <div class="flex items-center flex-wrap gap-y-2 gap-x-2">
         <div class="flex gap-1.5">

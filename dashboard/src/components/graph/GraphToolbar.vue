@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import { PhMagnifyingGlass, PhMinus, PhPlus, PhCornersOut, PhSparkle, PhArrowsClockwise } from '@phosphor-icons/vue'
+import { Button } from '@oxhive/ui'
 import { useGraphStore } from '../../stores/graph.js'
 import { useMemoriesStore } from '../../stores/memories.js'
 import { useSuggestStore } from '../../stores/suggest.js'
@@ -70,14 +71,14 @@ function resetZoom() {
           <PhPlus :size="12" weight="bold" />
         </button>
       </div>
-      <button class="hm-btn hm-btn-ghost hm-btn-sm" title="Re-layout graph" @click="graph.requestRelayout()">
+      <Button variant="ghost" size="sm" title="Re-layout graph" @click="graph.requestRelayout()">
         <PhArrowsClockwise :size="13" weight="bold" />
-      </button>
-      <button class="hm-btn hm-btn-sm suggest-btn"
+      </Button>
+      <Button size="sm" class="suggest-btn"
         @click="suggest.active ? suggest.openPanel() : suggest.start()">
         <PhSparkle :size="13" weight="fill" />
         {{ suggest.phase === 'suggesting' ? 'suggesting…' : 'suggest' }}
-      </button>
+      </Button>
     </div>
   </div>
 </template>

@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { Button } from '@oxhive/ui'
 import MarkdownContent from '../shared/MarkdownContent.vue'
 import { useUpdateStore } from '../../stores/update.js'
 import { getStatus } from '../../api/memories.js'
@@ -128,10 +129,10 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="flex justify-end gap-2">
-          <button class="hm-btn hm-btn-default" @click="emit('close')">Later</button>
-          <button class="hm-btn hm-btn-primary" @click="onUpdate">
+          <Button variant="default" @click="emit('close')">Later</Button>
+          <Button variant="primary" @click="onUpdate">
             {{ update.status === 'failed' ? 'Retry update' : 'Update' }}
-          </button>
+          </Button>
         </div>
       </template>
 
@@ -156,7 +157,7 @@ onBeforeUnmount(() => {
             Check the server logs, or reload to check its current state.
           </p>
           <div class="flex justify-end">
-            <button class="hm-btn hm-btn-primary" @click="onReloadClick">Reload page</button>
+            <Button variant="primary" @click="onReloadClick">Reload page</Button>
           </div>
         </div>
       </template>

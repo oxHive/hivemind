@@ -1,5 +1,6 @@
 <script setup>
 import { PhX } from '@phosphor-icons/vue'
+import { Button } from '@oxhive/ui'
 import { useUiStore } from '../../stores/ui.js'
 import { useFeedbackStore } from '../../stores/feedback.js'
 import { useMemoriesStore } from '../../stores/memories.js'
@@ -39,16 +40,16 @@ function navToMemory() {
           {{ item.title || item.memory_id }}
         </button>
       </div>
-      <button class="hm-btn hm-btn-ghost hm-btn-sm" aria-label="Dismiss feedback" @click="fb.dismissFeedback(item.id)">
+      <Button variant="ghost" size="sm" aria-label="Dismiss feedback" @click="fb.dismissFeedback(item.id)">
         <PhX :size="14" weight="bold" />
-      </button>
+      </Button>
     </div>
 
     <p v-if="item.note" style="font-size:12px; color:var(--hm-text-secondary)" class="mb-4">{{ item.note }}</p>
 
-    <button class="hm-btn hm-btn-default hm-btn-sm font-mono"
+    <Button variant="default" size="sm" class="font-mono"
       @click="ui.copyToClipboard(`/memory-edit ${item.memory_id}`)">
       ⎘ /memory-edit
-    </button>
+    </Button>
   </div>
 </template>

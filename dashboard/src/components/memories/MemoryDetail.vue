@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { PhDownloadSimple, PhFlag, PhShareNetwork } from '@phosphor-icons/vue'
+import { Button } from '@oxhive/ui'
 import { useMemoriesStore } from '../../stores/memories.js'
 import { useUiStore } from '../../stores/ui.js'
 import { useGraphStore } from '../../stores/graph.js'
@@ -253,20 +254,20 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
           <CopyIdButton v-if="!memories.creatingNew" :id="memories.selected.id" />
         </span>
         <div v-if="memories.selected" class="flex gap-1">
-          <button v-if="!memories.creatingNew" class="hm-btn hm-btn-ghost hm-btn-sm" title="View in graph" @click="openInGraph">
+          <Button v-if="!memories.creatingNew" variant="ghost" size="sm" title="View in graph" @click="openInGraph">
             <PhShareNetwork :size="14" /> Go to graph
-          </button>
-          <button class="hm-btn hm-btn-ghost hm-btn-sm"
+          </Button>
+          <Button variant="ghost" size="sm"
             :disabled="!canDownload"
             :title="memories.dirty ? 'Save changes before downloading' : 'Download as Markdown'"
             @click="downloadMarkdown">
             <PhDownloadSimple :size="14" /> Download
-          </button>
+          </Button>
           <div class="relative">
-            <button class="hm-btn hm-btn-ghost hm-btn-sm" title="Flag for review"
+            <Button variant="ghost" size="sm" title="Flag for review"
               @click="flagOpen = !flagOpen" @keydown.esc="flagOpen = false">
               <PhFlag :size="14" />
-            </button>
+            </Button>
             <div v-if="flagOpen" class="fixed inset-0" style="z-index:9" @click="flagOpen = false"></div>
             <div v-if="flagOpen" class="absolute right-0 mt-1 rounded-md py-1"
               style="background:var(--hm-bg-overlay); border:0.5px solid var(--hm-border-default); z-index:10">
@@ -275,7 +276,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
                 @click="flag(r)">{{ r }}</button>
             </div>
           </div>
-          <button class="hm-btn hm-btn-danger hm-btn-sm" @click="showDeleteModal = true">Delete</button>
+          <Button variant="danger" size="sm" @click="showDeleteModal = true">Delete</Button>
         </div>
       </div>
 
@@ -286,12 +287,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
           Someone (or an agent) saved a different version of "{{ memories.conflict.title }}" while your changes here were unsaved. Choose which version to keep.
         </p>
         <div class="flex items-center gap-2 mt-2">
-          <button class="hm-btn hm-btn-primary hm-btn-sm" @click="memories.resolveConflictLoadLatest()">
+          <Button variant="primary" size="sm" @click="memories.resolveConflictLoadLatest()">
             Load latest version
-          </button>
-          <button class="hm-btn hm-btn-default hm-btn-sm" @click="memories.resolveConflictKeepMine()">
+          </Button>
+          <Button variant="default" size="sm" @click="memories.resolveConflictKeepMine()">
             Keep my draft
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -379,17 +380,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
         <template v-if="memories.creatingNew">
           <label class="hm-label">LAYER</label>
           <div class="flex gap-1.5 mb-6">
-            <button class="hm-btn hm-btn-sm"
+            <Button size="sm"
               :style="memories.draft.layer==='workspace' ? 'background:var(--hm-workspace-bg); border-color:var(--hm-workspace); color:var(--hm-workspace)' : 'border-color:var(--hm-border-subtle); color:var(--hm-text-secondary)'"
-              @click="memories.draft.layer='workspace'">workspace</button>
-            <button class="hm-btn hm-btn-sm"
+              @click="memories.draft.layer='workspace'">workspace</Button>
+            <Button size="sm"
               :style="memories.draft.layer==='personal' ? 'background:var(--hm-personal-bg); border-color:var(--hm-personal); color:var(--hm-personal)' : 'border-color:var(--hm-border-subtle); color:var(--hm-text-secondary)'"
-              @click="memories.draft.layer='personal'">personal</button>
-            <button class="hm-btn hm-btn-sm"
+              @click="memories.draft.layer='personal'">personal</Button>
+            <Button size="sm"
               :disabled="!ui.orgInfo?.configured"
               :title="ui.orgInfo?.configured ? '' : 'Org layer not configured — set [org_sync] in the global config'"
               :style="memories.draft.layer==='org' ? 'background:var(--hm-org-bg); border-color:var(--hm-org); color:var(--hm-org)' : 'border-color:var(--hm-border-subtle); color:var(--hm-text-secondary)'"
-              @click="memories.draft.layer='org'">org</button>
+              @click="memories.draft.layer='org'">org</Button>
           </div>
         </template>
 
@@ -424,22 +425,22 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
           not saved yet
         </span>
         <div class="flex items-center gap-2">
-          <button v-if="memories.creatingNew" class="hm-btn hm-btn-default hm-btn-sm"
+          <Button v-if="memories.creatingNew" variant="default" size="sm"
             :disabled="memories.saving"
             @click="handleCancelNew">
             Cancel
-          </button>
-          <button v-else-if="memories.dirty" class="hm-btn hm-btn-default hm-btn-sm"
+          </Button>
+          <Button v-else-if="memories.dirty" variant="default" size="sm"
             :disabled="memories.saving"
             @click="showResetModal = true">
             Reset
-          </button>
-          <button class="hm-btn hm-btn-primary hm-btn-sm"
+          </Button>
+          <Button variant="primary" size="sm"
             :disabled="(memories.creatingNew ? !memories.canSaveNew : !memories.dirty) || memories.saving || !!memories.conflict"
             :title="memories.conflict ? 'Resolve the conflict above before saving' : undefined"
             @click="handleSave">
             {{ memories.saving ? (memories.creatingNew ? 'Creating…' : 'Saving…') : (memories.creatingNew ? 'Create' : 'Save') }}
-          </button>
+          </Button>
         </div>
       </div>
     </template>

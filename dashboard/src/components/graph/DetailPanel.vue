@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import { PhX, PhArrowSquareOut, PhFlag } from '@phosphor-icons/vue'
+import { Button } from '@oxhive/ui'
 import { useGraphStore } from '../../stores/graph.js'
 import { useMemoriesStore } from '../../stores/memories.js'
 import { useUiStore } from '../../stores/ui.js'
@@ -53,9 +54,9 @@ async function flag(signal) {
       <div class="flex items-center justify-between px-5 py-2.5"
         style="border-bottom:0.5px solid var(--hm-border-subtle)">
         <span style="font-size:13px; font-weight:500; color:var(--hm-text-primary)">Memory</span>
-        <button class="hm-btn hm-btn-ghost hm-btn-sm" aria-label="Close" @click="graph.selectedNodeId = null">
+        <Button variant="ghost" size="sm" aria-label="Close" @click="graph.selectedNodeId = null">
           <PhX :size="14" weight="bold" />
-        </button>
+        </Button>
       </div>
 
       <div v-if="node" class="flex-1 overflow-y-auto px-5 py-4">
@@ -95,16 +96,16 @@ async function flag(signal) {
 
       <div v-if="node" class="flex flex-col gap-2 px-5 py-3"
         style="border-top:0.5px solid var(--hm-border-subtle)">
-        <button class="hm-btn hm-btn-sm connect-btn w-full justify-center" @click="openInMemories">
+        <Button size="sm" class="connect-btn w-full justify-center" @click="openInMemories">
           <PhArrowSquareOut :size="13" weight="bold" /> Go to memory detail
-        </button>
+        </Button>
         <div class="flex items-center gap-2">
           <CopyButton :command="`/memory-edit ${node.id}`" label="/memory-edit" />
           <div class="relative ml-auto">
-            <button class="hm-btn hm-btn-ghost hm-btn-sm" title="Flag for review"
+            <Button variant="ghost" size="sm" title="Flag for review"
               @click="flagOpen = !flagOpen" @keydown.esc="flagOpen = false">
               <PhFlag :size="14" />
-            </button>
+            </Button>
             <div v-if="flagOpen" class="fixed inset-0" style="z-index:9" @click="flagOpen = false"></div>
             <div v-if="flagOpen" class="absolute right-0 bottom-full mb-1 rounded-md py-1"
               style="background:var(--hm-bg-overlay); border:0.5px solid var(--hm-border-default); z-index:10; min-width:110px">

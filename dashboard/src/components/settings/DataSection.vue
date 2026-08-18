@@ -1,5 +1,6 @@
 <script setup>
 import { ref } from 'vue'
+import { Button } from '@oxhive/ui'
 import { useUiStore } from '../../stores/ui.js'
 import { exportMemories, importMemories } from '../../api/memories.js'
 
@@ -44,14 +45,14 @@ async function handleImport(e) {
           <p style="font-size:13px; font-weight:500; color:var(--hm-text-primary)" class="mb-1.5">Export to JSON</p>
           <p style="font-size:12px; color:var(--hm-text-tertiary)">Download personal and workspace memories as a JSON file (org-layer memories are not included)</p>
         </div>
-        <button class="hm-btn hm-btn-default shrink-0" @click="handleExport">Export</button>
+        <Button variant="default" class="shrink-0" @click="handleExport">Export</Button>
       </div>
       <div class="flex items-center justify-between gap-4">
         <div>
           <p style="font-size:13px; font-weight:500; color:var(--hm-text-primary)" class="mb-1.5">Import from JSON</p>
           <p style="font-size:12px; color:var(--hm-text-tertiary)">Restore personal and workspace memories from a previous export</p>
         </div>
-        <button class="hm-btn hm-btn-default shrink-0" @click="fileInput.click()">Import</button>
+        <Button variant="default" class="shrink-0" @click="fileInput.click()">Import</Button>
         <input ref="fileInput" type="file" accept=".json" class="hidden" @change="handleImport" />
       </div>
     </div>

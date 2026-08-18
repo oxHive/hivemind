@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from 'vue'
+import { Button } from '@oxhive/ui'
 const props = defineProps({ label: String, value: String, active: Boolean, layer: String })
 defineEmits(['select'])
 
@@ -13,7 +14,7 @@ const chipStyle = computed(() => {
 </script>
 
 <template>
-  <button @click="$emit('select', value)" class="hm-btn hm-btn-sm" :style="chipStyle">
+  <Button @click="$emit('select', value)" size="sm" :style="chipStyle">
     {{ label }}
-  </button>
+  </Button>
 </template>

@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { PhX } from '@phosphor-icons/vue'
+import { Button } from '@oxhive/ui'
 import { useMemoriesStore } from '../../stores/memories.js'
 import { useTagSettingsStore } from '../../stores/tagSettings.js'
 import TagChip from './TagChip.vue'
@@ -91,13 +92,13 @@ function toggle() {
 
 <template>
   <div class="relative" ref="root">
-    <button class="hm-btn hm-btn-sm" :class="modelValue ? 'hm-btn-default' : 'hm-btn-ghost'"
+    <Button size="sm" :variant="modelValue ? 'default' : 'ghost'"
       style="font-family:var(--hm-font-mono); max-width:100%" @click="toggle">
       <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap">{{ activeLabel }}</span>
       <span v-if="modelValue" class="tag-filter-clear inline-flex items-center" @click.stop="clear">
         <PhX :size="11" weight="bold" />
       </span>
-    </button>
+    </Button>
 
     <div v-if="open" class="tag-filter-menu">
       <input class="hm-input mb-2" style="font-size:12px" v-model="query" placeholder="Search tags…" autofocus />

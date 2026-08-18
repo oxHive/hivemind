@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue'
+import { Button } from '@oxhive/ui'
 import { useMemoriesStore } from '../../stores/memories.js'
 import { useUiStore } from '../../stores/ui.js'
 
@@ -42,10 +43,10 @@ async function handleClear() {
       <label class="hm-label">TYPE DELETE TO CONFIRM</label>
       <input class="hm-input mb-4" v-model="confirmText" placeholder="DELETE" />
       <div class="flex justify-end gap-2">
-        <button class="hm-btn hm-btn-default" @click="$emit('close')">Cancel</button>
-        <button class="hm-btn hm-btn-danger" :disabled="!canConfirm || working" @click="handleClear">
+        <Button variant="default" @click="$emit('close')">Cancel</Button>
+        <Button variant="danger" :disabled="!canConfirm || working" @click="handleClear">
           {{ working ? 'Deleting…' : 'Clear all ⚠' }}
-        </button>
+        </Button>
       </div>
     </div>
   </div>

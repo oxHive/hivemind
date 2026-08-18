@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
+import { Button } from '@oxhive/ui'
 import { useTagSettingsStore } from '../../stores/tagSettings.js'
 import { useUiStore } from '../../stores/ui.js'
 import TagChip from '../shared/TagChip.vue'
@@ -126,12 +127,12 @@ async function save() {
           </span>
           <span class="flex-1"></span>
           <template v-if="!isLocked(name)">
-            <button v-if="pendingDelete !== name" class="hm-btn hm-btn-ghost hm-btn-sm"
-              style="color:var(--hm-text-tertiary)" @click="askDeleteNamespace(name)">Remove</button>
+            <Button v-if="pendingDelete !== name" variant="ghost" size="sm"
+              style="color:var(--hm-text-tertiary)" @click="askDeleteNamespace(name)">Remove</Button>
             <template v-else>
               <span style="font-size:12px; color:var(--hm-text-tertiary)">Remove {{ name }}:*?</span>
-              <button class="hm-btn hm-btn-danger hm-btn-sm" @click="askDeleteNamespace(name)">Confirm</button>
-              <button class="hm-btn hm-btn-ghost hm-btn-sm" @click="pendingDelete = null">Cancel</button>
+              <Button variant="danger" size="sm" @click="askDeleteNamespace(name)">Confirm</Button>
+              <Button variant="ghost" size="sm" @click="pendingDelete = null">Cancel</Button>
             </template>
           </template>
         </div>
@@ -197,13 +198,13 @@ async function save() {
         style="border:1px dashed var(--hm-border-default)">
         <input class="hm-input" style="width:160px" v-model="newNamespaceName" placeholder="new namespace"
           @keydown.enter="addNamespace" />
-        <button class="hm-btn hm-btn-default hm-btn-sm" @click="addNamespace">+ Add namespace</button>
+        <Button variant="default" size="sm" @click="addNamespace">+ Add namespace</Button>
       </div>
 
       <div class="flex items-center gap-3">
-        <button class="hm-btn hm-btn-primary" :disabled="saving || !tagSettings.isDirty" @click="save">
+        <Button variant="primary" :disabled="saving || !tagSettings.isDirty" @click="save">
           {{ saving ? 'Saving…' : 'Save tag namespaces' }}
-        </button>
+        </Button>
         <span v-if="error" style="font-size:11px; color:var(--hm-danger)">{{ error }}</span>
       </div>
     </template>

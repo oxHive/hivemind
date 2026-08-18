@@ -1,5 +1,6 @@
 <script setup>
 import { ref } from 'vue'
+import { Button } from '@oxhive/ui'
 import DangerModal from './DangerModal.vue'
 const showModal = ref(false)
 </script>
@@ -12,7 +13,7 @@ const showModal = ref(false)
       <p style="font-size:12px; color:var(--hm-text-secondary)" class="mb-4">
         Permanently deletes all memories, edges, and feedback. This cannot be undone.
       </p>
-      <button class="hm-btn hm-btn-danger" @click="showModal = true">Clear all ⚠</button>
+      <Button variant="danger" @click="showModal = true">Clear all ⚠</Button>
     </div>
     <DangerModal v-if="showModal" @close="showModal = false" />
   </div>

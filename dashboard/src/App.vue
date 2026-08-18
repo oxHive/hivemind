@@ -1,5 +1,6 @@
 <script setup>
 import { onMounted, onBeforeUnmount, watch } from 'vue'
+import { Button } from '@oxhive/ui'
 import { useUiStore } from './stores/ui.js'
 import { useMemoriesStore } from './stores/memories.js'
 import { useGraphStore } from './stores/graph.js'
@@ -110,9 +111,9 @@ onBeforeUnmount(() => {
       <p style="font-size:14px">Cannot connect to HiveMind server at
         <code class="font-mono">{{ apiBase }}</code>.</p>
       <p style="font-size:12px; color:var(--hm-text-tertiary)">Run <code class="font-mono">hivemind up</code> and then retry.</p>
-      <button class="hm-btn hm-btn-default mt-2" @click="ui.pollServerStatus().then(() => memories.fetchAll())">
+      <Button variant="default" class="mt-2" @click="ui.pollServerStatus().then(() => memories.fetchAll())">
         Retry
-      </button>
+      </Button>
     </div>
 
     <template v-else>

@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { Button } from '@oxhive/ui'
 
 const props = defineProps({ title: String, body: String, confirmLabel: String, dangerous: Boolean })
 const emit = defineEmits(['confirm', 'cancel'])
@@ -45,13 +46,12 @@ onBeforeUnmount(() => {
       <h3 id="confirm-modal-title" class="text-base font-medium mb-3" style="color:var(--hm-text-primary)">{{ title }}</h3>
       <p class="text-sm mb-5" style="color:var(--hm-text-secondary)">{{ body }}</p>
       <div class="flex justify-end gap-2">
-        <button class="hm-btn hm-btn-default" @click="$emit('cancel')">Cancel</button>
-        <button
-          class="hm-btn"
-          :class="dangerous ? 'hm-btn-danger' : 'hm-btn-primary'"
+        <Button variant="default" @click="$emit('cancel')">Cancel</Button>
+        <Button
+          :variant="dangerous ? 'danger' : 'primary'"
           @click="$emit('confirm')">
           {{ confirmLabel }}
-        </button>
+        </Button>
       </div>
     </div>
   </div>

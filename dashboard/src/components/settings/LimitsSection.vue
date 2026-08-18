@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
+import { Button } from '@oxhive/ui'
 import { useContentLimitSettingsStore } from '../../stores/contentLimitSettings.js'
 import { useUiStore } from '../../stores/ui.js'
 
@@ -45,9 +46,9 @@ async function save() {
       </div>
 
       <div class="flex items-center gap-3">
-        <button class="hm-btn hm-btn-primary" :disabled="saving || !contentLimits.isDirty" @click="save">
+        <Button variant="primary" :disabled="saving || !contentLimits.isDirty" @click="save">
           {{ saving ? 'Saving…' : 'Save content limits' }}
-        </button>
+        </Button>
         <span v-if="error" style="font-size:11px; color:var(--hm-danger)">{{ error }}</span>
       </div>
     </template>

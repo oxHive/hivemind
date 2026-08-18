@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { Button } from '@oxhive/ui'
 import { useUiStore } from '../../stores/ui.js'
 import { getSyncSettings, saveSyncSettings } from '../../api/settings.js'
 
@@ -65,7 +66,7 @@ const intervalLabel = computed(() => {
           <span style="font-size:13px; color:var(--hm-text-secondary)">Sync immediately after storing a memory</span>
         </label>
       </template>
-      <button class="hm-btn hm-btn-primary" @click="save">Save sync settings</button>
+      <Button variant="primary" @click="save">Save sync settings</Button>
       <p v-if="message" style="font-size:12px; color:var(--hm-text-tertiary)" class="mt-3">{{ message }}</p>
     </template>
   </div>

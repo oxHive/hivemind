@@ -1,5 +1,6 @@
 <script setup>
 import { PhSparkle } from '@phosphor-icons/vue'
+import { Button } from '@oxhive/ui'
 import { useGraphStore } from '../../stores/graph.js'
 import { useSuggestStore } from '../../stores/suggest.js'
 const graph = useGraphStore()
@@ -16,8 +17,8 @@ const suggest = useSuggestStore()
     </span>
     <div class="flex items-center gap-4">
       <button class="pending-bar__link" @click="graph.rejectAllPending()">Reject all</button>
-      <button class="hm-btn hm-btn-sm" style="background:var(--hm-accent); border-color:var(--hm-accent); color:var(--hm-bg-base); font-weight:600"
-        @click="graph.acceptAllPending()">Accept all</button>
+      <Button size="sm" style="background:var(--hm-accent); border-color:var(--hm-accent); color:var(--hm-bg-base); font-weight:600"
+        @click="graph.acceptAllPending()">Accept all</Button>
     </div>
   </div>
 </template>

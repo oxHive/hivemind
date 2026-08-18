@@ -1,5 +1,6 @@
 <script setup>
 import { useFeedbackStore } from '../../stores/feedback.js'
+import { Button } from '@oxhive/ui'
 import LayerBadge from '../shared/LayerBadge.vue'
 
 const props = defineProps({ conflict: Object })
@@ -31,10 +32,10 @@ const fb = useFeedbackStore()
     </div>
 
     <div class="flex items-center gap-2">
-      <button class="hm-btn hm-btn-primary hm-btn-sm"
-        @click="fb.resolveConflict(conflict.id, 'keep_remote')">Keep remote</button>
-      <button class="hm-btn hm-btn-default hm-btn-sm"
-        @click="fb.resolveConflict(conflict.id, 'keep_local')">Restore local</button>
+      <Button variant="primary" size="sm"
+        @click="fb.resolveConflict(conflict.id, 'keep_remote')">Keep remote</Button>
+      <Button variant="default" size="sm"
+        @click="fb.resolveConflict(conflict.id, 'keep_local')">Restore local</Button>
     </div>
   </div>
 </template>

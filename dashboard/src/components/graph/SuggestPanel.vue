@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { PhX } from '@phosphor-icons/vue'
+import { Button } from '@oxhive/ui'
 import { useGraphStore } from '../../stores/graph.js'
 import { useMemoriesStore } from '../../stores/memories.js'
 import { useSuggestStore } from '../../stores/suggest.js'
@@ -91,9 +92,9 @@ async function endSession() {
       <span style="font-size:13px; font-weight:500; color:var(--hm-text-primary)">
         ✦ Suggestions
       </span>
-      <button class="hm-btn hm-btn-ghost hm-btn-sm" aria-label="Close" @click="close">
+      <Button variant="ghost" size="sm" aria-label="Close" @click="close">
         <PhX :size="14" weight="bold" />
-      </button>
+      </Button>
     </div>
 
     <div v-if="suggest.error" class="px-4 py-2"
@@ -142,9 +143,9 @@ async function endSession() {
         </div>
 
         <div v-else class="mt-2 flex gap-1.5" @click.stop>
-          <button class="hm-btn hm-btn-primary hm-btn-sm" @click="graph.resolveEdge(edge.id, 'active')">Approve</button>
-          <button class="hm-btn hm-btn-default hm-btn-sm" @click="graph.resolveEdge(edge.id, 'rejected')">Reject</button>
-          <button v-if="suggest.active" class="hm-btn hm-btn-ghost hm-btn-sm" @click="openRevise(edge)">Revise</button>
+          <Button variant="primary" size="sm" @click="graph.resolveEdge(edge.id, 'active')">Approve</Button>
+          <Button variant="default" size="sm" @click="graph.resolveEdge(edge.id, 'rejected')">Reject</Button>
+          <Button v-if="suggest.active" variant="ghost" size="sm" @click="openRevise(edge)">Revise</Button>
         </div>
 
         <input v-if="revisingFor === edge.id" v-model="feedbackText"
@@ -155,12 +156,12 @@ async function endSession() {
 
     <div class="px-4 flex items-center gap-1.5" style="height:40px; border-top:0.5px solid var(--hm-border-subtle)">
       <template v-if="rows.length">
-        <button class="hm-btn hm-btn-primary hm-btn-sm" @click="graph.acceptAllPending()">Accept all</button>
-        <button class="hm-btn hm-btn-default hm-btn-sm" @click="graph.rejectAllPending()">Reject all</button>
+        <Button variant="primary" size="sm" @click="graph.acceptAllPending()">Accept all</Button>
+        <Button variant="default" size="sm" @click="graph.rejectAllPending()">Reject all</Button>
       </template>
-      <button v-if="suggest.active" class="hm-btn hm-btn-default hm-btn-sm ml-auto" @click="endSession">
+      <Button v-if="suggest.active" variant="default" size="sm" class="ml-auto" @click="endSession">
         End session
-      </button>
+      </Button>
     </div>
   </div>
 </template>
