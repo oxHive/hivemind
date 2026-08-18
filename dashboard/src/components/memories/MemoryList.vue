@@ -1,12 +1,11 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { PhMagnifyingGlass, PhPlus } from '@phosphor-icons/vue'
-import { Button, Input } from '@oxhive/ui'
+import { Button, Input, SkeletonCard } from '@oxhive/ui'
 import { useMemoriesStore } from '../../stores/memories.js'
 import { useUiStore } from '../../stores/ui.js'
 import MemoryCard from './MemoryCard.vue'
 import FilterChip from '../shared/FilterChip.vue'
-import SkeletonCard from '../shared/SkeletonCard.vue'
 import TagFilter from '../shared/TagFilter.vue'
 
 const memories = useMemoriesStore()

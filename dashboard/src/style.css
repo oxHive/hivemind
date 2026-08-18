@@ -72,24 +72,6 @@ button:focus-visible {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--hm-border-strong); border-radius: 2px; }
 
-/* Skeleton shimmer */
-@keyframes shimmer {
-  0% { background-position: -400px 0; }
-  100% { background-position: 400px 0; }
-}
-
-.hm-skeleton {
-  background: linear-gradient(
-    90deg,
-    var(--hm-bg-elevated) 25%,
-    var(--hm-bg-overlay) 50%,
-    var(--hm-bg-elevated) 75%
-  );
-  background-size: 800px 100%;
-  animation: shimmer 1.5s infinite;
-  border-radius: 4px;
-}
-
 /* Hexagon cell — the HiveMind mark, shared by legends and badges */
 .hm-hex {
   display: inline-block;
@@ -97,6 +79,5 @@ button:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .hm-skeleton { animation: none; }
   * { transition-duration: 0.01ms !important; }
 }

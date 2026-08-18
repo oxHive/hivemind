@@ -104,7 +104,7 @@ async function endSession() {
 
     <div v-if="suggest.phase === 'suggesting'" class="px-4 py-3 flex items-center gap-2"
       style="font-size:13px; font-weight:600; color:var(--hm-text-primary)">
-      <span class="hm-skeleton" style="display:inline-block; width:10px; height:10px; border-radius:50%"></span>
+      <span class="oxui-skeleton" style="display:inline-block; width:10px; height:10px; border-radius:50%"></span>
       Agent is analyzing your memories…
       <span class="font-mono" style="margin-left:auto; font-weight:500; font-size:11px; color:var(--hm-text-tertiary)">
         {{ elapsedSeconds }}s
@@ -134,7 +134,7 @@ async function endSession() {
 
         <div v-if="rowState(edge) === 'revising'" class="mt-2 flex items-center gap-1.5"
           style="font-size:11px; color:var(--hm-warning)">
-          <span class="hm-skeleton" style="display:inline-block; width:8px; height:8px; border-radius:50%"></span>
+          <span class="oxui-skeleton" style="display:inline-block; width:8px; height:8px; border-radius:50%"></span>
           revising…
         </div>
         <div v-else-if="rowState(edge) === 'queued'" class="mt-2"

@@ -100,7 +100,7 @@ onBeforeUnmount(() => {
     <div v-if="ui.serverStatus === 'checking'"
       class="flex flex-col items-center justify-center w-full gap-3"
       style="color:var(--hm-text-tertiary)">
-      <div class="hm-hex hm-skeleton" style="width:28px; height:28px"></div>
+      <div class="hm-hex oxui-skeleton" style="width:28px; height:28px"></div>
       <p style="font-size:12px">Connecting to HiveMind server…</p>
     </div>
 
