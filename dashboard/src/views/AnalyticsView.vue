@@ -5,7 +5,7 @@ import { useAnalyticsStore } from '../stores/analytics.js'
 import { useUiStore } from '../stores/ui.js'
 import BarChart from '../components/analytics/BarChart.vue'
 import SessionLogRow from '../components/analytics/SessionLogRow.vue'
-import EmptyState from '../components/shared/EmptyState.vue'
+import { EmptyState } from '@oxhive/ui'
 
 const memories = useMemoriesStore()
 const analytics = useAnalyticsStore()
@@ -54,22 +54,54 @@ const typeColor = (d) => {
       <div class="analytics-panel">
         <h3 class="analytics-panel__title">Top tags</h3>
         <BarChart v-if="topTags.length" :data="topTags" labelKey="tag" valueKey="count" />
-        <EmptyState v-else message="No tags yet" />
+        <EmptyState v-else message="No tags yet">
+          <template #icon>
+            <svg width="28" height="28" viewBox="0 0 16 16" aria-hidden="true">
+              <polygon points="8,1.5 13.6,4.75 13.6,11.25 8,14.5 2.4,11.25 2.4,4.75"
+                fill="none" stroke="var(--hm-border-strong)" stroke-width="1" />
+              <circle cx="8" cy="8" r="1.5" fill="var(--hm-border-strong)" />
+            </svg>
+          </template>
+        </EmptyState>
       </div>
       <div class="analytics-panel">
         <h3 class="analytics-panel__title">Memory types</h3>
         <BarChart v-if="analytics.typeCounts.length" :data="analytics.typeCounts" labelKey="type" valueKey="count" :color="typeColor" />
-        <EmptyState v-else message="No memories yet" />
+        <EmptyState v-else message="No memories yet">
+          <template #icon>
+            <svg width="28" height="28" viewBox="0 0 16 16" aria-hidden="true">
+              <polygon points="8,1.5 13.6,4.75 13.6,11.25 8,14.5 2.4,11.25 2.4,4.75"
+                fill="none" stroke="var(--hm-border-strong)" stroke-width="1" />
+              <circle cx="8" cy="8" r="1.5" fill="var(--hm-border-strong)" />
+            </svg>
+          </template>
+        </EmptyState>
       </div>
       <div class="analytics-panel">
         <h3 class="analytics-panel__title">By project</h3>
         <BarChart v-if="analytics.projectCounts.length" :data="analytics.projectCounts" labelKey="project" valueKey="count" />
-        <EmptyState v-else message="No project-tagged memories yet" hint="Add a project:* tag to a memory to see it here." />
+        <EmptyState v-else message="No project-tagged memories yet" hint="Add a project:* tag to a memory to see it here.">
+          <template #icon>
+            <svg width="28" height="28" viewBox="0 0 16 16" aria-hidden="true">
+              <polygon points="8,1.5 13.6,4.75 13.6,11.25 8,14.5 2.4,11.25 2.4,4.75"
+                fill="none" stroke="var(--hm-border-strong)" stroke-width="1" />
+              <circle cx="8" cy="8" r="1.5" fill="var(--hm-border-strong)" />
+            </svg>
+          </template>
+        </EmptyState>
       </div>
       <div class="analytics-panel">
         <h3 class="analytics-panel__title">Activity by day</h3>
         <BarChart v-if="analytics.activityByDay.length" :data="analytics.activityByDay" labelKey="day" valueKey="count" />
-        <EmptyState v-else message="No activity recorded yet" />
+        <EmptyState v-else message="No activity recorded yet">
+          <template #icon>
+            <svg width="28" height="28" viewBox="0 0 16 16" aria-hidden="true">
+              <polygon points="8,1.5 13.6,4.75 13.6,11.25 8,14.5 2.4,11.25 2.4,4.75"
+                fill="none" stroke="var(--hm-border-strong)" stroke-width="1" />
+              <circle cx="8" cy="8" r="1.5" fill="var(--hm-border-strong)" />
+            </svg>
+          </template>
+        </EmptyState>
       </div>
     </div>
 
@@ -80,7 +112,15 @@ const typeColor = (d) => {
       </div>
       <EmptyState v-else
         message="No session-start runs logged yet"
-        hint="This fills in once a Claude Code session with HiveMind configured runs its session-start hook." />
+        hint="This fills in once a Claude Code session with HiveMind configured runs its session-start hook.">
+        <template #icon>
+          <svg width="28" height="28" viewBox="0 0 16 16" aria-hidden="true">
+            <polygon points="8,1.5 13.6,4.75 13.6,11.25 8,14.5 2.4,11.25 2.4,4.75"
+              fill="none" stroke="var(--hm-border-strong)" stroke-width="1" />
+            <circle cx="8" cy="8" r="1.5" fill="var(--hm-border-strong)" />
+          </svg>
+        </template>
+      </EmptyState>
     </div>
   </div>
 </template>

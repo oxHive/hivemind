@@ -7,7 +7,7 @@ import { useUiStore } from '../../stores/ui.js'
 import { useGraphStore } from '../../stores/graph.js'
 import LayerBadge from '../shared/LayerBadge.vue'
 import TagInput from '../shared/TagInput.vue'
-import EmptyState from '../shared/EmptyState.vue'
+import { EmptyState } from '@oxhive/ui'
 import DeleteConfirmModal from './DeleteConfirmModal.vue'
 import MarkdownContent from '../shared/MarkdownContent.vue'
 import CopyIdButton from '../shared/CopyIdButton.vue'
@@ -242,7 +242,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
     <!-- Empty state -->
     <EmptyState v-if="!memories.selected && !memories.creatingNew"
       message="Select a memory to view or edit"
-      hint="Press / to search, Ctrl+S to save changes" />
+      hint="Press / to search, Ctrl+S to save changes">
+      <template #icon>
+        <svg width="28" height="28" viewBox="0 0 16 16" aria-hidden="true">
+          <polygon points="8,1.5 13.6,4.75 13.6,11.25 8,14.5 2.4,11.25 2.4,4.75"
+            fill="none" stroke="var(--hm-border-strong)" stroke-width="1" />
+          <circle cx="8" cy="8" r="1.5" fill="var(--hm-border-strong)" />
+        </svg>
+      </template>
+    </EmptyState>
 
     <template v-else>
       <!-- Toolbar -->

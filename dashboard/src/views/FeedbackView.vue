@@ -2,7 +2,7 @@
 import { useFeedbackStore } from '../stores/feedback.js'
 import ConflictCard from '../components/feedback/ConflictCard.vue'
 import FeedbackCard from '../components/feedback/FeedbackCard.vue'
-import EmptyState from '../components/shared/EmptyState.vue'
+import { EmptyState } from '@oxhive/ui'
 
 const fb = useFeedbackStore()
 </script>
@@ -32,12 +32,28 @@ const fb = useFeedbackStore()
     <div class="flex-1 overflow-y-auto px-6 py-5">
       <template v-if="fb.activeTab === 'conflicts'">
         <EmptyState v-if="!fb.conflicts.length" message="No conflicts."
-          hint="Conflicts appear when a sync overwrites a local edit." />
+          hint="Conflicts appear when a sync overwrites a local edit.">
+          <template #icon>
+            <svg width="28" height="28" viewBox="0 0 16 16" aria-hidden="true">
+              <polygon points="8,1.5 13.6,4.75 13.6,11.25 8,14.5 2.4,11.25 2.4,4.75"
+                fill="none" stroke="var(--hm-border-strong)" stroke-width="1" />
+              <circle cx="8" cy="8" r="1.5" fill="var(--hm-border-strong)" />
+            </svg>
+          </template>
+        </EmptyState>
         <ConflictCard v-for="c in fb.conflicts" :key="c.id" :conflict="c" />
       </template>
       <template v-else>
         <EmptyState v-if="!fb.feedbackItems.length" message="No open feedback."
-          hint="Flag a memory with /memory-flag <id> to queue it here." />
+          hint="Flag a memory with /memory-flag <id> to queue it here.">
+          <template #icon>
+            <svg width="28" height="28" viewBox="0 0 16 16" aria-hidden="true">
+              <polygon points="8,1.5 13.6,4.75 13.6,11.25 8,14.5 2.4,11.25 2.4,4.75"
+                fill="none" stroke="var(--hm-border-strong)" stroke-width="1" />
+              <circle cx="8" cy="8" r="1.5" fill="var(--hm-border-strong)" />
+            </svg>
+          </template>
+        </EmptyState>
         <FeedbackCard v-for="item in fb.feedbackItems" :key="item.id" :item="item" />
       </template>
     </div>

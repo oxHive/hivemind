@@ -9,7 +9,7 @@ import PendingBar from '../components/shared/PendingBar.vue'
 import DetailPanel from '../components/graph/DetailPanel.vue'
 import MiniCard from '../components/graph/MiniCard.vue'
 import Legend from '../components/graph/Legend.vue'
-import EmptyState from '../components/shared/EmptyState.vue'
+import { EmptyState } from '@oxhive/ui'
 import Tooltip from '../components/shared/Tooltip.vue'
 
 const memories = useMemoriesStore()
@@ -63,7 +63,15 @@ const tooltipText = computed(() => {
             v-if="!memories.all.length"
             message="No connections to display."
             hint="Store some memories first; edges appear as they share tags or get linked."
-          />
+          >
+            <template #icon>
+              <svg width="28" height="28" viewBox="0 0 16 16" aria-hidden="true">
+                <polygon points="8,1.5 13.6,4.75 13.6,11.25 8,14.5 2.4,11.25 2.4,4.75"
+                  fill="none" stroke="var(--hm-border-strong)" stroke-width="1" />
+                <circle cx="8" cy="8" r="1.5" fill="var(--hm-border-strong)" />
+              </svg>
+            </template>
+          </EmptyState>
           <GraphCanvas v-else @node-hover="hoveredNode = $event" @edge-hover="hoveredEdge = $event" />
 
           <MiniCard
