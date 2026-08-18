@@ -5,17 +5,14 @@ import { useUiStore } from '../../stores/ui.js'
 import { useFeedbackStore } from '../../stores/feedback.js'
 import { useGraphStore } from '../../stores/graph.js'
 import { useUpdateStore } from '../../stores/update.js'
-import { useThemeStore } from '../../stores/theme.js'
 import { useNavItems } from '../../config/nav.js'
 import StatusRow from './StatusRow.vue'
-import oxhiveMark from '../../assets/oxhive-mark.png'
 import { BASE } from '../../api/client.js'
 
 const ui = useUiStore()
 const feedback = useFeedbackStore()
 const graph = useGraphStore()
 const update = useUpdateStore()
-const theme = useThemeStore()
 const navItems = useNavItems()
 
 const statusDot = computed(() => {
@@ -80,21 +77,13 @@ const orgSyncDot = computed(() => {
 </script>
 
 <template>
-  <OxAppSidebar>
-    <template #logo>
-      <div class="flex items-center justify-start gap-2">
-        <div class="flex items-center" style="gap:4px">
-          <svg width="24" height="24" viewBox="0 0 16 16" aria-hidden="true">
-            <polygon points="8,1.5 13.6,4.75 13.6,11.25 8,14.5 2.4,11.25 2.4,4.75"
-              fill="none" stroke="var(--hm-accent)" stroke-width="1.2" />
-            <circle cx="8" cy="8" r="2" fill="var(--hm-accent)" />
-          </svg>
-          <div style="font-size:19px; font-weight:600; letter-spacing:-0.01em; color:var(--hm-text-primary); line-height:1">HiveMind</div>
-        </div>
-        <span class="font-mono self-end" style="font-size:10px; color:var(--hm-text-tertiary); line-height:1">
-          v{{ ui.serverInfo?.version || '—' }}
-        </span>
-      </div>
+  <OxAppSidebar product-name="HiveMind" :version="ui.serverInfo?.version || ''">
+    <template #logo-icon>
+      <svg width="24" height="24" viewBox="0 0 16 16" aria-hidden="true">
+        <polygon points="8,1.5 13.6,4.75 13.6,11.25 8,14.5 2.4,11.25 2.4,4.75"
+          fill="none" stroke="var(--hm-accent)" stroke-width="1.2" />
+        <circle cx="8" cy="8" r="2" fill="var(--hm-accent)" />
+      </svg>
     </template>
 
     <AppNav :items="navItems" />
@@ -117,25 +106,6 @@ const orgSyncDot = computed(() => {
       <StatusRow v-if="orgInfo?.configured" :dot="orgSyncDot" pulse k="org" :v="orgSyncStatusText" class="mt-1" />
       <StatusRow :dot="conflictDot" k="conflicts" :v="String(conflictCount)" class="mt-1" />
       <StatusRow dot="gray" :text="`${memoryCount} memories`" class="mt-1" />
-      <!--
-        The `footer` slot in @oxhive/ui's AppSidebar is a single padded box
-        (px-5 pb-5 pt-4, border-top) that used to wrap only the status rows
-        in the original markup — the OxHive wordmark lived in its own sibling
-        div below it with independent padding (14px 20px 16px, no border).
-        Merging both into one slot means the box's own pb-5 (20px) no longer
-        sits between the rows and the wordmark, and its own pt-4/pb-5 now
-        double up with nothing there to match the original 34px gap / 16px
-        trailing padding. The margins below recreate those exact original
-        spacings without touching the shared AppSidebar shell:
-          - margin-top: 34px = original box pb-5 (20px) + footer pt (14px)
-          - margin-bottom: -4px cancels 4px of the box's own pb-5 (20px)
-            so the trailing gap matches the original footer's pb (16px)
-      -->
-      <div class="flex items-center justify-center" style="gap:5px; margin-top:34px; margin-bottom:-4px">
-        <img :src="oxhiveMark" alt="" aria-hidden="true" width="18" height="18"
-          :style="theme.resolved === 'light' ? '' : 'filter:brightness(0) invert(1)'" />
-        <span style="font-family:'Hanken Grotesk', var(--hm-font-sans); font-size:15px; font-weight:800; letter-spacing:-0.02em; color:var(--hm-text-primary)">OxHive</span>
-      </div>
     </template>
   </OxAppSidebar>
 </template>

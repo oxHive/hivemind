@@ -6,15 +6,25 @@ import { useUiStore } from '../../stores/ui.js'
 import { useFeedbackStore } from '../../stores/feedback.js'
 import { useGraphStore } from '../../stores/graph.js'
 
-// jsdom doesn't implement matchMedia; the theme store (now used by
-// AppSidebar for the OxHive mark's theme-aware filter) needs it.
-if (!window.matchMedia) {
-  window.matchMedia = () => ({
-    matches: false,
-    addEventListener: () => {},
-    removeEventListener: () => {},
+describe('AppSidebar header and brand footer (via @oxhive/ui AppSidebar)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
   })
-}
+
+  it('passes the HiveMind product name and server version to the header', () => {
+    const ui = useUiStore()
+    ui.serverInfo = { version: '0.14.3' }
+    const wrapper = mount(AppSidebar)
+    expect(wrapper.text()).toContain('HiveMind')
+    expect(wrapper.text()).toContain('v0.14.3')
+  })
+
+  it('always renders the OxHive brand footer', () => {
+    const wrapper = mount(AppSidebar)
+    expect(wrapper.text()).toContain('OxHive')
+    expect(wrapper.find('img.oxui-sidebar__brand-mark').exists()).toBe(true)
+  })
+})
 
 describe('AppSidebar org status row', () => {
   beforeEach(() => {
