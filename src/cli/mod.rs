@@ -134,6 +134,7 @@ pub enum McpAction {
     },
 }
 
+mod discord_cmds;
 mod init;
 mod matrix_cmds;
 mod mcp_install;
@@ -142,6 +143,7 @@ mod status;
 #[cfg(test)]
 mod tests;
 
+pub use discord_cmds::*;
 pub use init::*;
 pub use matrix_cmds::*;
 pub use mcp_install::*;
