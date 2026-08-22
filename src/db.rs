@@ -424,8 +424,8 @@ mod tests {
 
     #[test]
     fn org_db_path_sits_next_to_primary_db_path() {
-        // SAFETY: test-only env var mutation, no other test in this module reads
-        // XDG_DATA_HOME concurrently — matches the existing pattern in this file.
+        let _lock = crate::test_env_lock::ENV_MUTEX.lock().unwrap();
+        // SAFETY: test-only env var mutation; serialised by ENV_MUTEX.
         unsafe { std::env::set_var("XDG_DATA_HOME", "/tmp/hivemind-test-xdg") };
         let primary = resolve_db_path();
         let org = resolve_org_db_path();
