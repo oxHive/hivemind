@@ -1,4 +1,4 @@
-use crate::cli::{MatrixStatusLine, StatusData, build_status_data};
+use crate::cli::{DiscordStatusLine, MatrixStatusLine, StatusData, build_status_data};
 use crate::store::SqliteStore;
 use crate::tui::{TerminalGuard, header::render_header};
 use anyhow::Result;
@@ -281,6 +281,23 @@ fn draw(
         } => {
             lines.push(Line::from(format!(
                 "Matrix     {user_id} ({sync_state}), {room_count} room(s), \
+                 {active_sessions} active session(s)"
+            )));
+        }
+    }
+    match &data.discord {
+        DiscordStatusLine::NotConfigured => {}
+        DiscordStatusLine::NotRunning => {
+            lines.push(Line::from("Discord    configured, not running"));
+        }
+        DiscordStatusLine::Running {
+            application_id,
+            sync_state,
+            channel_count,
+            active_sessions,
+        } => {
+            lines.push(Line::from(format!(
+                "Discord    {application_id} ({sync_state}), {channel_count} channel(s), \
                  {active_sessions} active session(s)"
             )));
         }
