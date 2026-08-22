@@ -76,6 +76,9 @@ pub enum ServiceAction {
         /// Also install the Matrix bot unit (requires `hivemind matrix login` first)
         #[arg(long)]
         matrix: bool,
+        /// Also install the Discord bot unit (requires `hivemind discord login` first)
+        #[arg(long)]
+        discord: bool,
     },
     /// Stop and remove the HiveMind background service
     Uninstall,
