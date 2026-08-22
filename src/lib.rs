@@ -4,6 +4,7 @@ pub mod chat_bot;
 pub mod cli;
 pub mod config;
 pub mod db;
+pub mod discord;
 pub mod http;
 pub mod matrix;
 pub mod model;
