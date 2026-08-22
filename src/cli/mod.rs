@@ -51,6 +51,11 @@ pub enum Command {
         #[command(subcommand)]
         action: MatrixAction,
     },
+    /// Discord chat interface: capture/recall HiveMind memories from a channel or DM
+    Discord {
+        #[command(subcommand)]
+        action: DiscordAction,
+    },
     /// Migrate the database from the legacy ~/.hivemind/ path to XDG data dir
     Migrate,
     /// Print the session-start memory context for the current project (for hooks and scripts)
@@ -93,6 +98,27 @@ pub enum MatrixAction {
     /// Send a one-off DM to a user (connectivity smoke test, no daemon needed)
     Send {
         /// Recipient's Matrix user ID (e.g. @oxgrad:matrix.org)
+        user_id: String,
+        /// Message text to send
+        message: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum DiscordAction {
+    /// Log into a Discord bot account once; persists the token to the OS keyring
+    Login,
+    /// Run the Discord bot daemon (requires `hivemind discord login` first)
+    Run {
+        /// Print verbose connection/message logs to stderr
+        #[arg(long)]
+        debug: bool,
+    },
+    /// Show whether the daemon is running and its sync/session state
+    Status,
+    /// Send a one-off DM to a user (connectivity smoke test, no daemon needed)
+    Send {
+        /// Recipient's Discord user ID (snowflake, e.g. 111111111111111111)
         user_id: String,
         /// Message text to send
         message: String,
