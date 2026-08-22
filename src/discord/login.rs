@@ -24,13 +24,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let config_path = tmp.path().join("config.toml");
         let store = FakeTokenStore::new();
-        persist_login(
-            "123456789012345678",
-            "bot-token-abc",
-            &store,
-            &config_path,
-        )
-        .unwrap();
+        persist_login("123456789012345678", "bot-token-abc", &store, &config_path).unwrap();
         assert_eq!(
             store.load("123456789012345678").unwrap(),
             Some("bot-token-abc".to_string())

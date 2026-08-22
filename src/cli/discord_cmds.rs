@@ -31,9 +31,7 @@ pub fn cmd_discord_login() -> Result<()> {
                 "Logged in as {} (application id {application_id}).",
                 current_user.name
             );
-            println!(
-                "Token saved to the OS keyring. Run `hivemind discord run` to start the bot."
-            );
+            println!("Token saved to the OS keyring. Run `hivemind discord run` to start the bot.");
             anyhow::Ok(())
         })
 }

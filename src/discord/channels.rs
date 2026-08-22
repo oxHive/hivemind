@@ -12,7 +12,11 @@ pub fn resolve_target(settings: &DiscordSettings, channel_id: &str, is_dm: bool)
             tags: vec!["source:discord".to_string()],
         };
     }
-    if let Some(mapping) = settings.channels.iter().find(|c| c.channel_id == channel_id) {
+    if let Some(mapping) = settings
+        .channels
+        .iter()
+        .find(|c| c.channel_id == channel_id)
+    {
         return MemoryTarget {
             layer: "workspace",
             tags: mapping.base_tags.clone(),
@@ -20,7 +24,10 @@ pub fn resolve_target(settings: &DiscordSettings, channel_id: &str, is_dm: bool)
     }
     MemoryTarget {
         layer: "workspace",
-        tags: vec![format!("channel:{channel_id}"), "source:discord".to_string()],
+        tags: vec![
+            format!("channel:{channel_id}"),
+            "source:discord".to_string(),
+        ],
     }
 }
 

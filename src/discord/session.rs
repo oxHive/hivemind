@@ -105,8 +105,12 @@ mod tests {
     #[tokio::test]
     async fn session_within_ttl_is_resumable() {
         let map = SessionMap::default();
-        map.set_aged("111111111111111111", "sess-1".to_string(), Duration::from_secs(60))
-            .await;
+        map.set_aged(
+            "111111111111111111",
+            "sess-1".to_string(),
+            Duration::from_secs(60),
+        )
+        .await;
         assert_eq!(
             map.get("111111111111111111").await,
             Some("sess-1".to_string())
@@ -116,11 +120,19 @@ mod tests {
     #[tokio::test]
     async fn session_past_ttl_is_detached_and_removed() {
         let map = SessionMap::default();
-        map.set_aged("111111111111111111", "sess-1".to_string(), Duration::from_secs(121))
-            .await;
+        map.set_aged(
+            "111111111111111111",
+            "sess-1".to_string(),
+            Duration::from_secs(121),
+        )
+        .await;
         assert_eq!(map.get("111111111111111111").await, None);
-        map.set_aged("111111111111111111", "sess-1".to_string(), Duration::from_secs(121))
-            .await;
+        map.set_aged(
+            "111111111111111111",
+            "sess-1".to_string(),
+            Duration::from_secs(121),
+        )
+        .await;
         assert_eq!(map.get("111111111111111111").await, None);
     }
 

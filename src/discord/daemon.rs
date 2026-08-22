@@ -4,9 +4,9 @@ use crate::discord::status::{ChannelStatus, StatusReply};
 use crate::discord::token_store::{KeyringTokenStore, TokenStore};
 use anyhow::Result;
 use serenity::all::{
-    Command, Context, CreateCommand, CreateCommandOption, CommandOptionType,
-    CreateInteractionResponse, CreateInteractionResponseMessage, EventHandler, GatewayIntents,
-    Interaction, Message, Ready, ResolvedValue,
+    ChannelId, Command, CommandOptionType, Context, CreateCommand, CreateCommandOption,
+    CreateInteractionResponse, CreateInteractionResponseFollowup, CreateInteractionResponseMessage,
+    EventHandler, GatewayIntents, Interaction, Message, Ready, ResolvedValue,
 };
 use serenity::async_trait;
 use std::sync::Arc;
@@ -87,7 +87,19 @@ pub fn decide(
     } else {
         mentions_bot
     };
-    EventDecision { should_handle, is_dm }
+    EventDecision {
+        should_handle,
+        is_dm,
+    }
+}
+
+/// Whether a `/hm` interaction from `author_id` is authorized: DMs are
+/// gated by `[discord] allowed_users` (mirroring `decide()`'s DM path
+/// above), while guild interactions are always allowed here since Discord's
+/// own `default_member_permissions` (`[discord] permission_gate`) already
+/// gates who can invoke the command in a guild.
+pub fn interaction_authorized(settings: &DiscordSettings, is_dm: bool, author_id: &str) -> bool {
+    !is_dm || settings.allowed_users.iter().any(|u| u == author_id)
 }
 
 /// Maps the `[discord] permission_gate` config string to a Discord permission
@@ -121,11 +133,15 @@ fn build_hm_command(permission_gate: Option<serenity::model::Permissions>) -> Cr
     let mut cmd = CreateCommand::new("hm")
         .description("HiveMind memory bot")
         .add_option(
-            CreateCommandOption::new(CommandOptionType::SubCommand, "store", "Directly store a memory")
-                .add_sub_option(
-                    CreateCommandOption::new(CommandOptionType::String, "text", "Memory text")
-                        .required(true),
-                ),
+            CreateCommandOption::new(
+                CommandOptionType::SubCommand,
+                "store",
+                "Directly store a memory",
+            )
+            .add_sub_option(
+                CreateCommandOption::new(CommandOptionType::String, "text", "Memory text")
+                    .required(true),
+            ),
         )
         .add_option(CreateCommandOption::new(
             CommandOptionType::SubCommand,
@@ -143,6 +159,48 @@ fn build_hm_command(permission_gate: Option<serenity::model::Permissions>) -> Cr
     cmd
 }
 
+/// Discord rejects message content over 2000 UTF-16 code units client-side
+/// (`Error::Model(ModelError::MessageTooLong(..))`), before it ever reaches
+/// the API. Splits `text` into chunks of at most `max_len` characters,
+/// preferring to break on a newline near the limit so multi-line replies
+/// don't get cut mid-line when a good break point is available.
+fn chunk_message(text: &str, max_len: usize) -> Vec<String> {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= max_len {
+        return vec![text.to_string()];
+    }
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    while start < chars.len() {
+        let remaining = chars.len() - start;
+        if remaining <= max_len {
+            chunks.push(chars[start..].iter().collect());
+            break;
+        }
+        let mut end = start + max_len;
+        let search_start = start + max_len / 2;
+        if let Some(rel_nl) = chars[search_start..end].iter().rposition(|&c| c == '\n') {
+            end = search_start + rel_nl + 1;
+        }
+        chunks.push(chars[start..end].iter().collect());
+        start = end;
+    }
+    chunks
+}
+
+/// Sends `text` to `channel_id`, splitting it into multiple messages if it's
+/// over Discord's 2000-character limit (see [`chunk_message`]) instead of
+/// letting `say` fail client-side and silently dropping the reply. Each
+/// chunk is awaited before the next is sent, so ordering is preserved.
+async fn send_chunked(ctx: &Context, channel_id: ChannelId, text: &str) {
+    const MAX_CHUNK_LEN: usize = 1900;
+    for chunk in chunk_message(text, MAX_CHUNK_LEN) {
+        if let Err(e) = channel_id.say(&ctx.http, &chunk).await {
+            tracing::warn!(%channel_id, error = %e, "failed to send Discord message chunk");
+        }
+    }
+}
+
 async fn respond_ephemeral(ctx: &Context, command: &serenity::all::CommandInteraction, text: &str) {
     let _ = command
         .create_response(
@@ -156,11 +214,48 @@ async fn respond_ephemeral(ctx: &Context, command: &serenity::all::CommandIntera
         .await;
 }
 
+/// Sends an ephemeral deferred response, telling Discord "processing" before
+/// the 3-second interaction-response deadline expires. Used ahead of slow
+/// operations (like `/hm store`'s spawn-and-MCP-handshake) whose result is
+/// then delivered via [`respond_followup`] instead of `create_response`,
+/// since the initial response can only be sent once.
+async fn defer_ephemeral(ctx: &Context, command: &serenity::all::CommandInteraction) {
+    if let Err(e) = command
+        .create_response(
+            &ctx.http,
+            CreateInteractionResponse::Defer(
+                CreateInteractionResponseMessage::new().ephemeral(true),
+            ),
+        )
+        .await
+    {
+        tracing::warn!(error = %e, "failed to defer /hm interaction response");
+    }
+}
+
+/// Delivers the actual result for an interaction whose response was already
+/// deferred via [`defer_ephemeral`].
+async fn respond_followup(ctx: &Context, command: &serenity::all::CommandInteraction, text: &str) {
+    if let Err(e) = command
+        .create_followup(
+            &ctx.http,
+            CreateInteractionResponseFollowup::new()
+                .content(text)
+                .ephemeral(true),
+        )
+        .await
+    {
+        tracing::warn!(error = %e, "failed to send /hm interaction followup");
+    }
+}
+
 #[async_trait]
 impl EventHandler for Handler {
     async fn ready(&self, ctx: Context, _ready: Ready) {
         tracing::debug!("discord gateway ready, registering /hm command");
-        if let Err(e) = Command::create_global_command(&ctx.http, build_hm_command(self.permission_gate)).await {
+        if let Err(e) =
+            Command::create_global_command(&ctx.http, build_hm_command(self.permission_gate)).await
+        {
             tracing::warn!("failed to register /hm command: {e:#}");
         }
         let mut r = self.status_reply.lock().await;
@@ -175,6 +270,13 @@ impl EventHandler for Handler {
         let is_dm = msg.guild_id.is_none();
         let bot_id = ctx.cache.current_user().id;
         let mentions_bot = msg.mentions_user_id(bot_id);
+        tracing::debug!(
+            channel_id = %msg.channel_id,
+            author = %msg.author.id,
+            is_dm,
+            mentions_bot,
+            "message received"
+        );
         let decision = crate::discord::daemon::decide(
             &self.settings,
             is_dm,
@@ -183,8 +285,14 @@ impl EventHandler for Handler {
             mentions_bot,
         );
         if !decision.should_handle {
+            if is_dm {
+                tracing::debug!(author = %msg.author.id, "DM from non-allowed user, ignoring");
+            } else {
+                tracing::debug!(author = %msg.author.id, "message not handled (no mention)");
+            }
             return;
         }
+        tracing::debug!(author = %msg.author.id, channel_id = %msg.channel_id, "sender authorized, handling message");
 
         let channel_id = msg.channel_id.to_string();
         {
@@ -194,6 +302,12 @@ impl EventHandler for Handler {
         let target = crate::discord::channels::resolve_target(&self.settings, &channel_id, is_dm);
         let system_prompt = crate::discord::channels::context_system_prompt(&target);
         let resume = self.sessions.get(&channel_id).await;
+        match &resume {
+            Some(id) => {
+                tracing::debug!(channel_id = %channel_id, session_id = %id, "resuming session")
+            }
+            None => tracing::debug!(channel_id = %channel_id, "spawning new session"),
+        }
         match crate::chat_bot::agent::run_turn(
             &self.agent,
             &self.hivemind_bin,
@@ -204,17 +318,26 @@ impl EventHandler for Handler {
         .await
         {
             Ok(result) => {
+                tracing::debug!(
+                    channel_id = %channel_id,
+                    session_id = %result.session_id,
+                    reply = %result.reply_text,
+                    "agent response"
+                );
                 self.sessions.set(&channel_id, result.session_id).await;
                 mark_channel_active(&self.status_reply, &channel_id).await;
-                let _ = msg.channel_id.say(&ctx.http, result.reply_text).await;
+                send_chunked(&ctx, msg.channel_id, &result.reply_text).await;
             }
             Err(e) => {
+                tracing::debug!(channel_id = %channel_id, error = %e, "agent turn failed");
                 self.sessions.reset(&channel_id).await;
                 mark_channel_inactive(&self.status_reply, &channel_id).await;
-                let _ = msg
-                    .channel_id
-                    .say(&ctx.http, format!("hivemind discord hit an error: {e}"))
-                    .await;
+                send_chunked(
+                    &ctx,
+                    msg.channel_id,
+                    &format!("hivemind discord hit an error: {e}"),
+                )
+                .await;
             }
         }
     }
@@ -228,7 +351,18 @@ impl EventHandler for Handler {
         }
         let is_dm = command.guild_id.is_none();
         let author_id = command.user.id.to_string();
-        if is_dm && !self.settings.allowed_users.iter().any(|u| u == &author_id) {
+        tracing::debug!(
+            channel_id = %command.channel_id,
+            author = %author_id,
+            is_dm,
+            "interaction received"
+        );
+        if !interaction_authorized(&self.settings, is_dm, &author_id) {
+            tracing::debug!(
+                author = %author_id,
+                is_dm,
+                "interaction not authorized (DM from non-allowed user), ignoring"
+            );
             return;
         }
 
@@ -239,31 +373,45 @@ impl EventHandler for Handler {
             return;
         };
         let channel_id = command.channel_id.to_string();
+        tracing::debug!(channel_id = %channel_id, subcommand = top.name, "dispatching /hm subcommand");
 
         match top.name {
             "help" => respond_ephemeral(&ctx, &command, HELP_TEXT).await,
             "reset" => {
+                tracing::debug!(channel_id = %channel_id, "resetting session");
                 self.sessions.reset(&channel_id).await;
                 mark_channel_inactive(&self.status_reply, &channel_id).await;
                 respond_ephemeral(&ctx, &command, "Reset.").await;
             }
             "store" => {
+                // `store_memory` spawns the `hivemind` binary and does an MCP
+                // handshake, which can outlast Discord's 3-second
+                // interaction-response deadline. Defer immediately so the
+                // interaction token stays valid, then deliver the real
+                // result via a followup once it's done.
+                defer_ephemeral(&ctx, &command).await;
                 let text = sub_opts.iter().find_map(|o| match &o.value {
                     ResolvedValue::String(s) if o.name == "text" => Some(s.to_string()),
                     _ => None,
                 });
                 let Some(text) = text else {
-                    respond_ephemeral(&ctx, &command, "Missing text.").await;
+                    respond_followup(&ctx, &command, "Missing text.").await;
                     return;
                 };
-                let target = crate::discord::channels::resolve_target(&self.settings, &channel_id, is_dm);
-                match crate::discord::store_direct::store_memory(&self.hivemind_bin, &text, &target).await {
+                let target =
+                    crate::discord::channels::resolve_target(&self.settings, &channel_id, is_dm);
+                tracing::debug!(channel_id = %channel_id, "storing memory via /hm store");
+                match crate::discord::store_direct::store_memory(&self.hivemind_bin, &text, &target)
+                    .await
+                {
                     Ok(()) => {
+                        tracing::debug!(channel_id = %channel_id, "/hm store succeeded");
                         mark_channel_active(&self.status_reply, &channel_id).await;
-                        respond_ephemeral(&ctx, &command, "Stored.").await;
+                        respond_followup(&ctx, &command, "Stored.").await;
                     }
                     Err(e) => {
-                        respond_ephemeral(
+                        tracing::debug!(channel_id = %channel_id, error = %e, "/hm store failed");
+                        respond_followup(
                             &ctx,
                             &command,
                             &format!("hivemind discord failed to store that: {e}"),
@@ -277,13 +425,26 @@ impl EventHandler for Handler {
     }
 }
 
-pub async fn run(settings: DiscordSettings, agent: AgentSettings, hivemind_bin: String) -> Result<()> {
-    let token = tokio::task::spawn_blocking({
-        let application_id = settings.application_id.clone();
-        move || KeyringTokenStore.load(&application_id)
-    })
-    .await??
+pub async fn run(
+    settings: DiscordSettings,
+    agent: AgentSettings,
+    hivemind_bin: String,
+) -> Result<()> {
+    tracing::debug!(application_id = %settings.application_id, "loading saved bot token from OS keyring");
+    let application_id = settings.application_id.clone();
+    let token = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        tokio::task::spawn_blocking(move || KeyringTokenStore.load(&application_id)),
+    )
+    .await
+    .map_err(|_| {
+        anyhow::anyhow!(
+            "timed out reading bot token from the OS keyring after 10s: is a keyring daemon \
+             running and unlocked? (e.g. `systemctl --user start gnome-keyring-daemon`)"
+        )
+    })???
     .ok_or_else(|| anyhow::anyhow!("no saved bot token — run `hivemind discord login` first"))?;
+    tracing::debug!("bot token loaded from keyring");
 
     let _pid_guard = write_pidfile()?;
 
@@ -349,11 +510,18 @@ pub async fn send_direct_message(
     to_user_id: &str,
     message: &str,
 ) -> Result<()> {
-    let token = tokio::task::spawn_blocking({
-        let application_id = settings.application_id.clone();
-        move || KeyringTokenStore.load(&application_id)
-    })
-    .await??
+    let application_id = settings.application_id.clone();
+    let token = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        tokio::task::spawn_blocking(move || KeyringTokenStore.load(&application_id)),
+    )
+    .await
+    .map_err(|_| {
+        anyhow::anyhow!(
+            "timed out reading bot token from the OS keyring after 10s: is a keyring daemon \
+             running and unlocked? (e.g. `systemctl --user start gnome-keyring-daemon`)"
+        )
+    })???
     .ok_or_else(|| anyhow::anyhow!("no saved bot token — run `hivemind discord login` first"))?;
 
     let http = serenity::http::Http::new(&token);
@@ -415,6 +583,58 @@ mod tests {
         let d = decide(&settings(), false, false, "444444444444444444", true);
         assert!(d.should_handle);
         assert!(!d.is_dm);
+    }
+
+    #[test]
+    fn chunk_message_returns_single_chunk_when_under_the_limit() {
+        let chunks = chunk_message("hello world", 1900);
+        assert_eq!(chunks, vec!["hello world".to_string()]);
+    }
+
+    #[test]
+    fn chunk_message_splits_text_over_the_limit() {
+        let text = "a".repeat(50);
+        let chunks = chunk_message(&text, 20);
+        assert_eq!(chunks.len(), 3);
+        assert_eq!(chunks[0].chars().count(), 20);
+        assert_eq!(chunks[1].chars().count(), 20);
+        assert_eq!(chunks[2].chars().count(), 10);
+        assert_eq!(chunks.concat(), text);
+    }
+
+    #[test]
+    fn chunk_message_prefers_breaking_on_a_newline_near_the_limit() {
+        let text = format!("{}\n{}", "a".repeat(15), "b".repeat(15));
+        let chunks = chunk_message(&text, 20);
+        assert_eq!(chunks[0], format!("{}\n", "a".repeat(15)));
+        assert_eq!(chunks[1], "b".repeat(15));
+    }
+
+    #[test]
+    fn interaction_from_dm_by_allowed_user_is_authorized() {
+        assert!(interaction_authorized(
+            &settings(),
+            true,
+            "111111111111111111"
+        ));
+    }
+
+    #[test]
+    fn interaction_from_dm_by_non_allowed_user_is_not_authorized() {
+        assert!(!interaction_authorized(
+            &settings(),
+            true,
+            "333333333333333333"
+        ));
+    }
+
+    #[test]
+    fn interaction_from_guild_is_always_authorized_regardless_of_allowed_users() {
+        assert!(interaction_authorized(
+            &settings(),
+            false,
+            "444444444444444444"
+        ));
     }
 
     #[test]
