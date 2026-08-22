@@ -35,6 +35,12 @@ pub fn matrix_pidfile_path() -> std::path::PathBuf {
     xdg_data_dir().join("hivemind-matrix.pid")
 }
 
+/// PID file written by `hivemind discord run` while its daemon is running:
+/// $XDG_DATA_HOME/hivemind/hivemind-discord.pid
+pub fn discord_pidfile_path() -> std::path::PathBuf {
+    xdg_data_dir().join("hivemind-discord.pid")
+}
+
 pub fn resolve_db_path() -> String {
     if let Ok(p) = std::env::var("HIVEMIND_DB_PATH") {
         return p;
