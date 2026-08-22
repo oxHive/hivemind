@@ -32,6 +32,12 @@ fn main() -> Result<()> {
             cli::MatrixAction::Status => cli::cmd_matrix_status(),
             cli::MatrixAction::Send { user_id, message } => run_matrix_send(user_id, message),
         },
+        Some(Command::Discord { action }) => match action {
+            cli::DiscordAction::Login => cli::cmd_discord_login(),
+            cli::DiscordAction::Run { debug } => run_discord(debug),
+            cli::DiscordAction::Status => cli::cmd_discord_status(),
+            cli::DiscordAction::Send { user_id, message } => run_discord_send(user_id, message),
+        },
         Some(Command::Migrate) => cli::cmd_migrate(),
         Some(Command::SessionStart { json }) => cli::cmd_session_start(json),
     }
@@ -253,4 +259,32 @@ async fn run_matrix_send(user_id: String, message: String) -> Result<()> {
             anyhow::anyhow!("no [matrix] config found — run `hivemind matrix login` first")
         })?;
     oxhivemind::matrix::daemon::send_direct_message(&settings, &user_id, &message).await
+}
+
+#[tokio::main]
+async fn run_discord(debug: bool) -> Result<()> {
+    if debug {
+        init_tracing_with_default("hivemind=debug,oxhivemind=debug");
+    } else {
+        init_tracing();
+    }
+    tracing::debug!("loading discord config");
+    let settings =
+        config::load_discord_settings(&config::global_config_path())?.ok_or_else(|| {
+            anyhow::anyhow!("no [discord] config found — run `hivemind discord login` first")
+        })?;
+    let server_settings = config::load_server_settings(&config::global_config_path())?;
+    let hivemind_bin = std::env::current_exe()?.to_string_lossy().into_owned();
+    tracing::debug!("starting discord daemon");
+    oxhivemind::discord::daemon::run(settings, server_settings.agent, hivemind_bin).await
+}
+
+#[tokio::main]
+async fn run_discord_send(user_id: String, message: String) -> Result<()> {
+    init_tracing_with_default("hivemind=debug,oxhivemind=debug");
+    let settings =
+        config::load_discord_settings(&config::global_config_path())?.ok_or_else(|| {
+            anyhow::anyhow!("no [discord] config found — run `hivemind discord login` first")
+        })?;
+    oxhivemind::discord::daemon::send_direct_message(&settings, &user_id, &message).await
 }
