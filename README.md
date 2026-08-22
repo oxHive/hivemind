@@ -606,6 +606,14 @@ Channels the bot is in but not listed here still work — memories land in the `
 layer tagged `channel:<id-or-alias>` + `source:discord` instead of your configured
 `base_tags`. DMs always use the `personal` layer.
 
+> **Trust boundary:** `permission_gate` only restricts the `/hm` slash command. Freeform
+> @mention chat in a guild channel is open to any member of that guild who can see the
+> channel: it's gated by Discord's own channel permissions, not by `permission_gate` or
+> `allowed_users` (`allowed_users` only gates DMs). This mirrors Matrix's trust model,
+> where room membership is the boundary, but Discord guilds are typically much larger
+> than Matrix rooms, so make sure you're comfortable with everyone in a guild before
+> inviting the bot to it.
+
 Then run it:
 
 ```sh
