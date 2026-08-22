@@ -1,5 +1,6 @@
 pub mod api;
 pub mod budget;
+pub mod chat_bot;
 pub mod cli;
 pub mod config;
 pub mod db;

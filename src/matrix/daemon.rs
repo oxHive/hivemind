@@ -352,7 +352,7 @@ pub async fn run(
                         Some(id) => tracing::debug!(room_id = %room.room_id(), session_id = %id, "resuming session"),
                         None => tracing::debug!(room_id = %room.room_id(), "spawning new session"),
                     }
-                    match crate::matrix::agent::run_turn(&agent, &hivemind_bin, &message, resume.as_deref(), Some(&system_prompt)).await {
+                    match crate::chat_bot::agent::run_turn(&agent, &hivemind_bin, &message, resume.as_deref(), Some(&system_prompt)).await {
                         Ok(result) => {
                             tracing::debug!(
                                 room_id = %room.room_id(),
