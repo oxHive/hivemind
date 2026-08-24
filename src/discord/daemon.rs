@@ -655,4 +655,177 @@ mod tests {
         assert!(err.contains("super_admin"));
         assert!(err.contains("manage_guild"));
     }
+
+    #[test]
+    fn parse_permission_gate_accepts_all_remaining_known_values() {
+        use serenity::model::Permissions;
+        assert_eq!(
+            parse_permission_gate("manage_channels").unwrap(),
+            Permissions::MANAGE_CHANNELS
+        );
+        assert_eq!(
+            parse_permission_gate("manage_messages").unwrap(),
+            Permissions::MANAGE_MESSAGES
+        );
+        assert_eq!(
+            parse_permission_gate("kick_members").unwrap(),
+            Permissions::KICK_MEMBERS
+        );
+        assert_eq!(
+            parse_permission_gate("ban_members").unwrap(),
+            Permissions::BAN_MEMBERS
+        );
+    }
+
+    #[test]
+    fn chunk_message_returns_single_chunk_when_exactly_at_the_limit() {
+        let text = "a".repeat(20);
+        let chunks = chunk_message(&text, 20);
+        assert_eq!(chunks, vec![text]);
+    }
+
+    #[test]
+    fn chunk_message_handles_empty_text() {
+        let chunks = chunk_message("", 20);
+        assert_eq!(chunks, vec!["".to_string()]);
+    }
+
+    #[test]
+    fn now_ts_returns_a_parseable_unix_timestamp() {
+        let ts = now_ts();
+        let parsed: u64 = ts.parse().expect("now_ts should return a plain integer string");
+        // Sanity bound: any time after 2020-01-01 in unix seconds.
+        assert!(parsed > 1_577_836_800);
+    }
+
+    #[tokio::test]
+    async fn mark_channel_active_adds_a_new_channel_when_absent() {
+        let status = Arc::new(Mutex::new(StatusReply {
+            logged_in: true,
+            application_id: "1".into(),
+            sync_state: "connected".into(),
+            last_sync_at: None,
+            channels: vec![],
+        }));
+        mark_channel_active(&status, "123").await;
+        let r = status.lock().await;
+        assert_eq!(r.channels.len(), 1);
+        assert_eq!(r.channels[0].channel_id, "123");
+        assert!(r.channels[0].active_session);
+        assert!(r.channels[0].last_active_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn mark_channel_active_updates_an_existing_channel() {
+        let status = Arc::new(Mutex::new(StatusReply {
+            logged_in: true,
+            application_id: "1".into(),
+            sync_state: "connected".into(),
+            last_sync_at: None,
+            channels: vec![ChannelStatus {
+                channel_id: "123".into(),
+                alias: Some("proj".into()),
+                active_session: false,
+                last_active_at: None,
+            }],
+        }));
+        mark_channel_active(&status, "123").await;
+        let r = status.lock().await;
+        assert_eq!(r.channels.len(), 1);
+        assert_eq!(r.channels[0].alias.as_deref(), Some("proj"));
+        assert!(r.channels[0].active_session);
+        assert!(r.channels[0].last_active_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn mark_channel_inactive_updates_an_existing_channel() {
+        let status = Arc::new(Mutex::new(StatusReply {
+            logged_in: true,
+            application_id: "1".into(),
+            sync_state: "connected".into(),
+            last_sync_at: None,
+            channels: vec![ChannelStatus {
+                channel_id: "123".into(),
+                alias: None,
+                active_session: true,
+                last_active_at: Some("100".into()),
+            }],
+        }));
+        mark_channel_inactive(&status, "123").await;
+        let r = status.lock().await;
+        assert!(!r.channels[0].active_session);
+    }
+
+    #[tokio::test]
+    async fn mark_channel_inactive_is_a_noop_for_an_unknown_channel() {
+        let status = Arc::new(Mutex::new(StatusReply {
+            logged_in: true,
+            application_id: "1".into(),
+            sync_state: "connected".into(),
+            last_sync_at: None,
+            channels: vec![],
+        }));
+        mark_channel_inactive(&status, "does-not-exist").await;
+        let r = status.lock().await;
+        assert!(r.channels.is_empty());
+    }
+
+    #[test]
+    fn build_hm_command_without_permission_gate_has_no_default_permissions() {
+        let cmd = build_hm_command(None);
+        let json = serde_json::to_value(&cmd).unwrap();
+        assert_eq!(json["name"], "hm");
+        assert!(json.get("default_member_permissions").is_none());
+        let options = json["options"].as_array().unwrap();
+        let names: Vec<&str> = options
+            .iter()
+            .map(|o| o["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, vec!["store", "reset", "help"]);
+    }
+
+    #[test]
+    fn build_hm_command_with_permission_gate_sets_default_permissions() {
+        use serenity::model::Permissions;
+        let cmd = build_hm_command(Some(Permissions::MANAGE_GUILD));
+        let json = serde_json::to_value(&cmd).unwrap();
+        assert_eq!(
+            json["default_member_permissions"],
+            Permissions::MANAGE_GUILD.bits().to_string()
+        );
+    }
+
+    #[test]
+    fn build_hm_command_store_option_requires_text() {
+        let cmd = build_hm_command(None);
+        let json = serde_json::to_value(&cmd).unwrap();
+        let store = json["options"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|o| o["name"] == "store")
+            .unwrap();
+        let sub_opts = store["options"].as_array().unwrap();
+        let text_opt = sub_opts.iter().find(|o| o["name"] == "text").unwrap();
+        assert_eq!(text_opt["required"], true);
+    }
+
+    #[test]
+    fn write_pidfile_writes_current_pid_and_removes_it_on_drop() {
+        let _lock = crate::test_env_lock::ENV_MUTEX.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        // SAFETY: test-only env mutation; serialised by ENV_MUTEX.
+        unsafe { std::env::set_var("XDG_DATA_HOME", dir.path()) };
+
+        let path = crate::db::discord_pidfile_path();
+        {
+            let guard = write_pidfile().unwrap();
+            assert_eq!(guard.0, path);
+            let contents = std::fs::read_to_string(&path).unwrap();
+            assert_eq!(contents, std::process::id().to_string());
+        }
+        assert!(!path.exists(), "pidfile should be removed once the guard drops");
+
+        unsafe { std::env::remove_var("XDG_DATA_HOME") };
+    }
 }
