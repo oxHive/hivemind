@@ -4,11 +4,11 @@ use std::path::{Path, PathBuf};
 
 // ── service management ────────────────────────────────────────────────────────
 
-pub fn cmd_service_install(dashboard: bool, matrix: bool) -> Result<()> {
+pub fn cmd_service_install(dashboard: bool, matrix: bool, discord: bool) -> Result<()> {
     #[cfg(target_os = "macos")]
-    return service_install_macos(dashboard, matrix);
+    return service_install_macos(dashboard, matrix, discord);
     #[cfg(target_os = "linux")]
-    return service_install_linux(dashboard, matrix);
+    return service_install_linux(dashboard, matrix, discord);
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     anyhow::bail!("hivemind service install is only supported on Linux and macOS");
 }
@@ -160,7 +160,7 @@ fn service_status_unit_linux(unit_name: &str) -> Result<()> {
 }
 
 #[cfg(target_os = "linux")]
-fn service_install_linux(dashboard: bool, matrix: bool) -> Result<()> {
+fn service_install_linux(dashboard: bool, matrix: bool, discord: bool) -> Result<()> {
     let (args, desc): (&[&str], &str) = if dashboard {
         (&["up"], "HiveMind server (API + dashboard)")
     } else {
@@ -186,6 +186,24 @@ fn service_install_linux(dashboard: bool, matrix: bool) -> Result<()> {
         )?;
     }
 
+    if discord {
+        let configured = crate::config::load_discord_settings(&crate::config::global_config_path())
+            .ok()
+            .flatten()
+            .is_some();
+        if !configured {
+            anyhow::bail!(
+                "--discord was passed but Discord is not configured.\n\
+                 Run `hivemind discord login` first, then re-run `hivemind service install --discord`."
+            );
+        }
+        service_install_unit_linux(
+            "hivemind-discord",
+            "HiveMind Discord chat bot",
+            &["discord", "run"],
+        )?;
+    }
+
     println!();
     println!("HiveMind will now start automatically on login.");
     if dashboard {
@@ -204,6 +222,9 @@ fn service_uninstall_linux() -> Result<()> {
     if systemd_unit_path("hivemind-matrix").exists() {
         service_uninstall_unit_linux("hivemind-matrix")?;
     }
+    if systemd_unit_path("hivemind-discord").exists() {
+        service_uninstall_unit_linux("hivemind-discord")?;
+    }
 
     println!("HiveMind service uninstalled.");
     Ok(())
@@ -214,6 +235,9 @@ fn service_status_linux() -> Result<()> {
     service_status_unit_linux("hivemind")?;
     if systemd_unit_path("hivemind-matrix").exists() {
         service_status_unit_linux("hivemind-matrix")?;
+    }
+    if systemd_unit_path("hivemind-discord").exists() {
+        service_status_unit_linux("hivemind-discord")?;
     }
     Ok(())
 }
@@ -231,6 +255,18 @@ mod matrix_service_tests {
         );
         assert!(content.contains("Description=HiveMind Matrix chat bot"));
         assert!(content.contains("ExecStart=/usr/local/bin/hivemind matrix run"));
+        assert!(content.contains("WantedBy=default.target"));
+    }
+
+    #[test]
+    fn systemd_unit_content_for_discord_names_the_unit_and_subcommand() {
+        let content = systemd_unit_content(
+            "HiveMind Discord chat bot",
+            &std::path::PathBuf::from("/usr/local/bin/hivemind"),
+            &["discord", "run"],
+        );
+        assert!(content.contains("Description=HiveMind Discord chat bot"));
+        assert!(content.contains("ExecStart=/usr/local/bin/hivemind discord run"));
         assert!(content.contains("WantedBy=default.target"));
     }
 
@@ -256,6 +292,9 @@ const LAUNCH_AGENT_LABEL: &str = "com.oxhive.hivemind";
 
 #[cfg(target_os = "macos")]
 const MATRIX_LAUNCH_AGENT_LABEL: &str = "com.oxhive.hivemind-matrix";
+
+#[cfg(target_os = "macos")]
+const DISCORD_LAUNCH_AGENT_LABEL: &str = "com.oxhive.hivemind-discord";
 
 #[cfg(target_os = "macos")]
 fn launch_agent_path(label: &str) -> PathBuf {
@@ -366,7 +405,7 @@ fn service_status_unit_macos(label: &str) -> Result<()> {
 }
 
 #[cfg(target_os = "macos")]
-fn service_install_macos(dashboard: bool, matrix: bool) -> Result<()> {
+fn service_install_macos(dashboard: bool, matrix: bool, discord: bool) -> Result<()> {
     let (args, desc): (&[&str], &str) = if dashboard {
         (&["up"], "HiveMind server (API + dashboard)")
     } else {
@@ -392,6 +431,24 @@ fn service_install_macos(dashboard: bool, matrix: bool) -> Result<()> {
         )?;
     }
 
+    if discord {
+        let configured = crate::config::load_discord_settings(&crate::config::global_config_path())
+            .ok()
+            .flatten()
+            .is_some();
+        if !configured {
+            anyhow::bail!(
+                "--discord was passed but Discord is not configured.\n\
+                 Run `hivemind discord login` first, then re-run `hivemind service install --discord`."
+            );
+        }
+        service_install_unit_macos(
+            DISCORD_LAUNCH_AGENT_LABEL,
+            &["discord", "run"],
+            "HiveMind Discord chat bot",
+        )?;
+    }
+
     println!();
     println!("HiveMind will now start automatically on login.");
     if dashboard {
@@ -411,6 +468,9 @@ fn service_uninstall_macos() -> Result<()> {
     if launch_agent_path(MATRIX_LAUNCH_AGENT_LABEL).exists() {
         service_uninstall_unit_macos(MATRIX_LAUNCH_AGENT_LABEL)?;
     }
+    if launch_agent_path(DISCORD_LAUNCH_AGENT_LABEL).exists() {
+        service_uninstall_unit_macos(DISCORD_LAUNCH_AGENT_LABEL)?;
+    }
 
     println!("HiveMind service uninstalled.");
     Ok(())
@@ -421,6 +481,9 @@ fn service_status_macos() -> Result<()> {
     service_status_unit_macos(LAUNCH_AGENT_LABEL)?;
     if launch_agent_path(MATRIX_LAUNCH_AGENT_LABEL).exists() {
         service_status_unit_macos(MATRIX_LAUNCH_AGENT_LABEL)?;
+    }
+    if launch_agent_path(DISCORD_LAUNCH_AGENT_LABEL).exists() {
+        service_status_unit_macos(DISCORD_LAUNCH_AGENT_LABEL)?;
     }
     Ok(())
 }
