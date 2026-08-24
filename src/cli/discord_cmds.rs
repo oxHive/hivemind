@@ -27,7 +27,10 @@ pub fn cmd_discord_login() -> Result<()> {
                 &store,
                 &crate::config::global_config_path(),
             )?;
-            print!("{}", format_login_success(&current_user.name, &application_id));
+            print!(
+                "{}",
+                format_login_success(&current_user.name, &application_id)
+            );
             anyhow::Ok(())
         })
 }
@@ -37,7 +40,10 @@ pub fn cmd_discord_login() -> Result<()> {
 fn format_login_success(user_name: &str, application_id: &str) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
-    let _ = writeln!(out, "Logged in as {user_name} (application id {application_id}).");
+    let _ = writeln!(
+        out,
+        "Logged in as {user_name} (application id {application_id})."
+    );
     let _ = writeln!(
         out,
         "Token saved to the OS keyring. Run `hivemind discord run` to start the bot."

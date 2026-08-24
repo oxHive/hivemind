@@ -693,7 +693,9 @@ mod tests {
     #[test]
     fn now_ts_returns_a_parseable_unix_timestamp() {
         let ts = now_ts();
-        let parsed: u64 = ts.parse().expect("now_ts should return a plain integer string");
+        let parsed: u64 = ts
+            .parse()
+            .expect("now_ts should return a plain integer string");
         // Sanity bound: any time after 2020-01-01 in unix seconds.
         assert!(parsed > 1_577_836_800);
     }
@@ -824,7 +826,10 @@ mod tests {
             let contents = std::fs::read_to_string(&path).unwrap();
             assert_eq!(contents, std::process::id().to_string());
         }
-        assert!(!path.exists(), "pidfile should be removed once the guard drops");
+        assert!(
+            !path.exists(),
+            "pidfile should be removed once the guard drops"
+        );
 
         unsafe { std::env::remove_var("XDG_DATA_HOME") };
     }
