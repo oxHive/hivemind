@@ -1200,3 +1200,205 @@ fn global_config_template_parses_with_org_sync_disabled_by_default() {
         "template should document the org_sync block, even commented out"
     );
 }
+
+// ── dashboard-parity command parsing ─────────────────────────────────────
+
+#[test]
+fn parses_memory_list_with_tag_and_json() {
+    let cli = Cli::parse_from([
+        "hivemind",
+        "memory",
+        "list",
+        "--tag",
+        "tag:topic:x",
+        "--json",
+    ]);
+    match cli.command {
+        Some(Command::Memory {
+            action: MemoryAction::List { tag, json, .. },
+        }) => {
+            assert_eq!(tag.as_deref(), Some("tag:topic:x"));
+            assert!(json);
+        }
+        _ => panic!("expected Memory List command"),
+    }
+}
+
+#[test]
+fn parses_memory_add_with_repeated_tags() {
+    let cli = Cli::parse_from([
+        "hivemind",
+        "memory",
+        "add",
+        "--title",
+        "T",
+        "--content",
+        "C",
+        "--tag",
+        "a",
+        "--tag",
+        "b",
+    ]);
+    match cli.command {
+        Some(Command::Memory {
+            action:
+                MemoryAction::Add {
+                    title,
+                    content,
+                    tags,
+                    ..
+                },
+        }) => {
+            assert_eq!(title, "T");
+            assert_eq!(content, "C");
+            assert_eq!(tags, vec!["a".to_string(), "b".to_string()]);
+        }
+        _ => panic!("expected Memory Add command"),
+    }
+}
+
+#[test]
+fn parses_memory_edit_without_tags_leaves_none() {
+    let cli = Cli::parse_from(["hivemind", "memory", "edit", "mem_x", "--title", "New"]);
+    match cli.command {
+        Some(Command::Memory {
+            action: MemoryAction::Edit {
+                id, title, tags, ..
+            },
+        }) => {
+            assert_eq!(id, "mem_x");
+            assert_eq!(title.as_deref(), Some("New"));
+            assert!(tags.is_none());
+        }
+        _ => panic!("expected Memory Edit command"),
+    }
+}
+
+#[test]
+fn parses_edge_add_subcommand() {
+    let cli = Cli::parse_from(["hivemind", "edge", "add", "mem_a", "mem_b", "sibling"]);
+    assert!(matches!(
+        cli.command,
+        Some(Command::Edge {
+            action: EdgeAction::Add { .. }
+        })
+    ));
+}
+
+#[test]
+fn parses_edge_approve_subcommand() {
+    let cli = Cli::parse_from(["hivemind", "edge", "approve", "edge_x"]);
+    match cli.command {
+        Some(Command::Edge {
+            action: EdgeAction::Approve { id },
+        }) => assert_eq!(id, "edge_x"),
+        _ => panic!("expected Edge Approve command"),
+    }
+}
+
+#[test]
+fn parses_feedback_add_subcommand() {
+    let cli = Cli::parse_from(["hivemind", "feedback", "add", "mem_x", "outdated"]);
+    assert!(matches!(
+        cli.command,
+        Some(Command::Feedback {
+            action: FeedbackAction::Add { .. }
+        })
+    ));
+}
+
+#[test]
+fn parses_conflict_resolve_subcommand() {
+    let cli = Cli::parse_from([
+        "hivemind",
+        "conflict",
+        "resolve",
+        "conflict_x",
+        "keep-local",
+    ]);
+    match cli.command {
+        Some(Command::Conflict {
+            action: ConflictAction::Resolve { id, resolution },
+        }) => {
+            assert_eq!(id, "conflict_x");
+            assert_eq!(resolution, "keep-local");
+        }
+        _ => panic!("expected Conflict Resolve command"),
+    }
+}
+
+#[test]
+fn parses_tags_add_subcommand_with_defaults() {
+    let cli = Cli::parse_from(["hivemind", "tags", "add", "myns"]);
+    match cli.command {
+        Some(Command::Tags {
+            action:
+                TagsAction::Add {
+                    name,
+                    color,
+                    values_mode,
+                    single_value,
+                    ..
+                },
+        }) => {
+            assert_eq!(name, "myns");
+            assert_eq!(color, "#4a9eff");
+            assert_eq!(values_mode, "suggestion");
+            assert!(!single_value);
+        }
+        _ => panic!("expected Tags Add command"),
+    }
+}
+
+#[test]
+fn parses_limits_set_subcommand() {
+    let cli = Cli::parse_from(["hivemind", "limits", "set", "2000"]);
+    match cli.command {
+        Some(Command::Limits {
+            action: LimitsAction::Set { tokens },
+        }) => assert_eq!(tokens, 2000),
+        _ => panic!("expected Limits Set command"),
+    }
+}
+
+#[test]
+fn parses_data_wipe_with_yes_flag() {
+    let cli = Cli::parse_from(["hivemind", "data", "wipe", "--yes"]);
+    match cli.command {
+        Some(Command::Data {
+            action: DataAction::Wipe { yes },
+        }) => assert!(yes),
+        _ => panic!("expected Data Wipe command"),
+    }
+}
+
+#[test]
+fn parses_suggest_revise_subcommand() {
+    let cli = Cli::parse_from([
+        "hivemind",
+        "suggest",
+        "revise",
+        "edge_x",
+        "make it a parent",
+    ]);
+    match cli.command {
+        Some(Command::Suggest {
+            action: SuggestAction::Revise { edge_id, feedback },
+        }) => {
+            assert_eq!(edge_id, "edge_x");
+            assert_eq!(feedback, "make it a parent");
+        }
+        _ => panic!("expected Suggest Revise command"),
+    }
+}
+
+#[test]
+fn parses_update_apply_with_yes_flag() {
+    let cli = Cli::parse_from(["hivemind", "update", "apply", "--yes"]);
+    match cli.command {
+        Some(Command::Update {
+            action: UpdateAction::Apply { yes },
+        }) => assert!(yes),
+        _ => panic!("expected Update Apply command"),
+    }
+}

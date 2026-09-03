@@ -59,6 +59,51 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Manage memories (list, search, create, edit, delete, tag)
+    Memory {
+        #[command(subcommand)]
+        action: MemoryAction,
+    },
+    /// Manage the memory relationship graph (edges between memories)
+    Edge {
+        #[command(subcommand)]
+        action: EdgeAction,
+    },
+    /// Review and triage flagged-memory feedback
+    Feedback {
+        #[command(subcommand)]
+        action: FeedbackAction,
+    },
+    /// Review and resolve sync conflicts
+    Conflict {
+        #[command(subcommand)]
+        action: ConflictAction,
+    },
+    /// Manage the tag namespace registry (colors, values, descriptions)
+    Tags {
+        #[command(subcommand)]
+        action: TagsAction,
+    },
+    /// Manage the max-content-tokens guardrail
+    Limits {
+        #[command(subcommand)]
+        action: LimitsAction,
+    },
+    /// Export/import memories, or wipe all local data
+    Data {
+        #[command(subcommand)]
+        action: DataAction,
+    },
+    /// AI-assisted graph suggestions (requires `hivemind up` to be running)
+    Suggest {
+        #[command(subcommand)]
+        action: SuggestAction,
+    },
+    /// Check for and apply HiveMind updates
+    Update {
+        #[command(subcommand)]
+        action: UpdateAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -108,16 +153,33 @@ pub enum McpAction {
     },
 }
 
+pub(crate) mod common;
+mod data;
+mod edge;
+mod feedback;
 mod init;
+mod limits;
 mod matrix_cmds;
 mod mcp_install;
+mod memory;
+mod self_update;
 mod service;
 mod status;
+mod suggest;
+mod tags;
 #[cfg(test)]
 mod tests;
 
+pub use data::*;
+pub use edge::*;
+pub use feedback::*;
 pub use init::*;
+pub use limits::*;
 pub use matrix_cmds::*;
 pub use mcp_install::*;
+pub use memory::*;
+pub use self_update::*;
 pub use service::*;
 pub use status::*;
+pub use suggest::*;
+pub use tags::*;
