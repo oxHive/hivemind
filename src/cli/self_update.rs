@@ -9,11 +9,14 @@ use crate::update::{GitHubVersionSource, ensure_binstall_available, run_binstall
 pub enum UpdateAction {
     /// Check GitHub releases for a newer version
     Check {
+        /// Emit machine-readable JSON instead of a text summary
         #[arg(long)]
         json: bool,
     },
-    /// Self-update via `cargo binstall` and restart in place
+    /// Self-update via `cargo binstall` (does not restart any running server —
+    /// restart `hivemind up`/the background service afterward)
     Apply {
+        /// Skip the confirmation prompt
         #[arg(long)]
         yes: bool,
     },

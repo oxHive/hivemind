@@ -11,11 +11,17 @@ pub enum SuggestAction {
     Start,
     /// Show the current suggest session's phase and pending suggestions
     Status {
+        /// Emit machine-readable JSON instead of a text summary
         #[arg(long)]
         json: bool,
     },
     /// Send feedback on a suggested edge, asking the agent to revise it
-    Revise { edge_id: String, feedback: String },
+    Revise {
+        /// The pending edge's id, e.g. edge_xxxxxxxx
+        edge_id: String,
+        /// What should change, e.g. "make it a parent instead of a sibling"
+        feedback: String,
+    },
     /// End the current suggest session
     End,
 }

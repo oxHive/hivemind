@@ -15,9 +15,13 @@ pub enum DataAction {
         output: Option<PathBuf>,
     },
     /// Import memories + edges from a previous export
-    Import { input: PathBuf },
+    Import {
+        /// Path to a JSON file previously produced by `hivemind data export`
+        input: PathBuf,
+    },
     /// Permanently delete all memories, edges, feedback, and conflicts
     Wipe {
+        /// Skip the confirmation prompt
         #[arg(long)]
         yes: bool,
     },

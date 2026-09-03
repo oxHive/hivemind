@@ -8,12 +8,16 @@ use super::common::{block_on, open_store, print_json};
 pub enum LimitsAction {
     /// Show the max-content-tokens guardrail
     Show {
+        /// Emit machine-readable JSON instead of a text summary
         #[arg(long)]
         json: bool,
     },
     /// Set the max-content-tokens guardrail — a single memory's title+content
     /// can't exceed this many tokens, enforced for AI agents too
-    Set { tokens: i64 },
+    Set {
+        /// The new max-content-tokens value; must be a positive integer
+        tokens: i64,
+    },
 }
 
 pub fn cmd_limits(action: LimitsAction) -> Result<()> {

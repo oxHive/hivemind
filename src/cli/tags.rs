@@ -8,16 +8,21 @@ use super::common::{block_on, open_store, print_json};
 pub enum TagsAction {
     /// Show the tag namespace registry (colors, values, descriptions)
     List {
+        /// Emit machine-readable JSON instead of a text summary
         #[arg(long)]
         json: bool,
     },
     /// Create a new tag namespace
     Add {
+        /// The namespace name, e.g. "topic" for tags like topic:sync
         name: String,
+        /// Hex color shown for this namespace's tags, e.g. #4a9eff
         #[arg(long, default_value = "#4a9eff")]
         color: String,
+        /// What this namespace means — shown to AI agents and in the dashboard
         #[arg(long)]
         description: Option<String>,
+        /// Restrict memories to at most one tag in this namespace
         #[arg(long)]
         single_value: bool,
         /// suggestion|fixed — "fixed" enforces the value list, "suggestion" is advisory only
@@ -26,22 +31,40 @@ pub enum TagsAction {
     },
     /// Edit an existing namespace's color/description/single-value/values-mode
     Set {
+        /// The namespace name to edit
         name: String,
+        /// New hex color; omit to leave unchanged
         #[arg(long)]
         color: Option<String>,
+        /// New description; omit to leave unchanged
         #[arg(long)]
         description: Option<String>,
+        /// Restrict memories to at most one tag in this namespace; omit to leave unchanged
         #[arg(long)]
         single_value: Option<bool>,
+        /// suggestion|fixed; omit to leave unchanged
         #[arg(long)]
         values_mode: Option<String>,
     },
     /// Delete a namespace (predefined namespaces are guarded by default)
-    Rm { name: String },
+    Rm {
+        /// The namespace name to delete
+        name: String,
+    },
     /// Add an accepted/suggested value to a namespace
-    ValueAdd { name: String, value: String },
+    ValueAdd {
+        /// The namespace name
+        name: String,
+        /// The value to add, e.g. "sync" for topic:sync
+        value: String,
+    },
     /// Remove a value from a namespace
-    ValueRemove { name: String, value: String },
+    ValueRemove {
+        /// The namespace name
+        name: String,
+        /// The value to remove
+        value: String,
+    },
 }
 
 /// Mirrors `api::settings::validate_tag_namespaces` — each entry needs a

@@ -9,26 +9,36 @@ use crate::store::{ConflictEntry, FeedbackEntry};
 pub enum FeedbackAction {
     /// List flagged-memory feedback
     List {
+        /// Only show feedback for this memory id
         #[arg(long)]
         memory_id: Option<String>,
         /// Filter by status: pending|resolved|dismissed
         #[arg(long)]
         status: Option<String>,
+        /// Emit machine-readable JSON instead of one line per item
         #[arg(long)]
         json: bool,
     },
     /// Flag a memory for review
     Add {
+        /// The memory's id, e.g. mem_xxxxxxxx
         memory_id: String,
         /// incorrect|outdated|duplicate|other (free text also accepted)
         signal: String,
+        /// Optional free-text note explaining the flag
         #[arg(long)]
         note: Option<String>,
     },
     /// Mark feedback resolved
-    Resolve { id: String },
+    Resolve {
+        /// The feedback's id, e.g. fb_xxxxxxxx
+        id: String,
+    },
     /// Dismiss feedback without acting on it
-    Dismiss { id: String },
+    Dismiss {
+        /// The feedback's id, e.g. fb_xxxxxxxx
+        id: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -38,11 +48,13 @@ pub enum ConflictAction {
         /// Filter by status: pending|keep_local|keep_remote
         #[arg(long)]
         status: Option<String>,
+        /// Emit machine-readable JSON instead of one line per conflict
         #[arg(long)]
         json: bool,
     },
     /// Resolve a conflict by keeping the local or remote version
     Resolve {
+        /// The conflict's id, e.g. conflict_xxxxxxxx
         id: String,
         /// keep-local|keep-remote
         resolution: String,

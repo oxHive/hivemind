@@ -9,49 +9,64 @@ use crate::store::MemoryEntry;
 pub enum MemoryAction {
     /// List memories
     List {
+        /// Maximum number of memories to return
         #[arg(long, default_value_t = 200)]
         limit: i64,
+        /// Number of memories to skip, for pagination
         #[arg(long, default_value_t = 0)]
         offset: i64,
         /// Filter by a tag expression, e.g. "tag:topic:sync" or "tag:status:done & tag:project:hivemind"
         #[arg(long)]
         tag: Option<String>,
+        /// Emit machine-readable JSON instead of one line per memory
         #[arg(long)]
         json: bool,
     },
     /// Show one memory by id
     Get {
+        /// The memory's id, e.g. mem_xxxxxxxx
         id: String,
+        /// Emit machine-readable JSON instead of a text summary
         #[arg(long)]
         json: bool,
     },
     /// Full-text search across memories
     Search {
+        /// Search text, or a tag expression like "tag:topic:sync"
         query: String,
+        /// Maximum number of results to return
         #[arg(long, default_value_t = 20)]
         limit: i64,
+        /// Emit machine-readable JSON instead of one line per result
         #[arg(long)]
         json: bool,
     },
     /// Create a new memory
     Add {
+        /// The memory's title
         #[arg(long)]
         title: String,
+        /// The memory's body content
         #[arg(long)]
         content: String,
         /// Tag, repeatable: --tag topic:sync --tag status:done
         #[arg(long = "tag")]
         tags: Vec<String>,
+        /// Which layer to store it in: personal|workspace|org
         #[arg(long, default_value = "workspace")]
         layer: String,
+        /// The memory's type: preference|project|history
         #[arg(long = "type", default_value = "project")]
         memory_type: String,
     },
     /// Edit a memory's title, content, and/or tags (tags replace the full set)
     Edit {
+        /// The memory's id, e.g. mem_xxxxxxxx
         id: String,
+        /// New title; omit to leave unchanged
         #[arg(long)]
         title: Option<String>,
+        /// New content; omit to leave unchanged
         #[arg(long)]
         content: Option<String>,
         /// Replaces the full tag set; repeatable: --tag a --tag b
@@ -59,12 +74,24 @@ pub enum MemoryAction {
         tags: Option<Vec<String>>,
     },
     /// Add tags to a memory without touching the rest
-    TagAdd { id: String, tags: Vec<String> },
+    TagAdd {
+        /// The memory's id, e.g. mem_xxxxxxxx
+        id: String,
+        /// Tags to add, e.g. topic:sync status:done
+        tags: Vec<String>,
+    },
     /// Remove tags from a memory without touching the rest
-    TagRemove { id: String, tags: Vec<String> },
+    TagRemove {
+        /// The memory's id, e.g. mem_xxxxxxxx
+        id: String,
+        /// Tags to remove, e.g. topic:sync status:done
+        tags: Vec<String>,
+    },
     /// Delete one memory
     Rm {
+        /// The memory's id, e.g. mem_xxxxxxxx
         id: String,
+        /// Skip the confirmation prompt
         #[arg(long)]
         yes: bool,
     },

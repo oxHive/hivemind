@@ -10,27 +10,42 @@ use crate::store::EdgeEntry;
 pub enum EdgeAction {
     /// List edges (the memory relationship graph), optionally scoped to one memory
     List {
+        /// Only show edges touching this memory id
         #[arg(long)]
         memory_id: Option<String>,
         /// Filter by status: active|pending|rejected
         #[arg(long)]
         status: Option<String>,
+        /// Emit machine-readable JSON instead of one line per edge
         #[arg(long)]
         json: bool,
     },
     /// Create an edge between two memories
     Add {
+        /// The source memory's id, e.g. mem_xxxxxxxx
         source_id: String,
+        /// The target memory's id, e.g. mem_xxxxxxxx
         target_id: String,
         /// parent|child|sibling
         relationship: String,
     },
     /// Set an edge's status directly: active|pending|rejected
-    Status { id: String, status: String },
+    Status {
+        /// The edge's id, e.g. edge_xxxxxxxx
+        id: String,
+        /// New status: active|pending|rejected
+        status: String,
+    },
     /// Approve a pending (e.g. AI-suggested) edge — sets it active
-    Approve { id: String },
+    Approve {
+        /// The edge's id, e.g. edge_xxxxxxxx
+        id: String,
+    },
     /// Reject a pending edge
-    Reject { id: String },
+    Reject {
+        /// The edge's id, e.g. edge_xxxxxxxx
+        id: String,
+    },
 }
 
 fn print_edge_line(e: &EdgeEntry) {
