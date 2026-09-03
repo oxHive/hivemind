@@ -1393,6 +1393,40 @@ fn parses_suggest_revise_subcommand() {
 }
 
 #[test]
+fn parses_analytics_with_defaults() {
+    let cli = Cli::parse_from(["hivemind", "analytics"]);
+    match cli.command {
+        Some(Command::Analytics { json, days, limit }) => {
+            assert!(!json);
+            assert_eq!(days, 90);
+            assert_eq!(limit, 50);
+        }
+        _ => panic!("expected Analytics command"),
+    }
+}
+
+#[test]
+fn parses_analytics_with_overrides() {
+    let cli = Cli::parse_from([
+        "hivemind",
+        "analytics",
+        "--json",
+        "--days",
+        "30",
+        "--limit",
+        "10",
+    ]);
+    match cli.command {
+        Some(Command::Analytics { json, days, limit }) => {
+            assert!(json);
+            assert_eq!(days, 30);
+            assert_eq!(limit, 10);
+        }
+        _ => panic!("expected Analytics command"),
+    }
+}
+
+#[test]
 fn parses_update_apply_with_yes_flag() {
     let cli = Cli::parse_from(["hivemind", "update", "apply", "--yes"]);
     match cli.command {

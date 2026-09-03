@@ -43,6 +43,7 @@ fn main() -> Result<()> {
         Some(Command::Data { action }) => cli::cmd_data(action),
         Some(Command::Suggest { action }) => cli::cmd_suggest(action),
         Some(Command::Update { action }) => cli::cmd_update(action),
+        Some(Command::Analytics { json, days, limit }) => cli::cmd_analytics(json, days, limit),
     }
 }
 

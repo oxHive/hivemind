@@ -104,6 +104,18 @@ pub enum Command {
         #[command(subcommand)]
         action: UpdateAction,
     },
+    /// Show analytics: tag/type/project counts, activity by day, and recall session logs
+    Analytics {
+        /// Emit machine-readable JSON instead of a text summary
+        #[arg(long)]
+        json: bool,
+        /// How many days of activity-by-day history to include
+        #[arg(long, default_value_t = 90)]
+        days: i64,
+        /// How many recent recall sessions to show
+        #[arg(long, default_value_t = 50)]
+        limit: i64,
+    },
 }
 
 #[derive(Subcommand)]
@@ -153,6 +165,7 @@ pub enum McpAction {
     },
 }
 
+mod analytics;
 pub(crate) mod common;
 mod data;
 mod edge;
@@ -170,6 +183,7 @@ mod tags;
 #[cfg(test)]
 mod tests;
 
+pub use analytics::*;
 pub use data::*;
 pub use edge::*;
 pub use feedback::*;

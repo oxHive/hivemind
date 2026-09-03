@@ -350,7 +350,7 @@ hivemind dashboard --open        Open the dashboard (requires server running)
 
 ### Managing data from the CLI
 
-Everything you can do in the web dashboard (aside from analytics) is also available as a CLI command — useful for scripting, headless boxes, or when you just don't want to open a browser. All of these work directly against the local database; `suggest` additionally requires `hivemind up` to be running.
+Everything you can do in the web dashboard is also available as a CLI command — useful for scripting, headless boxes, or when you just don't want to open a browser. All of these work directly against the local database; `suggest` additionally requires `hivemind up` to be running.
 
 ```
 hivemind memory list [--tag EXPR] [--json]        List memories (--tag filters by a tag expression, e.g. tag:topic:sync)
@@ -384,6 +384,8 @@ hivemind suggest start / status / revise / end    Drive an AI-assisted graph-sug
 
 hivemind update check [--json]                    Check GitHub releases for a newer version
 hivemind update apply [--yes]                     Self-update via cargo-binstall
+
+hivemind analytics [--days N] [--limit N]         Tag/type/project counts, activity by day, recall sessions
 ```
 
 Pass `--json` where available for machine-readable output. Run `hivemind <command> --help` for full flag lists.
