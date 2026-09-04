@@ -2214,3 +2214,220 @@ fn suggest_lifecycle_against_mock_server() {
         cmd_suggest(SuggestAction::End).unwrap();
     });
 }
+
+// ── more coverage: mcp install, status, and find_owning's org branch ────────
+//
+// `claude` itself is on PATH in this sandbox (it's the CLI running these
+// tests), so `cmd_mcp_install("claude")` is never exercised here — doing so
+// for real would register/mutate this environment's actual Claude Code MCP
+// servers. opencode/kimi/codex/cursor/windsurf have no CLI on PATH, so their
+// "write the config file directly" branches run deterministically.
+
+fn with_isolated_home<T>(f: impl FnOnce(&Path) -> T) -> T {
+    let _lock = crate::test_env_lock::ENV_MUTEX.lock().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    // SAFETY: test-only env mutation; serialised by ENV_MUTEX.
+    unsafe {
+        std::env::set_var("HOME", home.path());
+    }
+    let result = f(home.path());
+    // SAFETY: test-only env mutation; serialised by ENV_MUTEX.
+    unsafe {
+        std::env::remove_var("HOME");
+    }
+    result
+}
+
+#[test]
+fn mcp_install_rejects_unknown_client() {
+    assert!(cmd_mcp_install("not-a-real-client").is_err());
+}
+
+#[test]
+fn mcp_install_opencode_writes_config_when_cli_absent() {
+    let _lock = crate::test_env_lock::ENV_MUTEX.lock().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let xdg_config = tempfile::tempdir().unwrap();
+    // SAFETY: test-only env mutation; serialised by ENV_MUTEX.
+    unsafe {
+        std::env::set_var("HOME", home.path());
+        std::env::set_var("XDG_CONFIG_HOME", xdg_config.path());
+    }
+    let result = cmd_mcp_install("opencode");
+    // SAFETY: test-only env mutation; serialised by ENV_MUTEX.
+    unsafe {
+        std::env::remove_var("HOME");
+        std::env::remove_var("XDG_CONFIG_HOME");
+    }
+    result.unwrap();
+    let content =
+        fs::read_to_string(xdg_config.path().join("opencode").join("opencode.json")).unwrap();
+    assert!(content.contains("hivemind"));
+}
+
+#[test]
+fn mcp_install_kimi_writes_config_when_cli_absent() {
+    with_isolated_home(|home| {
+        cmd_mcp_install("kimi").unwrap();
+        let content = fs::read_to_string(home.join(".kimi").join("mcp.json")).unwrap();
+        assert!(content.contains("hivemind"));
+    });
+}
+
+#[test]
+fn mcp_install_codex_writes_toml_and_is_idempotent() {
+    with_isolated_home(|home| {
+        cmd_mcp_install("codex").unwrap();
+        let content = fs::read_to_string(home.join(".codex").join("config.toml")).unwrap();
+        assert!(content.contains("[mcp_servers.hivemind]"));
+        // Second run should detect the existing block and skip re-writing.
+        cmd_mcp_install("codex").unwrap();
+    });
+}
+
+#[test]
+fn mcp_install_cursor_writes_config() {
+    with_isolated_home(|home| {
+        cmd_mcp_install("cursor").unwrap();
+        let content = fs::read_to_string(home.join(".cursor").join("mcp.json")).unwrap();
+        assert!(content.contains("hivemind"));
+    });
+}
+
+#[test]
+fn mcp_install_windsurf_writes_config() {
+    with_isolated_home(|home| {
+        cmd_mcp_install("windsurf").unwrap();
+        let content = fs::read_to_string(
+            home.join(".codeium")
+                .join("windsurf")
+                .join("mcp_config.json"),
+        )
+        .unwrap();
+        assert!(content.contains("hivemind"));
+    });
+}
+
+#[test]
+fn toml_escape_escapes_backslashes_and_quotes() {
+    assert_eq!(
+        crate::cli::mcp_install::toml_escape(r#"C:\bin\"hivemind""#),
+        r#"C:\\bin\\\"hivemind\""#
+    );
+}
+
+#[test]
+fn cmd_status_plain_runs_end_to_end_against_isolated_store() {
+    with_isolated_cli_env(|| {
+        cmd_status(true).unwrap();
+    });
+}
+
+#[test]
+fn cmd_session_start_logs_and_prints_against_real_project_config() {
+    // The test binary's cwd is this crate's root, which has a real
+    // .hivemind.toml (see the repo's own dogfood config) — discover_project_root
+    // finds it, so this exercises the full db-open + recall + log-write path
+    // against the isolated temp store, not just the `no project config` early
+    // return.
+    with_isolated_cli_env(|| {
+        cmd_session_start(false).unwrap();
+        cmd_session_start(true).unwrap();
+    });
+}
+
+#[test]
+fn cmd_migrate_reports_nothing_to_migrate_when_isolated() {
+    let _lock = crate::test_env_lock::ENV_MUTEX.lock().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    // SAFETY: test-only env mutation; serialised by ENV_MUTEX.
+    unsafe {
+        std::env::set_var("HOME", home.path());
+        std::env::set_var("XDG_DATA_HOME", home.path());
+    }
+    // legacy_db_path() is under HOME, so with no legacy db present this
+    // returns via the "nothing to migrate" early-out — never touches stdin.
+    let result = cmd_migrate();
+    // SAFETY: test-only env mutation; serialised by ENV_MUTEX.
+    unsafe {
+        std::env::remove_var("HOME");
+        std::env::remove_var("XDG_DATA_HOME");
+    }
+    result.unwrap();
+}
+
+#[test]
+fn cmd_status_reports_matrix_not_running_when_configured_but_no_daemon() {
+    let _lock = crate::test_env_lock::ENV_MUTEX.lock().unwrap();
+    let db_dir = tempfile::tempdir().unwrap();
+    let cfg_dir = tempfile::tempdir().unwrap();
+    let db_path = db_dir.path().join("test.db");
+    let hivemind_cfg_dir = cfg_dir.path().join("hivemind");
+    fs::create_dir_all(&hivemind_cfg_dir).unwrap();
+    fs::write(
+        hivemind_cfg_dir.join("config.toml"),
+        "[matrix]\nhomeserver_url = \"https://matrix.example.org\"\nuser_id = \"@bot:example.org\"\n",
+    )
+    .unwrap();
+    // SAFETY: test-only env mutation; serialised by ENV_MUTEX.
+    unsafe {
+        std::env::set_var("HIVEMIND_DB_PATH", &db_path);
+        std::env::set_var("XDG_CONFIG_HOME", cfg_dir.path());
+    }
+    // No matrix daemon is running against this isolated socket path, so this
+    // exercises the "configured but not running" branch deterministically.
+    let result = cmd_status(true);
+    // SAFETY: test-only env mutation; serialised by ENV_MUTEX.
+    unsafe {
+        std::env::remove_var("HIVEMIND_DB_PATH");
+        std::env::remove_var("XDG_CONFIG_HOME");
+    }
+    result.unwrap();
+}
+
+#[test]
+fn find_owning_falls_back_to_org_store_and_reports_true_miss() {
+    async fn temp_store() -> (crate::store::SqliteStore, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.db");
+        let sync = crate::config::SyncSettings::default();
+        let database = crate::db::open_database(&sync, path.to_str().unwrap())
+            .await
+            .unwrap();
+        let conn = database.connect().unwrap();
+        crate::db::run_migrations(&conn).await.unwrap();
+        (crate::store::SqliteStore::new(conn), dir)
+    }
+
+    common::block_on(async {
+        let (primary, _d1) = temp_store().await;
+        let (org, _d2) = temp_store().await;
+        org.store(&crate::store::NewMemoryRow {
+            id: "mem_org_only",
+            title: "Org memory",
+            content: "lives only in org",
+            tags: &[],
+            token_count: None,
+            layer: "org",
+            memory_type: "project",
+        })
+        .await
+        .unwrap();
+        let org_store = Some(org);
+
+        // Found in org after a primary miss.
+        let owning = common::find_owning(&primary, &org_store, "mem_org_only")
+            .await
+            .unwrap();
+        assert!(owning.is_some());
+
+        // Missing from both.
+        let owning = common::find_owning(&primary, &org_store, "mem_nowhere")
+            .await
+            .unwrap();
+        assert!(owning.is_none());
+
+        Ok::<_, anyhow::Error>(())
+    })
+    .unwrap();
+}
